@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -107,8 +108,13 @@ func TestOpenForInspectResolvesNestedPathToWorktreeRoot(t *testing.T) {
 	}
 }
 
-func TestOpenForInspectPreservesWhitespaceAndNewlinesInRepositoryRoot(t *testing.T) {
-	repo := filepath.Join(t.TempDir(), "repo \n日本語 ")
+func TestOpenForInspectPreservesHostValidWhitespaceAndUnicodeInRepositoryRoot(t *testing.T) {
+	repositoryName := "repo \n日本語 "
+	if runtime.GOOS == "windows" {
+		// Win32 rejects newlines and trailing spaces in path components.
+		repositoryName = "repo 日本語 path"
+	}
+	repo := filepath.Join(t.TempDir(), repositoryName)
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatal(err)
 	}
