@@ -1,0 +1,27 @@
+schema_version: 1
+pinned_at: 2026-07-23
+repositories:
+  - name: cobra
+    url: https://github.com/spf13/cobra.git
+    branch: main
+    commit: adbc8813901bba65827259daa8e22ff94ec1f30e
+    size: small
+    primary_language: Go
+  - name: flask
+    url: https://github.com/pallets/flask.git
+    branch: main
+    commit: 36e4a824f340fdee7ed50937ba8e7f6bc7d17f81
+    size: medium
+    primary_language: Python
+  - name: django
+    url: https://github.com/django/django.git
+    branch: main
+    commit: 50c2b7c83661a61da48f78dd0130fc3cbf8ed39f
+    size: large
+    primary_language: Python
+  - name: next.js
+    url: https://github.com/vercel/next.js.git
+    branch: canary
+    commit: 6c6d1632e1e1f03e32db1dd8dc0a63dee49d68cd
+    size: monorepo
+    primary_language: TypeScript
