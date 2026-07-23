@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -297,10 +299,15 @@ description: Verify changes with the repository's existing check.
 	})
 }
 
-func TestValidateResolvesLiteralEvidencePathsWithNewlinesAndShellMetacharacters(t *testing.T) {
+func TestValidateResolvesLiteralEvidencePathsSupportedByTheHost(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init", "-b", "main")
 	evidencePath := "docs/a\n$([not-a-command]);*.md"
+	if runtime.GOOS == "windows" {
+		// Win32 rejects newlines and asterisks in filenames. Spaces, Unicode,
+		// and the remaining shell metacharacters still exercise literal paths.
+		evidencePath = "docs/a 日本語 $([not-a-command]);.md"
+	}
 	writeFile(t, filepath.Join(repo, filepath.FromSlash(evidencePath)), "Authoritative contract.\n")
 	writeFile(t, filepath.Join(repo, "Makefile"), "verify:\n\tgo test ./...\n")
 	git(t, repo, "add", ".")
@@ -309,7 +316,7 @@ func TestValidateResolvesLiteralEvidencePathsWithNewlinesAndShellMetacharacters(
 
 	writeFile(t, filepath.Join(repo, ".software-standards", "assessment.md"), "# Assessment\n")
 	rule := validRule(baseline, excerptHash("Authoritative contract.\n"), excerptHash("verify:\n\tgo test ./...\n"))
-	rule = strings.Replace(rule, "path: main.go", "path: \"docs/a\\n$([not-a-command]);*.md\"", 1)
+	rule = strings.Replace(rule, "path: main.go", "path: "+strconv.Quote(evidencePath), 1)
 	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "verify-before-merge.md"), rule)
 	writeFile(t, filepath.Join(repo, ".agents", "skills", "verify-change", "SKILL.md"), `---
 name: verify-change
