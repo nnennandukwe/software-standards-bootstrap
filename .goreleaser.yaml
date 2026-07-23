@@ -1,0 +1,73 @@
+version: 2
+
+project_name: software-standards-bootstrap
+
+builds:
+  - id: ssb
+    main: ./cmd/ssb
+    binary: ssb
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -buildid=
+
+archives:
+  - id: release
+    ids:
+      - ssb
+    name_template: "ssb_{{ .Tag }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    builds_info:
+      mtime: "{{ .CommitDate }}"
+    files:
+      - LICENSE
+      - NOTICE
+      - README.md
+      - docs/architecture.md
+      - docs/rule-format.md
+      - skills/software-standards-bootstrap/**/*
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+sboms:
+  - id: release-archives
+    artifacts: archive
+    ids:
+      - release
+    documents:
+      - "{{ .ArtifactName }}.spdx.json"
+
+release:
+  github:
+    owner: nnennandukwe
+    name: software-standards-bootstrap
+  draft: true
+  replace_existing_draft: false
+  replace_existing_artifacts: false
+  prerelease: auto
+  make_latest: true
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
