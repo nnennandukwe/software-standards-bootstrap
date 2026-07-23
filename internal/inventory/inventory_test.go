@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -15,9 +16,17 @@ import (
 
 func TestScanIndexesOnlySafeTrackedRegularFilesAtTheBaseline(t *testing.T) {
 	repo := newRepository(t)
+	unicodePath := "docs/a\n日本語.md"
+	shellPath := "docs/$([not-a-command]);*.txt"
+	if runtime.GOOS == "windows" {
+		// Win32 rejects newlines and asterisks in filenames. Keep every
+		// equivalent edge case that the host filesystem can represent.
+		unicodePath = "docs/a 日本語.md"
+		shellPath = "docs/$([not-a-command]);.txt"
+	}
 	writeFile(t, filepath.Join(repo, "src", "main.go"), "package main\n\nfunc main() {}\n")
-	writeFile(t, filepath.Join(repo, "docs", "a\n日本語.md"), "# Evidence\n")
-	writeFile(t, filepath.Join(repo, "docs", "$([not-a-command]);*.txt"), "literal path\n")
+	writeFile(t, filepath.Join(repo, filepath.FromSlash(unicodePath)), "# Evidence\n")
+	writeFile(t, filepath.Join(repo, filepath.FromSlash(shellPath)), "literal path\n")
 	writeFile(t, filepath.Join(repo, "vendor", "ignored.go"), "package ignored\n")
 	writeFile(t, filepath.Join(repo, ".env"), "TOKEN=do-not-read\n")
 	writeFile(t, filepath.Join(repo, "large.txt"), strings.Repeat("x", 80))
@@ -49,7 +58,7 @@ func TestScanIndexesOnlySafeTrackedRegularFilesAtTheBaseline(t *testing.T) {
 			t.Fatalf("%s has non-canonical digest %q", file.Path, file.SHA256)
 		}
 	}
-	wantPaths := []string{"docs/$([not-a-command]);*.txt", "docs/a\n日本語.md", "src/main.go"}
+	wantPaths := []string{shellPath, unicodePath, "src/main.go"}
 	if !reflect.DeepEqual(gotPaths, wantPaths) {
 		t.Fatalf("paths = %#v, want %#v", gotPaths, wantPaths)
 	}
