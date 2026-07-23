@@ -1,0 +1,403 @@
+package cli_test
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/cli"
+)
+
+func TestInspectJSONIsReadOnlyAndMachineReadable(t *testing.T) {
+	repo := committedRepository(t)
+	writeFile(t, filepath.Join(repo, "untracked notes.txt"), "must remain untracked\n")
+	before := git(t, repo, "status", "--porcelain=v1", "-z")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{"inspect", "--repo", repo, "--format", "json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr.String())
+	}
+	var response struct {
+		SchemaVersion  int    `json:"schema_version"`
+		BaselineCommit string `json:"baseline_commit"`
+		Files          []struct {
+			Path string `json:"path"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if response.SchemaVersion != 1 || response.BaselineCommit == "" {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+	if len(response.Files) != 1 || response.Files[0].Path != "README.md" {
+		t.Fatalf("unexpected files: %#v", response.Files)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected stderr: %q", stderr.String())
+	}
+	after := git(t, repo, "status", "--porcelain=v1", "-z")
+	if after != before {
+		t.Fatalf("inspect changed the repository:\nbefore %q\nafter  %q", before, after)
+	}
+}
+
+func TestInspectReportsDirtyRecoveryAndUsageErrors(t *testing.T) {
+	repo := committedRepository(t)
+	writeFile(t, filepath.Join(repo, "README.md"), "changed\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{"inspect", "--repo", repo}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2; stderr = %q", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("unexpected stdout: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "commit, stash, or restore tracked changes") ||
+		!strings.Contains(stderr.String(), "ssb inspect --repo") {
+		t.Fatalf("error lacks executable recovery guidance: %q", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = cli.Run([]string{"inspect", "--format", "xml"}, &stdout, &stderr)
+	if code != 2 || !strings.Contains(stderr.String(), "--format must be text or json") {
+		t.Fatalf("invalid format response: exit=%d stderr=%q", code, stderr.String())
+	}
+}
+
+func TestInspectNeverExecutesTrackedRepositoryCode(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init", "-b", "main")
+	marker := filepath.Join(repo, "executed.txt")
+	script := filepath.Join(repo, "danger.sh")
+	writeFile(t, script, "#!/bin/sh\nprintf executed > executed.txt\n")
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "add", "danger.sh")
+	git(t, repo, "commit", "-m", "executable fixture")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{"inspect", "--repo", repo}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("inspect failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	if _, err := os.Lstat(marker); !os.IsNotExist(err) {
+		t.Fatalf("inspect executed repository code: %v", err)
+	}
+}
+
+func TestHelpDocumentsOnlyTheCanonicalCommandForms(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{"--help"}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("help failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	for _, form := range []string{
+		"ssb inspect  [--repo PATH] [--format text|json]",
+		"ssb validate [--repo PATH] [--format text|json]",
+		"ssb render   [--repo PATH] [--dry-run]",
+		"ssb adr      [--repo PATH] [--adr-dir PATH] [--dry-run]",
+	} {
+		if !strings.Contains(stdout.String(), form) {
+			t.Fatalf("help missing %q:\n%s", form, stdout.String())
+		}
+	}
+	for _, forbidden := range []string{"commit", "push", "pull-request", "sync", "model"} {
+		if strings.Contains(strings.ToLower(stdout.String()), forbidden) {
+			t.Fatalf("help advertises forbidden surface %q:\n%s", forbidden, stdout.String())
+		}
+	}
+}
+
+func TestEachSubcommandProvidesSuccessfulFocusedHelp(t *testing.T) {
+	for _, command := range []string{"inspect", "validate", "render", "adr"} {
+		t.Run(command, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := cli.Run([]string{command, "--help"}, &stdout, &stderr)
+			if code != 0 || stderr.Len() != 0 {
+				t.Fatalf("%s help failed: exit=%d stderr=%q", command, code, stderr.String())
+			}
+			if !strings.Contains(stdout.String(), "Usage: ssb "+command) ||
+				!strings.Contains(stdout.String(), "--repo PATH") {
+				t.Fatalf("%s help is not actionable:\n%s", command, stdout.String())
+			}
+		})
+	}
+}
+
+func TestValidateUsesExitOneForRulePackFailuresAndNeverWrites(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidPack(t, repo, baseline)
+	before := git(t, repo, "status", "--porcelain=v1", "-z")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{"validate", "--repo", repo, "--format", "json"}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("valid pack failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	var validResponse struct {
+		SchemaVersion int  `json:"schema_version"`
+		Valid         bool `json:"valid"`
+		RuleCount     int  `json:"rule_count"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &validResponse); err != nil {
+		t.Fatal(err)
+	}
+	if validResponse.SchemaVersion != 1 || !validResponse.Valid || validResponse.RuleCount != 1 {
+		t.Fatalf("unexpected valid response: %#v", validResponse)
+	}
+	if after := git(t, repo, "status", "--porcelain=v1", "-z"); after != before {
+		t.Fatalf("validate changed repository: before=%q after=%q", before, after)
+	}
+
+	rulePath := filepath.Join(repo, ".software-standards", "rules", "verify-before-merge.md")
+	rule, err := os.ReadFile(rulePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, rulePath, strings.Replace(string(rule), excerptHash("package main\n"), "sha256:"+strings.Repeat("0", 64), 1))
+	stdout.Reset()
+	stderr.Reset()
+	code = cli.Run([]string{"validate", "--repo", repo, "--format", "json"}, &stdout, &stderr)
+	if code != 1 || stderr.Len() != 0 {
+		t.Fatalf("invalid pack response: exit=%d stderr=%q", code, stderr.String())
+	}
+	var invalidResponse struct {
+		Valid       bool `json:"valid"`
+		Diagnostics []struct {
+			Path    string `json:"path"`
+			Message string `json:"message"`
+		} `json:"diagnostics"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &invalidResponse); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if invalidResponse.Valid || len(invalidResponse.Diagnostics) == 0 ||
+		!strings.Contains(invalidResponse.Diagnostics[0].Message, "excerpt hash does not match") {
+		t.Fatalf("unexpected invalid response: %#v", invalidResponse)
+	}
+}
+
+func TestRenderDryRunAndValidationFailureHaveNoFilesystemEffects(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidPack(t, repo, baseline)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{"render", "--repo", repo, "--dry-run"}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("dry-run failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "AGENTS.md") ||
+		!strings.Contains(stdout.String(), "Run the repository verification command before merging.") {
+		t.Fatalf("dry-run did not disclose projection:\n%s", stdout.String())
+	}
+	if _, err := os.Lstat(filepath.Join(repo, "AGENTS.md")); !os.IsNotExist(err) {
+		t.Fatalf("dry-run created AGENTS.md: %v", err)
+	}
+
+	rulePath := filepath.Join(repo, ".software-standards", "rules", "verify-before-merge.md")
+	rule, err := os.ReadFile(rulePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, rulePath, strings.Replace(string(rule), "total: 70", "total: 71", 1))
+	stdout.Reset()
+	stderr.Reset()
+	code = cli.Run([]string{"render", "--repo", repo}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "score total 71 does not equal factor sum 70") {
+		t.Fatalf("invalid render response: exit=%d stderr=%q", code, stderr.String())
+	}
+	if _, err := os.Lstat(filepath.Join(repo, "AGENTS.md")); !os.IsNotExist(err) {
+		t.Fatalf("invalid render created AGENTS.md: %v", err)
+	}
+}
+
+func TestRenderWritesOnlyAgentsAndReportsDriftAsPrecondition(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidPack(t, repo, baseline)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{"render", "--repo", repo}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("render failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	agentsPath := filepath.Join(repo, "AGENTS.md")
+	rendered, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drifted := strings.Replace(string(rendered), "Run the repository verification command", "Direct section edit", 1)
+	writeFile(t, agentsPath, drifted)
+
+	stdout.Reset()
+	stderr.Reset()
+	code = cli.Run([]string{"render", "--repo", repo}, &stdout, &stderr)
+	if code != 2 || !strings.Contains(stderr.String(), "edit or delete rule source files") {
+		t.Fatalf("drift response: exit=%d stderr=%q", code, stderr.String())
+	}
+	after, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != drifted {
+		t.Fatal("drift failure modified AGENTS.md")
+	}
+}
+
+func TestADRValidatesThenCreatesExactlyOneNewProposedRecord(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidPack(t, repo, baseline)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{"adr", "--repo", repo, "--dry-run"}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("ADR dry-run failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "docs/adr/0001-agentic-rules.md") ||
+		!strings.Contains(stdout.String(), "Status: Proposed") {
+		t.Fatalf("ADR dry-run output is incomplete:\n%s", stdout.String())
+	}
+	if _, err := os.Lstat(filepath.Join(repo, "docs")); !os.IsNotExist(err) {
+		t.Fatalf("ADR dry-run created directories: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = cli.Run([]string{"adr", "--repo", repo}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("ADR creation failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Created docs/adr/0001-agentic-rules.md") {
+		t.Fatalf("ADR output did not disclose path: %q", stdout.String())
+	}
+	record, err := os.ReadFile(filepath.Join(repo, "docs", "adr", "0001-agentic-rules.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(record), "Status: Proposed") {
+		t.Fatalf("ADR status is not Proposed:\n%s", record)
+	}
+}
+
+func TestADRDirectoryAmbiguityIsARecoverablePrecondition(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidPack(t, repo, baseline)
+	if err := os.MkdirAll(filepath.Join(repo, "docs", "adr"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "docs", "adrs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{"adr", "--repo", repo}, &stdout, &stderr)
+	if code != 2 || !strings.Contains(stderr.String(), "--adr-dir PATH") {
+		t.Fatalf("ambiguous ADR response: exit=%d stderr=%q", code, stderr.String())
+	}
+}
+
+func committedRepository(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	git(t, dir, "init", "-b", "main")
+	writeFile(t, filepath.Join(dir, "README.md"), "fixture\n")
+	git(t, dir, "add", "README.md")
+	git(t, dir, "commit", "-m", "baseline")
+	return dir
+}
+
+func evidenceRepository(t *testing.T) (string, string) {
+	t.Helper()
+	repo := t.TempDir()
+	git(t, repo, "init", "-b", "main")
+	writeFile(t, filepath.Join(repo, "main.go"), "package main\n\nfunc main() {}\n")
+	writeFile(t, filepath.Join(repo, "Makefile"), "verify:\n\tgo test ./...\n")
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "baseline")
+	return repo, strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
+}
+
+func writeValidPack(t *testing.T, repo, baseline string) {
+	t.Helper()
+	writeFile(t, filepath.Join(repo, ".software-standards", "assessment.md"), "# Assessment\n")
+	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "verify-before-merge.md"), fmt.Sprintf(`---
+schema: ssb.dev/rule/v1
+id: verify-before-merge
+title: Verify before merge
+scopes:
+  - "**/*.go"
+classification: deterministic
+importance: high
+score:
+  method: ssb-score-v1
+  total: 70
+  factors:
+    prevalence: 15
+    consistency: 15
+    authority: 15
+    risk: 15
+    applicability: 10
+confidence: high
+baseline_commit: %s
+evidence:
+  - path: main.go
+    lines: 1-1
+    excerpt_sha256: %s
+    authoritative: true
+verification:
+  command: go test ./...
+  source:
+    path: Makefile
+    lines: 1-2
+    excerpt_sha256: %s
+---
+Run the repository verification command before merging.
+`, baseline, excerptHash("package main\n"), excerptHash("verify:\n\tgo test ./...\n")))
+}
+
+func excerptHash(excerpt string) string {
+	sum := sha256.Sum256([]byte(excerpt))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func git(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	command := append([]string{"-c", "user.name=SSB Test", "-c", "user.email=ssb@example.invalid", "-C", dir}, args...)
+	cmd := exec.Command("git", command...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
+}
+
+func writeFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
