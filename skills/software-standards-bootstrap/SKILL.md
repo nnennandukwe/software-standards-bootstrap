@@ -1,6 +1,6 @@
 ---
 name: software-standards-bootstrap
-description: Analyze a clean Git repository and generate an evidence-backed, scored rules pack plus portable procedural skills as uncommitted files. Use when a developer wants repository-specific agent guidance grounded in existing code, documentation, and checks.
+description: Analyze a clean Git repository and generate an evidence-backed, scored rules pack (a lint-style agent rule set) plus portable procedural skills as uncommitted files. Use when a developer wants repository-specific agent guidance grounded in existing code, documentation, and checks — e.g. to codify repo conventions, generate agent rules from existing code, or bootstrap standards for this repository.
 license: Apache-2.0
 compatibility: Requires the ssb CLI, Git 2.39 or newer, a commit-backed branch, and host access to read and write the target repository.
 metadata:
@@ -12,7 +12,7 @@ metadata:
 
 Create a repository-specific proposal. Do not use a generic rules catalog. Do not execute repository code or verification commands. Do not stage, commit, branch, push, open a pull request, or activate rules in another system.
 
-Read [the rule schema](references/rule-schema.md) and [the evidence workflow](references/evidence-workflow.md) before writing proposal files.
+Read [the rule schema](references/rule-schema.md), [the evidence workflow](references/evidence-workflow.md), and [the structural-pattern workflow](references/structural-patterns.md) before writing proposal files.
 
 ## 1. Establish the immutable input
 
@@ -35,6 +35,8 @@ Record:
 
 Read only inventory-listed paths, selecting exact sections relevant to repository conventions, architecture, risk, and existing checks. Never execute repository files, hooks, build scripts, tests, linters, formatters, package managers, or verification commands.
 
+Perform both an authority-and-risk pass and the structural-pattern workflow. Complete the structural-pattern pass before scoring or writing candidates. Do not reject a structural candidate only because no repository policy states it explicitly: three consistent occurrences across at least two files are an alternative evidence threshold. Narrow an otherwise useful candidate to the evidence-backed scope instead of manufacturing a repository-wide rule.
+
 Distinguish:
 
 - repository context that belongs only in the assessment;
@@ -54,7 +56,7 @@ Create:
 .agents/skills/<skill-id>/SKILL.md
 ```
 
-The assessment must name the baseline, inventory limits or truncation, repository context, evidence reviewed, candidates retained, candidates kept assessment-only, and classification rationale.
+The assessment must name the baseline, inventory limits or truncation, repository context, evidence reviewed, the completed structural pattern review, candidates retained, candidates kept assessment-only, and classification rationale.
 
 Use the dynamic number of candidates supported by evidence. Do not impose a five-rule or other fixed cap. Keep candidates below 25 in the assessment.
 
