@@ -29,6 +29,7 @@ Then run the Agent Skill workflow described in [agent-smoke-tests.md](agent-smok
 - exact pin;
 - inventory file count, excluded counts, indexed bytes, and truncation;
 - candidate scores and classifications;
+- structural-pattern review coverage and candidate dispositions;
 - evidence resolution result;
 - keep/edit-and-keep/defer/reject judgment;
 - complete changed-path list; and
@@ -37,6 +38,7 @@ Then run the Agent Skill workflow described in [agent-smoke-tests.md](agent-smok
 ## Acceptance
 
 - 100% of emitted rules have resolvable evidence.
+- The structural-pattern review records all five required dimensions and dispositions for every plausible candidate.
 - At least 70% of high and very-high candidates are judged “keep” or “edit and keep.”
 - Truncation is visible wherever a bound is reached.
 - Procedural candidates become Agent Skills.

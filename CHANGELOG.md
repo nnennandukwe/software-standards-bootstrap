@@ -11,4 +11,5 @@ All notable changes are documented here. The project follows semantic versioning
 - Drift-detecting bounded `AGENTS.md` rendering.
 - Proposed ADR generation from retained artifacts.
 - Portable `software-standards-bootstrap` Agent Skill.
+- Mandatory structural-pattern discovery and benchmark acceptance coverage.
 - Cross-platform CI and release provenance configuration.

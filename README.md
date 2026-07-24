@@ -75,13 +75,19 @@ and generate an evidence-backed rules pack.
 The skill:
 
 1. runs `ssb inspect`;
-2. performs targeted semantic reads without executing repository code;
+2. performs targeted authority, risk, and structural-pattern review without executing repository code;
 3. writes an assessment, dynamically ranked rule files, and genuinely procedural skills;
 4. runs `ssb validate` and `ssb render`;
 5. lists every changed and untracked path; and
 6. waits for the developer to edit or delete proposal sources before an ADR is requested.
 
 The workflow has no fixed candidate count. Candidates below 25 remain assessment-only. A rule requires one authoritative source or three consistent occurrences across two files.
+
+The structural-pattern review explicitly covers package and dependency
+boundaries, parallel implementation families, platform and configuration seams,
+public compatibility surfaces, and source/test/documentation symmetry. The
+assessment records a disposition for each plausible candidate instead of
+silently dropping patterns that lack a prose policy or repository-wide scope.
 
 Codex discovers repository skills under `.agents/skills`. Claude Code uses a different documented project discovery path, so the same portable skill content must be exposed through `.claude/skills` for its behavioral smoke test. Other consumers are format-compatible only until tested.
 
