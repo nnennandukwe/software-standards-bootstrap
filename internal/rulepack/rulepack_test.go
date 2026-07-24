@@ -32,6 +32,7 @@ license: Apache-2.0
 compatibility: Requires Git 2.39 or newer and the repository's own verification tooling.
 metadata:
   source: software-standards-bootstrap
+  topic: correctness
 ---
 
 # Verify change
@@ -55,6 +56,9 @@ Run the cited repository check and report its result.
 	}
 	if len(pack.Skills) != 1 || pack.Skills[0].ID != "verify-change" {
 		t.Fatalf("unexpected skills: %#v", pack.Skills)
+	}
+	if pack.Rules[0].Topic != "correctness" || pack.Skills[0].Topic != "correctness" {
+		t.Fatalf("unexpected primary topics: rule=%q skill=%q", pack.Rules[0].Topic, pack.Skills[0].Topic)
 	}
 }
 
@@ -109,6 +113,20 @@ func TestValidateRejectsUngroundedOrInternallyInconsistentRules(t *testing.T) {
 			want: "field mystery not found",
 		},
 		{
+			name: "missing primary topic",
+			mutateRule: func(rule string) string {
+				return strings.Replace(rule, "topic: correctness\n", "", 1)
+			},
+			want: "topic is required",
+		},
+		{
+			name: "unsupported primary topic",
+			mutateRule: func(rule string) string {
+				return strings.Replace(rule, "topic: correctness", "topic: readability", 1)
+			},
+			want: `topic "readability" is not supported`,
+		},
+		{
 			name: "missing related skill",
 			mutateRule: func(rule string) string {
 				return strings.Replace(rule, "- verify-change", "- missing-skill", 1)
@@ -126,9 +144,61 @@ func TestValidateRejectsUngroundedOrInternallyInconsistentRules(t *testing.T) {
 			writeFile(t, filepath.Join(repo, ".agents", "skills", "verify-change", "SKILL.md"), `---
 name: verify-change
 description: Verify changes with the repository's existing check.
+metadata:
+  topic: correctness
 ---
 # Verify
 `)
+
+			ws, err := workspace.Open(context.Background(), repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !diagnosticsContain(diagnostics, test.want) {
+				t.Fatalf("diagnostics %#v do not contain %q", diagnostics, test.want)
+			}
+		})
+	}
+}
+
+func TestValidateRequiresSupportedPrimaryTopicForRelatedSkills(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata string
+		want     string
+	}{
+		{
+			name:     "missing",
+			metadata: "  source: software-standards-bootstrap\n",
+			want:     "topic is required",
+		},
+		{
+			name:     "unsupported",
+			metadata: "  source: software-standards-bootstrap\n  topic: readability\n",
+			want:     `topic "readability" is not supported`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			writeFile(t, filepath.Join(repo, ".software-standards", "assessment.md"), "# Assessment\n")
+			writeFile(t, filepath.Join(repo, ".software-standards", "rules", "verify-before-merge.md"), validRule(
+				baseline,
+				excerptHash("package main\n"),
+				excerptHash("verify:\n\tgo test ./...\n"),
+			))
+			writeFile(t, filepath.Join(repo, ".agents", "skills", "verify-change", "SKILL.md"), fmt.Sprintf(`---
+name: verify-change
+description: Verify changes with the repository's existing check.
+metadata:
+%s---
+# Verify
+`, test.metadata))
 
 			ws, err := workspace.Open(context.Background(), repo)
 			if err != nil {
@@ -321,6 +391,8 @@ func TestValidateResolvesLiteralEvidencePathsSupportedByTheHost(t *testing.T) {
 	writeFile(t, filepath.Join(repo, ".agents", "skills", "verify-change", "SKILL.md"), `---
 name: verify-change
 description: Verify changes with the repository's existing check.
+metadata:
+  topic: correctness
 ---
 # Verify
 `)
@@ -403,6 +475,7 @@ func validRule(baseline, evidenceHash, verificationHash string) string {
 schema: ssb.dev/rule/v1
 id: verify-before-merge
 title: Verify before merge
+topic: correctness
 scopes:
   - "**/*.go"
 classification: deterministic
