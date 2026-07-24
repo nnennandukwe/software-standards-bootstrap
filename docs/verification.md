@@ -98,7 +98,7 @@ was edited.
 
 The release runbook still blocks `v0.1.0` until:
 
-- all four Claude Code proposal runs are durable;
+- the benchmark and consumer records are reviewed and land on `main`;
 - a developer records keep, edit-and-keep, defer, or reject decisions;
 - at least 70% of high and very-high candidates are kept or edit-and-kept;
 - the edit/delete/rerender and explicitly requested ADR behavior is verified
