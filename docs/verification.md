@@ -54,7 +54,8 @@ Tests verify:
 - untracked-only and nested-worktree starts;
 - literal spaces, Unicode, newlines, and shell metacharacters without shell execution;
 - binary, oversized, generated/vendor, secret-like, symlink, and submodule exclusion;
-- stable inventory plus explicit truncation;
+- stable inventory-v2 candidate accounting, exact resource boundaries, and
+  fail-closed incomplete coverage;
 - strict schema, score, evidence, primary-topic, classification, skill-reference, and baseline failures;
 - primary-topic projection for rules in `AGENTS.md` and for rules and skills in the ADR;
 - new/existing `AGENTS.md`, direct drift, malformed/duplicate markers, symlink targets, dry runs, source edits, and deletions;
@@ -82,6 +83,11 @@ evidence. Next.js also exercised the validation recovery path for an
 unsupported relationship to a target-owned skill; no pre-existing target file
 was edited.
 
+These proposal records used `ssb-inventory-v1`. They are historical pre-change
+evidence, not acceptance for inventory v2. The inventory-v2 resource harness
+completes all four pins on macOS arm64; Linux resource-envelope evidence and
+fresh Codex/Claude proposal records remain release gates.
+
 ## Release controls
 
 | Control | Result |
@@ -99,6 +105,9 @@ was edited.
 The release runbook still blocks `v0.1.0` until:
 
 - the benchmark and consumer records are reviewed and land on `main`;
+- inventory-v2 Linux resource-envelope evidence is recorded;
+- fresh inventory-v2 Codex and Claude proposal records replace the historical
+  v1 release evidence;
 - a developer records keep, edit-and-keep, defer, or reject decisions;
 - at least 70% of high and very-high candidates are kept or edit-and-kept;
 - the edit/delete/rerender and explicitly requested ADR behavior is verified

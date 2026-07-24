@@ -27,7 +27,8 @@ Then run the Agent Skill workflow described in [agent-smoke-tests.md](agent-smok
 - consumer and version;
 - operating system;
 - exact pin;
-- inventory file count, excluded counts, indexed bytes, and truncation;
+- inventory schema, candidate/scanned/indexed counts and bytes, exclusions, and
+  confirmation of complete coverage;
 - candidate scores, classifications, and primary topics;
 - structural-pattern review coverage and candidate dispositions;
 - evidence resolution result;
@@ -40,7 +41,8 @@ Then run the Agent Skill workflow described in [agent-smoke-tests.md](agent-smok
 - 100% of emitted rules have resolvable evidence.
 - The structural-pattern review records all five required dimensions and dispositions for every plausible candidate.
 - At least 70% of high and very-high candidates are judged “keep” or “edit and keep.”
-- Truncation is visible wherever a bound is reached.
+- Inventory v2 completes all four pinned repositories under its defaults.
+- Any truncated run blocks proposal generation and is not benchmark acceptance.
 - Procedural candidates become Agent Skills.
 - Existing commands are mapped without execution.
 - Every retained rule and procedural skill uses one supported primary topic, and generated `AGENTS.md` and ADR output preserve it.
@@ -56,3 +58,7 @@ The public-safe result ledger for the 2026-07-23 release evaluation is in
 Each record separates a generated proposal from developer acceptance and
 discloses truncation, evidence resolution, structural dispositions, changed
 paths, and forbidden-action checks.
+
+Those records used `ssb-inventory-v1` and remain immutable historical evidence.
+They are not inventory-v2 release acceptance. The v2 consumer refresh must be
+recorded separately before release.
