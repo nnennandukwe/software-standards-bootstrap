@@ -1,18 +1,20 @@
 ---
 name: software-standards-bootstrap
-description: Analyze a clean Git repository and generate an evidence-backed, scored rules pack plus portable procedural skills as uncommitted files. Use when a developer wants repository-specific agent guidance grounded in existing code, documentation, and checks.
+description: Analyze a clean Git repository with targeted semantic and structural-pattern review, then generate an evidence-backed, scored rule pack plus portable procedural skills as uncommitted files. Use when a developer wants to extract repository-specific coding standards, best practices, conventions, linting rules, or agent guidance from existing code, documentation, architecture, and checks.
 license: Apache-2.0
 compatibility: Requires the ssb CLI, Git 2.39 or newer, a commit-backed branch, and host access to read and write the target repository.
 metadata:
   project: software-standards-bootstrap
   schema: ssb.dev/rule/v1
+  topic: developer-experience
+  version: 0.1.0
 ---
 
 # Software Standards Bootstrap
 
 Create a repository-specific proposal. Do not use a generic rules catalog. Do not execute repository code or verification commands. Do not stage, commit, branch, push, open a pull request, or activate rules in another system.
 
-Read [the rule schema](references/rule-schema.md) and [the evidence workflow](references/evidence-workflow.md) before writing proposal files.
+Read [the rule schema](references/rule-schema.md), [the topic taxonomy](references/topics.md), [the evidence workflow](references/evidence-workflow.md), and [the structural-pattern workflow](references/structural-patterns.md) before writing proposal files.
 
 ## 1. Establish the immutable input
 
@@ -35,6 +37,8 @@ Record:
 
 Read only inventory-listed paths, selecting exact sections relevant to repository conventions, architecture, risk, and existing checks. Never execute repository files, hooks, build scripts, tests, linters, formatters, package managers, or verification commands.
 
+Perform both an authority-and-risk pass and the structural-pattern workflow. Complete the structural-pattern pass before scoring or writing candidates. Do not reject a structural candidate only because no repository policy states it explicitly: three consistent occurrences across at least two files are an alternative evidence threshold. Narrow an otherwise useful candidate to the evidence-backed scope instead of manufacturing a repository-wide rule.
+
 Distinguish:
 
 - repository context that belongs only in the assessment;
@@ -54,13 +58,14 @@ Create:
 .agents/skills/<skill-id>/SKILL.md
 ```
 
-The assessment must name the baseline, inventory limits or truncation, repository context, evidence reviewed, candidates retained, candidates kept assessment-only, and classification rationale.
+The assessment must name the baseline, inventory limits or truncation, repository context, evidence reviewed, the completed structural pattern review, candidates retained, candidates kept assessment-only, primary-topic rationale, and classification rationale.
 
 Use the dynamic number of candidates supported by evidence. Do not impose a five-rule or other fixed cap. Keep candidates below 25 in the assessment.
 
 Every emitted rule must:
 
 - conform to `ssb.dev/rule/v1`;
+- assign exactly one primary topic from the controlled taxonomy;
 - use `ssb-score-v1` with visible factor arithmetic;
 - have one authoritative source or three consistent occurrences across two files;
 - cite exact one-based line ranges and SHA-256 hashes of the exact baseline bytes;
@@ -69,7 +74,9 @@ Every emitted rule must:
 - classify `deterministic` only when an existing command and its defining source are cited; and
 - record a proof gap when guidance has no existing deterministic check.
 
-Create a portable Agent Skill only for a procedural workflow. Use core Agent Skills frontmatter. Do not add consumer-specific fields to the portable source.
+Choose the topic that best explains the rule's engineering risk or change obligation. Use `quality` only when no narrower topic fits. Topic is independent of classification, importance, confidence, and scope.
+
+Create a portable Agent Skill only for a procedural workflow. Use core Agent Skills frontmatter and set `metadata.topic` to the workflow's one primary engineering outcome. Do not add consumer-specific fields to the portable source.
 
 If a target already exists, stop instead of overwriting developer work.
 

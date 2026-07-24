@@ -345,6 +345,7 @@ func writeValidPack(t *testing.T, repo, baseline string) {
 schema: ssb.dev/rule/v1
 id: verify-before-merge
 title: Verify before merge
+topic: correctness
 scopes:
   - "**/*.go"
 classification: deterministic

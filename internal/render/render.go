@@ -102,6 +102,7 @@ func buildSection(pack rulepack.Pack) ([]byte, string, string, error) {
 		fmt.Fprintf(&body, "\n### %s (`%s`)\n\n", rule.Title, rule.ID)
 		fmt.Fprintf(&body, "- Source: `%s`\n", rule.SourcePath)
 		fmt.Fprintf(&body, "- Scope: %s\n", codeList(rule.Scopes))
+		fmt.Fprintf(&body, "- Primary topic: `%s`\n", rule.Topic)
 		fmt.Fprintf(&body, "- Classification: `%s`\n", rule.Classification)
 		fmt.Fprintf(&body, "- Importance: `%s` (%d/100, `%s`)\n", rule.Importance, rule.Score.Total, rule.Score.Method)
 		fmt.Fprintf(&body, "- Confidence: `%s`\n", rule.Confidence)

@@ -40,7 +40,7 @@ func TestApplyPreservesExistingBytesAndProjectsOnlySurvivingRules(t *testing.T) 
 	if !strings.HasPrefix(string(rendered), prefix) {
 		t.Fatalf("existing bytes changed:\n%s", rendered)
 	}
-	for _, text := range []string{"First rule body.", "Second rule body.", render.StartMarker, render.EndMarker} {
+	for _, text := range []string{"First rule body.", "Second rule body.", "- Primary topic: `correctness`", render.StartMarker, render.EndMarker} {
 		if !strings.Contains(string(rendered), text) {
 			t.Fatalf("rendered section missing %q:\n%s", text, rendered)
 		}
@@ -221,6 +221,7 @@ func testPack(baseline string, pairs ...string) rulepack.Pack {
 		rules = append(rules, rulepack.Rule{
 			ID:             id,
 			Title:          strings.ReplaceAll(strings.Title(strings.ReplaceAll(id, "-", " ")), " ", " "),
+			Topic:          "correctness",
 			Scopes:         []string{"**/*"},
 			Classification: "guidance",
 			Importance:     "high",
