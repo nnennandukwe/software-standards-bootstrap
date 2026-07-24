@@ -57,6 +57,7 @@ func TestScanBudgetsEveryCandidateBeforeContentExclusion(t *testing.T) {
 	for key, want := range map[string]float64{
 		"candidate_files":           3,
 		"scanned_files":             2,
+		"indexed_files":             0,
 		"remaining_candidate_files": 1,
 	} {
 		if got := fields[key]; got != want {
@@ -96,6 +97,9 @@ func TestScanIncludesExactCandidateByteBoundaryAndStopsBeforeNextBlob(t *testing
 	}
 	if len(report.Files) != 1 || report.Files[0].Path != "a.txt" {
 		t.Fatalf("exact-boundary file was not indexed: %#v", report.Files)
+	}
+	if report.IndexedFiles != len(report.Files) {
+		t.Fatalf("indexed_files = %d, want %d", report.IndexedFiles, len(report.Files))
 	}
 	if report.Excluded.Binary != 0 {
 		t.Fatalf("over-budget binary blob was read: %#v", report.Excluded)

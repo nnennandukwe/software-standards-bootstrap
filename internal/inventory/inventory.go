@@ -70,9 +70,10 @@ type Report struct {
 	CandidateBytes          int64      `json:"candidate_bytes"`
 	ScannedFiles            int        `json:"scanned_files"`
 	ScannedBytes            int64      `json:"scanned_bytes"`
+	IndexedFiles            int        `json:"indexed_files"`
+	IndexedBytes            int64      `json:"indexed_bytes"`
 	Files                   []File     `json:"files"`
 	Excluded                Exclusions `json:"excluded"`
-	IndexedBytes            int64      `json:"indexed_bytes"`
 	Truncated               bool       `json:"truncated"`
 	TruncationReason        string     `json:"truncation_reason,omitempty"`
 	RemainingCandidateFiles int        `json:"remaining_candidate_files"`
@@ -147,6 +148,16 @@ func scan(
 	batches batchPolicy,
 ) (Report, error) {
 	limits = normalizedLimits(limits)
+	if batches.MaxEntries <= 0 || batches.MaxBytes <= 0 {
+		return Report{}, fmt.Errorf("invalid Git batch policy")
+	}
+	if limits.MaxFileBytes > batches.MaxBytes {
+		return Report{}, fmt.Errorf(
+			"max_file_bytes=%d exceeds Git batch byte ceiling %d",
+			limits.MaxFileBytes,
+			batches.MaxBytes,
+		)
+	}
 	report := Report{
 		SchemaVersion:    2,
 		InventoryVersion: Version,
@@ -252,6 +263,7 @@ func scan(
 				Language: language(entry.path),
 				SHA256:   "sha256:" + hex.EncodeToString(sum[:]),
 			})
+			report.IndexedFiles++
 			report.IndexedBytes += entry.size
 		}
 		start = end

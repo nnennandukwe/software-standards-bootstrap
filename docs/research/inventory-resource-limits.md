@@ -101,18 +101,22 @@ by `/usr/bin/time -l`. It emitted schema 2 with all 29,073 candidates scanned,
 
 Prepare clean attached clones named `cobra`, `flask`, `django`, and `next.js`
 under one directory, each at the manifest commit. Do not install dependencies
-or execute repository code.
+or execute repository code. The committed harness reads
+`testdata/benchmarks.yaml` and fails before measuring when any checkout is not
+at its exact pin.
 
 ```bash
 SSB_BENCHMARK_ROOT=<fresh-pin-root> \
-  go test ./internal/evaluation \
-  -run TestPinnedInventoryResourceEnvelope -v
-
-SSB_BENCHMARK_ROOT=<fresh-pin-root> \
-  go test ./internal/inventory -run '^$' \
-  -bench '^BenchmarkBatchPolicies$' -benchmem -benchtime=1x -count=5
+  bash scripts/benchmark-inventory-resources.sh
 ```
 
-Linux amd64 resource-envelope evidence remains required before release. Regular
-CI does not clone public repositories and skips these tests when
+The script performs one discarded cold run and five warm runs for the full
+batch sweep. It then samples combined RSS for the parent benchmark process and
+its direct Git children every 10 milliseconds for the 4, 8, and 16 MiB
+512-entry candidates that were within 10% of the fastest recorded
+configuration. Its raw benchmark lines and `combined_peak_rss_bytes` records
+are the input to the selection rule.
+
+Linux amd64 resource-envelope evidence remains required before release.
+Regular CI does not clone public repositories and skips these tests when
 `SSB_BENCHMARK_ROOT` is unset.
