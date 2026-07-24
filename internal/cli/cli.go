@@ -415,7 +415,7 @@ func writeTextInventory(out io.Writer, report inventory.Report) {
 		report.RemainingCandidateFiles,
 		report.RemainingCandidateBytes,
 	)
-	fmt.Fprintf(out, "Files indexed: %d (%d bytes)\n", len(report.Files), report.IndexedBytes)
+	fmt.Fprintf(out, "Files indexed: %d (%d bytes)\n", report.IndexedFiles, report.IndexedBytes)
 	fmt.Fprintf(
 		out,
 		"Excluded: binary=%d generated=%d oversized=%d secret-like=%d symlink=%d submodule=%d vendor/generated-tree=%d non-regular=%d\n",
