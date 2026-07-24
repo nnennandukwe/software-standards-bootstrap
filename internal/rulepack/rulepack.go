@@ -25,11 +25,27 @@ import (
 const (
 	SchemaVersion = "ssb.dev/rule/v1"
 	ScoreMethod   = "ssb-score-v1"
+	topicRecovery = "use one primary topic: architecture, compatibility, compliance, correctness, developer-experience, documentation, maintainability, operability, performance, quality, reliability, security, or testability"
 )
 
 var (
 	stableIDPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`)
 	digestPattern   = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	supportedTopics = map[string]struct{}{
+		"architecture":         {},
+		"compatibility":        {},
+		"compliance":           {},
+		"correctness":          {},
+		"developer-experience": {},
+		"documentation":        {},
+		"maintainability":      {},
+		"operability":          {},
+		"performance":          {},
+		"quality":              {},
+		"reliability":          {},
+		"security":             {},
+		"testability":          {},
+	}
 )
 
 // Diagnostic is a recoverable, file-specific validation problem.
@@ -78,6 +94,7 @@ type Rule struct {
 	Schema          string       `yaml:"schema" json:"schema"`
 	ID              string       `yaml:"id" json:"id"`
 	Title           string       `yaml:"title" json:"title"`
+	Topic           string       `yaml:"topic" json:"topic"`
 	Scopes          []string     `yaml:"scopes" json:"scopes"`
 	Classification  string       `yaml:"classification" json:"classification"`
 	Importance      string       `yaml:"importance" json:"importance"`
@@ -96,6 +113,7 @@ type Rule struct {
 type Skill struct {
 	ID          string `json:"id"`
 	Description string `json:"description"`
+	Topic       string `json:"topic"`
 	SourcePath  string `json:"source_path"`
 	Body        string `json:"body"`
 }
@@ -272,6 +290,11 @@ func validateRule(ctx context.Context, repo *workspace.Repository, rule Rule, fi
 	}
 	if strings.TrimSpace(rule.Title) == "" {
 		add("title", "title is required", "add a concise developer-facing title")
+	}
+	if rule.Topic == "" {
+		add("topic", "topic is required", topicRecovery)
+	} else if _, supported := supportedTopics[rule.Topic]; !supported {
+		add("topic", fmt.Sprintf("topic %q is not supported", rule.Topic), topicRecovery)
 	}
 	if strings.TrimSpace(rule.Body) == "" {
 		add("body", "rule body is required", "write the exact guidance that should be projected")
@@ -456,10 +479,22 @@ func loadSkill(root, skillID string) (Skill, []Diagnostic, error) {
 	if strings.TrimSpace(metadata.Description) == "" || len(metadata.Description) > 1024 {
 		diagnostics = append(diagnostics, diagnostic(relative, "description", "skill description must contain 1-1024 characters", "describe what the skill does and when to use it"))
 	}
+	topic := metadata.Metadata["topic"]
+	if topic == "" {
+		diagnostics = append(diagnostics, diagnostic(relative, "metadata.topic", "topic is required", topicRecovery))
+	} else if _, supported := supportedTopics[topic]; !supported {
+		diagnostics = append(diagnostics, diagnostic(relative, "metadata.topic", fmt.Sprintf("topic %q is not supported", topic), topicRecovery))
+	}
 	if strings.TrimSpace(string(body)) == "" {
 		diagnostics = append(diagnostics, diagnostic(relative, "body", "skill body is required", "document the procedural workflow"))
 	}
-	return Skill{ID: skillID, Description: metadata.Description, SourcePath: relative, Body: string(body)}, diagnostics, nil
+	return Skill{
+		ID:          skillID,
+		Description: metadata.Description,
+		Topic:       topic,
+		SourcePath:  relative,
+		Body:        string(body),
+	}, diagnostics, nil
 }
 
 func findSymlinkComponent(root, relative string) (string, bool, error) {

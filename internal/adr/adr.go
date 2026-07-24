@@ -269,6 +269,7 @@ func render(pack rulepack.Pack, number int) []byte {
 		fmt.Fprintf(&output, "\n### %s (`%s`)\n\n", rule.Title, rule.ID)
 		fmt.Fprintf(&output, "- Source: `%s`\n", rule.SourcePath)
 		fmt.Fprintf(&output, "- Scope: %s\n", markdownCodeList(rule.Scopes))
+		fmt.Fprintf(&output, "- Primary topic: `%s`\n", rule.Topic)
 		fmt.Fprintf(&output, "- Classification: `%s`\n", rule.Classification)
 		fmt.Fprintf(&output, "- Importance: `%s` (%d/100, `%s`)\n", rule.Importance, rule.Score.Total, rule.Score.Method)
 		fmt.Fprintf(&output, "- Confidence: `%s`\n", rule.Confidence)
@@ -293,7 +294,10 @@ func render(pack rulepack.Pack, number int) []byte {
 	if len(skills) != 0 {
 		output.WriteString("\n## Retained procedural skills\n")
 		for _, skill := range skills {
-			fmt.Fprintf(&output, "\n- `%s` — %s (`%s`)\n", skill.ID, skill.Description, skill.SourcePath)
+			fmt.Fprintf(&output, "\n- `%s`\n", skill.ID)
+			fmt.Fprintf(&output, "  - Primary topic: `%s`\n", skill.Topic)
+			fmt.Fprintf(&output, "  - Source: `%s`\n", skill.SourcePath)
+			fmt.Fprintf(&output, "  - Description: %s\n", skill.Description)
 		}
 	}
 	output.WriteString("\n## Consequences\n\n")
