@@ -48,11 +48,17 @@ go install github.com/nnennandukwe/software-standards-bootstrap/cmd/ssb@v0.1.0
 ## CLI
 
 ```text
-ssb inspect  [--repo PATH] [--format text|json]
+ssb inspect  [--repo PATH] [--format text|json] [resource limits]
 ssb validate [--repo PATH] [--format text|json]
 ssb render   [--repo PATH] [--dry-run]
 ssb adr      [--repo PATH] [--adr-dir PATH] [--dry-run]
 ```
+
+`inspect` accepts `--max-candidate-files N` and
+`--max-candidate-bytes N`. The defaults are 40,000 candidate files and
+128 MiB of candidate content. `--allow-partial` changes incomplete coverage
+from a blocked result into an explicitly diagnostic success; it does not make
+the inventory complete and must not be used to generate a proposal.
 
 Exit codes:
 
@@ -60,6 +66,7 @@ Exit codes:
 - `1`: rule-pack validation failure
 - `2`: usage or repository precondition failure
 - `3`: unexpected internal failure
+- `4`: inventory coverage incomplete
 
 `inspect` and `validate` are read-only. `render` may change only the bounded Software Standards Bootstrap section in root `AGENTS.md`. `adr` exclusively creates one new record and refuses overwrite or path escape.
 
@@ -118,7 +125,9 @@ See [the rule format](docs/rule-format.md), [topic taxonomy](skills/software-sta
 - Binaries, oversized files, secret-like paths, generated/vendor trees, symlinks, and submodules are excluded.
 - Paths are passed directly to Git without a shell and are NUL-delimited where applicable.
 - `HEAD` and tracked state are rechecked before an inventory is returned.
-- Resource truncation is disclosed in text and JSON output.
+- Candidate file and byte budgets are applied before blob reads.
+- Incomplete coverage is disclosed in text and JSON output and returns exit
+  `4` unless the caller explicitly requests diagnostic partial output.
 - Existing packs, malformed markers, projection drift, target collisions, symlink escapes, submodule targets, and ADR ambiguity fail closed.
 - Writes are bounded, staged locally, and left uncommitted.
 

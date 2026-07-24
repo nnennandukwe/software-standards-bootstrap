@@ -4,6 +4,15 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## [Unreleased]
 
+### Changed
+
+- Replaced arbitrary indexed-output caps with measured inventory-v2 candidate
+  work budgets: 40,000 files, 128 MiB total, and a fixed 1 MiB per file.
+- Incomplete inventory coverage now returns exit `4` unless explicitly allowed
+  for diagnostic use, and reports complete candidate/scanned/remaining
+  accounting.
+- Git blob batching now uses the measured 512-entry, 4 MiB policy.
+
 ## [0.1.0] - 2026-07-23
 
 ### Added

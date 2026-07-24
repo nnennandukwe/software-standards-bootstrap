@@ -31,11 +31,22 @@ The inventory module enumerates `HEAD` with `git ls-tree -r -z -l --full-tree` a
 
 The default bounds are:
 
-- 20,000 indexed files;
-- 25 MiB total indexed text; and
+- 40,000 candidate files;
+- 128 MiB total candidate content; and
 - 1 MiB per file.
 
-Reaching a file-count or total-byte limit marks the report as truncated. Oversized files are counted as exclusions. The inventory contains no timestamps or absolute paths, so output remains stable for the same commit and limits.
+Candidate limits apply before blob reads, so binary and generated candidates
+consume the same work budget as indexed text. The complete candidate set and
+the scanned prefix are reported separately. Reaching either limit marks the
+report as truncated, retains exact remaining candidate counts and bytes, and
+causes the CLI to return exit `4` unless diagnostic partial output was
+explicitly allowed. Oversized files are counted as pre-read exclusions.
+
+Git blob reads use batches of at most 512 entries and 4 MiB. This policy was
+selected from the pinned benchmark corpus as the lowest-memory configuration
+within 10% of the fastest measured configuration. The inventory contains no
+timestamps or absolute paths, so output remains stable for the same commit and
+limits.
 
 Before success, the module rechecks attached `HEAD`, the exact commit, tracked/staged status, and the absence of a pre-existing pack.
 

@@ -14,13 +14,23 @@ func TestREADMEAndAgentSkillMatchTheExecutableCommandContract(t *testing.T) {
 	skill := readText(t, filepath.Join(root, "skills", "software-standards-bootstrap", "SKILL.md"))
 
 	for _, form := range []string{
-		"ssb inspect  [--repo PATH] [--format text|json]",
+		"ssb inspect  [--repo PATH] [--format text|json] [resource limits]",
 		"ssb validate [--repo PATH] [--format text|json]",
 		"ssb render   [--repo PATH] [--dry-run]",
 		"ssb adr      [--repo PATH] [--adr-dir PATH] [--dry-run]",
 	} {
 		if !strings.Contains(readme, form) {
 			t.Errorf("README missing canonical form %q", form)
+		}
+	}
+	for _, required := range []string{
+		"--max-candidate-files",
+		"--max-candidate-bytes",
+		"--allow-partial",
+		"`4`: inventory coverage incomplete",
+	} {
+		if !strings.Contains(readme, required) {
+			t.Errorf("README missing inspect contract %q", required)
 		}
 	}
 
@@ -38,6 +48,14 @@ func TestREADMEAndAgentSkillMatchTheExecutableCommandContract(t *testing.T) {
 	}
 	if !strings.Contains(skill, "Do not run `ssb adr` as part of the initial generation workflow.") {
 		t.Error("Agent Skill does not preserve the human review gate before ADR generation")
+	}
+	for _, required := range []string{
+		"Never pass `--allow-partial`",
+		"Do not create proposal files from incomplete inventory coverage",
+	} {
+		if !strings.Contains(skill, required) {
+			t.Errorf("Agent Skill missing incomplete-coverage gate %q", required)
+		}
 	}
 	for _, forbidden := range []string{"ssb commit", "ssb push", "ssb sync", "ssb model"} {
 		if strings.Contains(skill, forbidden) || strings.Contains(readme, forbidden) {
