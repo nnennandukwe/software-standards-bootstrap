@@ -1,4 +1,4 @@
-# v0.1 verification record
+# v0.1.0 verification record
 
 Verified locally on 2026-07-23 with Go 1.26.5 and Git 2.39.5.
 
@@ -31,6 +31,21 @@ CGO-free binaries compiled successfully for:
 
 The output formats were Mach-O, statically linked ELF, and PE32+ respectively.
 
+## Hosted CI
+
+[CI run 30057004619](https://github.com/nnennandukwe/software-standards-bootstrap/actions/runs/30057004619)
+passed on source commit
+`a426d419cb129541f4bf69497ed7232eff926c46`:
+
+| Hosted gate | Result |
+|---|---|
+| macOS / Go 1.26.5 | Pass |
+| Ubuntu / Go 1.26.5 | Pass |
+| Windows / Go 1.26.5 | Pass |
+| Race detector | Pass |
+| `go vet` | Pass |
+| `govulncheck` | Pass |
+
 ## Failure-path guarantees
 
 Tests verify:
@@ -48,15 +63,48 @@ Tests verify:
 - ADR write failure without partial output; and
 - no mutation from `inspect`, `validate`, dry runs, or failed commands.
 
-## Release-only acceptance still required
+## Public benchmark status
 
-These gates cannot be truthfully completed in the local greenfield repository:
+The durable proposal records are in
+[`docs/benchmarks/results/2026-07-23/`](benchmarks/results/2026-07-23/README.md).
 
-- publish and install verified GitHub release assets;
-- run CI on hosted macOS, Linux, and Windows;
-- complete the four pinned public benchmark workflows;
-- record Codex and Claude Code behavior at exact versions;
-- meet the 70% high-band retention threshold; and
-- confirm 100% evidence resolution in those external runs.
+| Consumer/version | Fixture coverage | Evidence resolution | Developer retention | End-to-end result |
+|---|---:|---:|---:|---|
+| Codex desktop 26.715.71837 (build 5702), `gpt-5.6-sol` | 4/4 proposals | 100% | Pending | Review gate |
+| Claude Code 2.1.191, `claude-sonnet-4-6` | 4/4 proposals | 100% | Pending | Review gate |
 
-The release runbook blocks `v0.1.0` until those records exist.
+All recorded proposals include the five-dimension structural-pattern pass.
+Django and Next.js disclose inventory truncation. No evaluated repository code
+or cited verification command was executed, and SSB performed no Git mutation.
+Evaluator review found and corrected inaccurate or incomplete inventory
+summaries in the initial Claude assessments before they became release
+evidence. Next.js also exercised the validation recovery path for an
+unsupported relationship to a target-owned skill; no pre-existing target file
+was edited.
+
+## Release controls
+
+| Control | Result |
+|---|---|
+| GitHub immutable releases | Enabled and verified before release creation |
+| `CHANGELOG.md` v0.1.0 notes | Prepared |
+| Signed `v0.1.0` tag | Pending |
+| Six release archives | Pending tag workflow |
+| Checksums and SPDX SBOMs | Pending tag workflow |
+| Build-provenance and SBOM attestations | Pending tag workflow |
+| Clean archive installation | Pending published assets |
+
+## Remaining release gates
+
+The release runbook still blocks `v0.1.0` until:
+
+- all four Claude Code proposal runs are durable;
+- a developer records keep, edit-and-keep, defer, or reject decisions;
+- at least 70% of high and very-high candidates are kept or edit-and-kept;
+- the edit/delete/rerender and explicitly requested ADR behavior is verified
+  for both consumers;
+- a configured signing identity creates the signed tag; and
+- published archives, checksums, SBOMs, attestations, and a clean installation
+  are independently verified.
+
+No pending item is represented as complete.
