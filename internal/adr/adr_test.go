@@ -30,6 +30,8 @@ func TestCreateDefaultsToConciseProposedADRWithOnlySurvivingArtifacts(t *testing
 	if dryRun.Path != "docs/adr/0001-agentic-rules.md" ||
 		!strings.Contains(string(dryRun.Content), "Status: Proposed") ||
 		!strings.Contains(string(dryRun.Content), "Keep this exact body.") ||
+		!strings.Contains(string(dryRun.Content), "- Primary topic: `correctness`") ||
+		!strings.Contains(string(dryRun.Content), "  - Primary topic: `compatibility`") ||
 		!strings.Contains(string(dryRun.Content), "keep-skill") ||
 		strings.Contains(string(dryRun.Content), "deleted-rule") {
 		t.Fatalf("unexpected ADR:\n%s", dryRun.Content)
@@ -199,6 +201,7 @@ func testPack(baseline, ruleID, body, skillID string) rulepack.Pack {
 	rule := rulepack.Rule{
 		ID:             ruleID,
 		Title:          "Retained rule",
+		Topic:          "correctness",
 		Scopes:         []string{"src/**"},
 		Classification: "guidance",
 		Importance:     "high",
@@ -228,6 +231,7 @@ func testPack(baseline, ruleID, body, skillID string) rulepack.Pack {
 		pack.Skills = []rulepack.Skill{{
 			ID:          skillID,
 			Description: "A retained procedural workflow.",
+			Topic:       "compatibility",
 			SourcePath:  ".agents/skills/" + skillID + "/SKILL.md",
 			Body:        "# Skill\n",
 		}}

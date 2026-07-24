@@ -15,6 +15,7 @@ The filename must match the stable lower-case kebab-case `id`. YAML frontmatter 
 schema: ssb.dev/rule/v1
 id: verify-before-merge
 title: Verify before merge
+topic: correctness
 scopes:
   - "**/*.go"
 classification: deterministic
@@ -69,6 +70,12 @@ Bands:
 
 The total must equal the factors. There is no fixed rule-count cap.
 
+## Primary topic
+
+Every rule declares exactly one primary software-engineering topic. It identifies the concern that best explains the rule's risk or change obligation; it does not replace scope, classification, importance, or confidence.
+
+The controlled vocabulary is `architecture`, `compatibility`, `compliance`, `correctness`, `developer-experience`, `documentation`, `maintainability`, `operability`, `performance`, `quality`, `reliability`, `security`, and `testability`. Prefer the narrowest accurate topic and use `quality` only when no narrower topic fits. See [the topic taxonomy](../skills/software-standards-bootstrap/references/topics.md) for selection guidance.
+
 ## Evidence threshold and hashing
 
 A rule needs either:
@@ -108,7 +115,8 @@ license: Apache-2.0
 compatibility: Requires the repository's own verification tooling.
 metadata:
   source: software-standards-bootstrap
+  topic: correctness
 ---
 ```
 
-`name` and `description` are required. `license`, `compatibility`, and string-to-string `metadata` are optional. Consumer-specific discovery and optional fields are not portable behavior.
+`name` and `description` are required by the Agent Skills core format. Software Standards Bootstrap additionally requires `metadata.topic` for every referenced skill, using the same controlled vocabulary as rules and selecting the workflow's primary engineering outcome. `license`, `compatibility`, and other string-to-string `metadata` are optional. Consumer-specific discovery and optional fields are not portable behavior.
