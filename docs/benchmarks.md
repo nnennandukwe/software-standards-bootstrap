@@ -28,7 +28,7 @@ Then run the Agent Skill workflow described in [agent-smoke-tests.md](agent-smok
 - operating system;
 - exact pin;
 - inventory file count, excluded counts, indexed bytes, and truncation;
-- candidate scores and classifications;
+- candidate scores, classifications, and primary topics;
 - structural-pattern review coverage and candidate dispositions;
 - evidence resolution result;
 - keep/edit-and-keep/defer/reject judgment;
@@ -43,6 +43,7 @@ Then run the Agent Skill workflow described in [agent-smoke-tests.md](agent-smok
 - Truncation is visible wherever a bound is reached.
 - Procedural candidates become Agent Skills.
 - Existing commands are mapped without execution.
+- Every retained rule and procedural skill uses one supported primary topic, and generated `AGENTS.md` and ADR output preserve it.
 - Rule edits and deletions propagate to `AGENTS.md` and the ADR.
 - Codex and Claude Code both finish the workflow through their documented skill locations.
 

@@ -57,3 +57,59 @@ func TestDocumentationCarriesStructuralPatternAcceptance(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentSkillRequiresPrimaryTopicMetadata(t *testing.T) {
+	root := repositoryRoot(t)
+	skill := readText(t, filepath.Join(root, "skills", "software-standards-bootstrap", "SKILL.md"))
+	schema := readText(t, filepath.Join(
+		root,
+		"skills",
+		"software-standards-bootstrap",
+		"references",
+		"rule-schema.md",
+	))
+
+	for _, required := range []string{
+		"assign exactly one primary topic",
+		"`quality` only when no narrower topic fits",
+		"`metadata.topic`",
+	} {
+		if !strings.Contains(skill, required) {
+			t.Errorf("Agent Skill missing primary-topic contract %q", required)
+		}
+	}
+	for _, topic := range []string{
+		"architecture",
+		"compatibility",
+		"compliance",
+		"correctness",
+		"developer-experience",
+		"documentation",
+		"maintainability",
+		"operability",
+		"performance",
+		"quality",
+		"reliability",
+		"security",
+		"testability",
+	} {
+		if !strings.Contains(schema, topic) {
+			t.Errorf("rule schema missing supported primary topic %q", topic)
+		}
+	}
+}
+
+func TestDocumentationCarriesPrimaryTopicAcceptance(t *testing.T) {
+	root := repositoryRoot(t)
+	documents := map[string]string{
+		"README":     readText(t, filepath.Join(root, "README.md")),
+		"smoke test": readText(t, filepath.Join(root, "docs", "agent-smoke-tests.md")),
+		"benchmark":  readText(t, filepath.Join(root, "docs", "benchmarks.md")),
+	}
+
+	for document, content := range documents {
+		if !strings.Contains(content, "primary topic") {
+			t.Errorf("%s documentation missing primary topic acceptance", document)
+		}
+	}
+}
