@@ -19,7 +19,7 @@ They are release evidence, not adopted policy for the evaluated repositories.
 | Consumer | Exact version | Cobra | Flask | Django | Next.js |
 |---|---|---|---|---|---|
 | Codex desktop | 26.715.71837 (build 5702), `gpt-5.6-sol`, `xhigh` | Proposal recorded | Proposal recorded | Proposal recorded | Proposal recorded |
-| Claude Code | 2.1.191, `claude-sonnet-4-6` | Proposal recorded | In progress | In progress | In progress |
+| Claude Code | 2.1.191, `claude-sonnet-4-6` | Proposal recorded | Proposal recorded | Proposal recorded | Proposal recorded |
 
 Every proposal record stops at the mandatory developer-review gate. A proposal
 is not a passing end-to-end smoke test until a developer has made explicit
@@ -34,3 +34,6 @@ verified.
 - [Django / Codex](codex-django.md)
 - [Next.js / Codex](codex-nextjs.md)
 - [Cobra / Claude Code](claude-cobra.md)
+- [Flask / Claude Code](claude-flask.md)
+- [Django / Claude Code](claude-django.md)
+- [Next.js / Claude Code](claude-nextjs.md)
