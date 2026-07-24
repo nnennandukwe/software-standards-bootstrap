@@ -48,3 +48,11 @@ Then run the Agent Skill workflow described in [agent-smoke-tests.md](agent-smok
 - Codex and Claude Code both finish the workflow through their documented skill locations.
 
 The benchmark pins are evaluation inputs, not runtime dependencies. `ssb` never clones or contacts these repositories.
+
+## Recorded results
+
+The public-safe result ledger for the 2026-07-23 release evaluation is in
+[`docs/benchmarks/results/2026-07-23/`](benchmarks/results/2026-07-23/README.md).
+Each record separates a generated proposal from developer acceptance and
+discloses truncation, evidence resolution, structural dispositions, changed
+paths, and forbidden-action checks.
