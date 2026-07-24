@@ -48,6 +48,7 @@ The rule-pack module parses strict YAML with known-field and unique-key validati
 - candidate evidence thresholds;
 - exact line-range hashing against baseline blobs;
 - the same binary, size, secret, generated/vendor, symlink, and submodule eligibility boundary used by inspection;
+- required primary-topic validation for rules and referenced skills;
 - classification and existing-proof mapping;
 - related Agent Skill path and frontmatter validation; and
 - symlink and traversal rejection.
@@ -69,7 +70,7 @@ A source edit leaves the old section internally valid and allows deterministic r
 
 The ADR module preserves one existing convention among `docs/adr`, `docs/adrs`, `adr`, or `adrs`; otherwise it defaults to `docs/adr`. Multiple conventions require `--adr-dir`.
 
-It rejects paths outside the repository, symlink components, and submodule prefixes. The next numeric filename is created with exclusive-create semantics. Existing files are never replaced. Content includes only rules and referenced skills that survive developer review, and status is always `Proposed`.
+It rejects paths outside the repository, symlink components, and submodule prefixes. The next numeric filename is created with exclusive-create semantics. Existing files are never replaced. Content includes only rules and referenced skills that survive developer review, exposes each artifact's primary topic, and always has `Proposed` status.
 
 ## Canonical versus derived state
 

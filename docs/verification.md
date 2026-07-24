@@ -40,7 +40,8 @@ Tests verify:
 - literal spaces, Unicode, newlines, and shell metacharacters without shell execution;
 - binary, oversized, generated/vendor, secret-like, symlink, and submodule exclusion;
 - stable inventory plus explicit truncation;
-- strict schema, score, evidence, classification, skill-reference, and baseline failures;
+- strict schema, score, evidence, primary-topic, classification, skill-reference, and baseline failures;
+- primary-topic projection for rules in `AGENTS.md` and for rules and skills in the ADR;
 - new/existing `AGENTS.md`, direct drift, malformed/duplicate markers, symlink targets, dry runs, source edits, and deletions;
 - staged-render write failure without replacement or temporary-file residue;
 - default, existing, ambiguous, traversal, symlink, submodule, collision-safe, and dry-run ADR behavior;

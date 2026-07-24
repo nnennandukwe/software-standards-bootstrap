@@ -12,4 +12,5 @@ All notable changes are documented here. The project follows semantic versioning
 - Proposed ADR generation from retained artifacts.
 - Portable `software-standards-bootstrap` Agent Skill.
 - Mandatory structural-pattern discovery and benchmark acceptance coverage.
+- Required primary-topic metadata for rules and skills, with AGENTS and ADR projection.
 - Cross-platform CI and release provenance configuration.
