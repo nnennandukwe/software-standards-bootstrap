@@ -24,12 +24,17 @@ From the target repository, run:
 ssb inspect --repo . --format json
 ```
 
-Stop if the command fails. Report its recovery guidance verbatim. Do not bypass a dirty, detached, unborn, non-Git, existing-pack, or missing-baseline precondition.
+Never pass `--allow-partial` during this workflow. Stop if the command fails,
+including exit `4` for incomplete coverage, and report its recovery guidance
+verbatim. Do not create proposal files from incomplete inventory coverage. Do
+not bypass a dirty, detached, unborn, non-Git, existing-pack, or missing-baseline
+precondition.
 
 Record:
 
 - `baseline_commit`;
-- whether coverage is truncated and the exact reason;
+- candidate, scanned, indexed, and remaining counts and bytes;
+- confirmation that `truncated` is false;
 - excluded-category counts; and
 - the safe tracked files available for targeted reads.
 
@@ -46,7 +51,9 @@ Distinguish:
 - genuinely procedural work that belongs in an Agent Skill; and
 - existing deterministic checks that can be cited but were not executed.
 
-Disclose inventory truncation. Do not describe a truncated scan as complete.
+If an explicitly diagnostic partial inventory is supplied from outside this
+workflow, disclose it and stop. Do not score candidates or write proposal
+sources from it.
 
 ## 3. Write editable proposal sources
 
@@ -58,7 +65,7 @@ Create:
 .agents/skills/<skill-id>/SKILL.md
 ```
 
-The assessment must name the baseline, inventory limits or truncation, repository context, evidence reviewed, the completed structural pattern review, candidates retained, candidates kept assessment-only, primary-topic rationale, and classification rationale.
+The assessment must name the baseline, complete inventory limits, repository context, evidence reviewed, the completed structural pattern review, candidates retained, candidates kept assessment-only, primary-topic rationale, and classification rationale.
 
 Use the dynamic number of candidates supported by evidence. Do not impose a five-rule or other fixed cap. Keep candidates below 25 in the assessment.
 

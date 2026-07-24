@@ -53,11 +53,11 @@ func TestPublicGoServiceFixtureProducesThePinnedSafeInventory(t *testing.T) {
 	}
 }
 
-func repositoryRoot(t *testing.T) string {
-	t.Helper()
+func repositoryRoot(tb testing.TB) string {
+	tb.Helper()
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
-		t.Fatal("cannot resolve test file")
+		tb.Fatal("cannot resolve test file")
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }

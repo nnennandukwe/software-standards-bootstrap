@@ -18,22 +18,23 @@ import (
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/workspace"
 )
 
-const Version = "ssb-inventory-v1"
+const Version = "ssb-inventory-v2"
 
 // Limits bound repository resource use during inspection.
 type Limits struct {
-	MaxFiles      int   `json:"max_files"`
-	MaxTotalBytes int64 `json:"max_total_bytes"`
-	MaxFileBytes  int64 `json:"max_file_bytes"`
+	MaxCandidateFiles int   `json:"max_candidate_files"`
+	MaxCandidateBytes int64 `json:"max_candidate_bytes"`
+	MaxFileBytes      int64 `json:"max_file_bytes"`
 }
 
-// DefaultLimits are deliberately conservative for an agent-oriented evidence
-// inventory. Any report cut short by MaxFiles or MaxTotalBytes says so.
+// DefaultLimits cover the pinned public benchmark corpus with at least twenty
+// percent candidate-work headroom. Any report cut short by a candidate limit
+// says so.
 func DefaultLimits() Limits {
 	return Limits{
-		MaxFiles:      20_000,
-		MaxTotalBytes: 25 << 20,
-		MaxFileBytes:  1 << 20,
+		MaxCandidateFiles: 40_000,
+		MaxCandidateBytes: 128 << 20,
+		MaxFileBytes:      1 << 20,
 	}
 }
 
@@ -61,15 +62,22 @@ type File struct {
 
 // Report is stable for a given commit and set of limits.
 type Report struct {
-	SchemaVersion    int        `json:"schema_version"`
-	InventoryVersion string     `json:"inventory_version"`
-	BaselineCommit   string     `json:"baseline_commit"`
-	Limits           Limits     `json:"limits"`
-	Files            []File     `json:"files"`
-	Excluded         Exclusions `json:"excluded"`
-	IndexedBytes     int64      `json:"indexed_bytes"`
-	Truncated        bool       `json:"truncated"`
-	TruncationReason string     `json:"truncation_reason,omitempty"`
+	SchemaVersion           int        `json:"schema_version"`
+	InventoryVersion        string     `json:"inventory_version"`
+	BaselineCommit          string     `json:"baseline_commit"`
+	Limits                  Limits     `json:"limits"`
+	CandidateFiles          int        `json:"candidate_files"`
+	CandidateBytes          int64      `json:"candidate_bytes"`
+	ScannedFiles            int        `json:"scanned_files"`
+	ScannedBytes            int64      `json:"scanned_bytes"`
+	IndexedFiles            int        `json:"indexed_files"`
+	IndexedBytes            int64      `json:"indexed_bytes"`
+	Files                   []File     `json:"files"`
+	Excluded                Exclusions `json:"excluded"`
+	Truncated               bool       `json:"truncated"`
+	TruncationReason        string     `json:"truncation_reason,omitempty"`
+	RemainingCandidateFiles int        `json:"remaining_candidate_files"`
+	RemainingCandidateBytes int64      `json:"remaining_candidate_bytes"`
 }
 
 type treeEntry struct {
@@ -78,6 +86,16 @@ type treeEntry struct {
 	oid  string
 	size int64
 	path string
+}
+
+type batchPolicy struct {
+	MaxEntries int
+	MaxBytes   int64
+}
+
+var defaultBatchPolicy = batchPolicy{
+	MaxEntries: 512,
+	MaxBytes:   4 << 20,
 }
 
 // ReadEvidence returns one baseline file only when it is eligible for the
@@ -120,9 +138,28 @@ func ReadEvidence(ctx context.Context, repo *workspace.Repository, filePath stri
 
 // Scan reads blobs from the pinned baseline commit, not from the worktree.
 func Scan(ctx context.Context, repo *workspace.Repository, limits Limits) (Report, error) {
+	return scan(ctx, repo, limits, defaultBatchPolicy)
+}
+
+func scan(
+	ctx context.Context,
+	repo *workspace.Repository,
+	limits Limits,
+	batches batchPolicy,
+) (Report, error) {
 	limits = normalizedLimits(limits)
+	if batches.MaxEntries <= 0 || batches.MaxBytes <= 0 {
+		return Report{}, fmt.Errorf("invalid Git batch policy")
+	}
+	if limits.MaxFileBytes > batches.MaxBytes {
+		return Report{}, fmt.Errorf(
+			"max_file_bytes=%d exceeds Git batch byte ceiling %d",
+			limits.MaxFileBytes,
+			batches.MaxBytes,
+		)
+	}
 	report := Report{
-		SchemaVersion:    1,
+		SchemaVersion:    2,
 		InventoryVersion: Version,
 		BaselineCommit:   repo.Baseline(),
 		Limits:           limits,
@@ -170,11 +207,38 @@ func Scan(ctx context.Context, repo *workspace.Repository, limits Limits) (Repor
 			continue
 		}
 		candidates = append(candidates, entry)
+		report.CandidateBytes += entry.size
 	}
+	report.CandidateFiles = len(candidates)
 
-	scanComplete := true
-	for start := 0; start < len(candidates); {
-		end := batchEnd(candidates, start)
+	scanEnd := 0
+	for scanEnd < len(candidates) {
+		if scanEnd >= limits.MaxCandidateFiles {
+			report.Truncated = true
+			report.TruncationReason = fmt.Sprintf(
+				"inventory stopped at max_candidate_files=%d",
+				limits.MaxCandidateFiles,
+			)
+			break
+		}
+		next := candidates[scanEnd].size
+		if report.ScannedBytes+next > limits.MaxCandidateBytes {
+			report.Truncated = true
+			report.TruncationReason = fmt.Sprintf(
+				"inventory stopped at max_candidate_bytes=%d",
+				limits.MaxCandidateBytes,
+			)
+			break
+		}
+		report.ScannedBytes += next
+		scanEnd++
+	}
+	report.ScannedFiles = scanEnd
+	report.RemainingCandidateFiles = report.CandidateFiles - report.ScannedFiles
+	report.RemainingCandidateBytes = report.CandidateBytes - report.ScannedBytes
+
+	for start := 0; start < scanEnd; {
+		end := batchEnd(candidates[:scanEnd], start, batches)
 		contents, err := readBlobBatch(ctx, repo, candidates[start:end])
 		if err != nil {
 			return Report{}, err
@@ -189,18 +253,6 @@ func Scan(ctx context.Context, repo *workspace.Repository, limits Limits) (Repor
 				report.Excluded.Generated++
 				continue
 			}
-			if len(report.Files) >= limits.MaxFiles {
-				report.Truncated = true
-				report.TruncationReason = fmt.Sprintf("inventory stopped at max_files=%d", limits.MaxFiles)
-				scanComplete = false
-				break
-			}
-			if report.IndexedBytes+entry.size > limits.MaxTotalBytes {
-				report.Truncated = true
-				report.TruncationReason = fmt.Sprintf("inventory stopped at max_total_bytes=%d", limits.MaxTotalBytes)
-				scanComplete = false
-				break
-			}
 
 			sum := sha256.Sum256(content)
 			report.Files = append(report.Files, File{
@@ -211,10 +263,8 @@ func Scan(ctx context.Context, repo *workspace.Repository, limits Limits) (Repor
 				Language: language(entry.path),
 				SHA256:   "sha256:" + hex.EncodeToString(sum[:]),
 			})
+			report.IndexedFiles++
 			report.IndexedBytes += entry.size
-		}
-		if !scanComplete {
-			break
 		}
 		start = end
 	}
@@ -224,16 +274,12 @@ func Scan(ctx context.Context, repo *workspace.Repository, limits Limits) (Repor
 	return report, nil
 }
 
-func batchEnd(entries []treeEntry, start int) int {
-	const (
-		maxEntries = 128
-		maxBytes   = int64(8 << 20)
-	)
+func batchEnd(entries []treeEntry, start int, policy batchPolicy) int {
 	end := start
 	var size int64
-	for end < len(entries) && end-start < maxEntries {
+	for end < len(entries) && end-start < policy.MaxEntries {
 		next := entries[end].size
-		if end > start && size+next > maxBytes {
+		if end > start && size+next > policy.MaxBytes {
 			break
 		}
 		size += next
@@ -287,11 +333,11 @@ func readBlobBatch(ctx context.Context, repo *workspace.Repository, entries []tr
 
 func normalizedLimits(limits Limits) Limits {
 	defaults := DefaultLimits()
-	if limits.MaxFiles <= 0 {
-		limits.MaxFiles = defaults.MaxFiles
+	if limits.MaxCandidateFiles <= 0 {
+		limits.MaxCandidateFiles = defaults.MaxCandidateFiles
 	}
-	if limits.MaxTotalBytes <= 0 {
-		limits.MaxTotalBytes = defaults.MaxTotalBytes
+	if limits.MaxCandidateBytes <= 0 {
+		limits.MaxCandidateBytes = defaults.MaxCandidateBytes
 	}
 	if limits.MaxFileBytes <= 0 {
 		limits.MaxFileBytes = defaults.MaxFileBytes
