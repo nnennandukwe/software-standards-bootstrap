@@ -36,7 +36,7 @@ func TestInspectJSONIsReadOnlyAndMachineReadable(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
 	}
-	if response.SchemaVersion != 1 || response.BaselineCommit == "" {
+	if response.SchemaVersion != 2 || response.BaselineCommit == "" {
 		t.Fatalf("unexpected response: %#v", response)
 	}
 	if len(response.Files) != 1 || response.Files[0].Path != "README.md" {
@@ -48,6 +48,117 @@ func TestInspectJSONIsReadOnlyAndMachineReadable(t *testing.T) {
 	after := git(t, repo, "status", "--porcelain=v1", "-z")
 	if after != before {
 		t.Fatalf("inspect changed the repository:\nbefore %q\nafter  %q", before, after)
+	}
+}
+
+func TestInspectFailsClosedOnPartialCoverageUnlessExplicitlyAllowed(t *testing.T) {
+	repo := committedRepository(t)
+	writeFile(t, filepath.Join(repo, "SECOND.md"), "second\n")
+	git(t, repo, "add", "SECOND.md")
+	git(t, repo, "commit", "-m", "second candidate")
+
+	var blockedOut bytes.Buffer
+	var blockedErr bytes.Buffer
+	code := cli.Run([]string{
+		"inspect",
+		"--repo", repo,
+		"--format", "json",
+		"--max-candidate-files", "1",
+	}, &blockedOut, &blockedErr)
+	if code != 4 {
+		t.Fatalf("exit = %d, want 4; stdout=%q stderr=%q", code, blockedOut.String(), blockedErr.String())
+	}
+	if !strings.Contains(blockedErr.String(), "inventory coverage incomplete") ||
+		!strings.Contains(blockedErr.String(), "--max-candidate-files") ||
+		!strings.Contains(blockedErr.String(), "--allow-partial") {
+		t.Fatalf("missing partial-coverage recovery: %q", blockedErr.String())
+	}
+	var blocked struct {
+		Truncated               bool `json:"truncated"`
+		ScannedFiles            int  `json:"scanned_files"`
+		RemainingCandidateFiles int  `json:"remaining_candidate_files"`
+	}
+	if err := json.Unmarshal(blockedOut.Bytes(), &blocked); err != nil {
+		t.Fatalf("invalid partial JSON %q: %v", blockedOut.String(), err)
+	}
+	if !blocked.Truncated || blocked.ScannedFiles != 1 || blocked.RemainingCandidateFiles != 1 {
+		t.Fatalf("unexpected partial report: %#v", blocked)
+	}
+
+	var allowedOut bytes.Buffer
+	var allowedErr bytes.Buffer
+	code = cli.Run([]string{
+		"inspect",
+		"--repo", repo,
+		"--format", "json",
+		"--max-candidate-files", "1",
+		"--allow-partial",
+	}, &allowedOut, &allowedErr)
+	if code != 0 {
+		t.Fatalf("allowed partial exit = %d, want 0; stderr=%q", code, allowedErr.String())
+	}
+	if allowedOut.String() != blockedOut.String() {
+		t.Fatalf("--allow-partial changed report:\nblocked %q\nallowed %q", blockedOut.String(), allowedOut.String())
+	}
+	if allowedErr.Len() != 0 {
+		t.Fatalf("allowed partial wrote stderr: %q", allowedErr.String())
+	}
+
+	var textOut bytes.Buffer
+	var textErr bytes.Buffer
+	code = cli.Run([]string{
+		"inspect",
+		"--repo", repo,
+		"--max-candidate-files", "1",
+	}, &textOut, &textErr)
+	if code != 4 {
+		t.Fatalf("text partial exit = %d, want 4; stderr=%q", code, textErr.String())
+	}
+	if !strings.Contains(textOut.String(), "Coverage: TRUNCATED") {
+		t.Fatalf("text report does not disclose truncation:\n%s", textOut.String())
+	}
+	if !strings.Contains(textErr.String(), "raise --max-candidate-files or --max-candidate-bytes") {
+		t.Fatalf("text failure lacks blocked recovery:\n%s", textErr.String())
+	}
+	if strings.Contains(textOut.String(), "perform targeted semantic reads") {
+		t.Fatalf("partial report advertised unsafe progression:\n%s", textOut.String())
+	}
+}
+
+func TestInspectRejectsInvalidCandidateLimitsBeforeOpeningRepository(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		flag  string
+		value string
+	}{
+		{name: "zero files", flag: "--max-candidate-files", value: "0"},
+		{name: "negative files", flag: "--max-candidate-files", value: "-1"},
+		{name: "zero bytes", flag: "--max-candidate-bytes", value: "0"},
+		{name: "negative bytes", flag: "--max-candidate-bytes", value: "-1"},
+		{name: "overflow files", flag: "--max-candidate-files", value: "9223372036854775808"},
+		{name: "overflow bytes", flag: "--max-candidate-bytes", value: "9223372036854775808"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := cli.Run([]string{
+				"inspect",
+				"--repo", filepath.Join(t.TempDir(), "does-not-exist"),
+				test.flag, test.value,
+			}, &stdout, &stderr)
+			if code != 2 {
+				t.Fatalf("exit = %d, want 2; stderr=%q", code, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("unexpected stdout: %q", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), test.flag) {
+				t.Fatalf("error does not name %s: %q", test.flag, stderr.String())
+			}
+			if strings.Contains(stderr.String(), "not a Git worktree") {
+				t.Fatalf("repository was opened before flag validation: %q", stderr.String())
+			}
+		})
 	}
 }
 
@@ -122,6 +233,9 @@ func TestHelpDocumentsOnlyTheCanonicalCommandForms(t *testing.T) {
 			t.Fatalf("help advertises forbidden surface %q:\n%s", forbidden, stdout.String())
 		}
 	}
+	if !strings.Contains(stdout.String(), "4  inventory coverage incomplete") {
+		t.Fatalf("help missing incomplete-coverage exit code:\n%s", stdout.String())
+	}
 }
 
 func TestEachSubcommandProvidesSuccessfulFocusedHelp(t *testing.T) {
@@ -136,6 +250,17 @@ func TestEachSubcommandProvidesSuccessfulFocusedHelp(t *testing.T) {
 			if !strings.Contains(stdout.String(), "Usage: ssb "+command) ||
 				!strings.Contains(stdout.String(), "--repo PATH") {
 				t.Fatalf("%s help is not actionable:\n%s", command, stdout.String())
+			}
+			if command == "inspect" {
+				for _, required := range []string{
+					"--max-candidate-files",
+					"--max-candidate-bytes",
+					"--allow-partial",
+				} {
+					if !strings.Contains(stdout.String(), required) {
+						t.Errorf("inspect help missing %q:\n%s", required, stdout.String())
+					}
+				}
 			}
 		})
 	}

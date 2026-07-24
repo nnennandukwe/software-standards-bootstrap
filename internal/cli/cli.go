@@ -21,7 +21,7 @@ import (
 const helpText = `Software Standards Bootstrap
 
 Usage:
-  ssb inspect  [--repo PATH] [--format text|json]
+  ssb inspect  [--repo PATH] [--format text|json] [resource limits]
   ssb validate [--repo PATH] [--format text|json]
   ssb render   [--repo PATH] [--dry-run]
   ssb adr      [--repo PATH] [--adr-dir PATH] [--dry-run]
@@ -31,13 +31,17 @@ Exit codes:
   1  rule-pack validation failure
   2  usage or repository precondition failure
   3  unexpected internal failure
+  4  inventory coverage incomplete
 `
 
 const (
-	inspectHelp = `Usage: ssb inspect [--repo PATH] [--format text|json]
+	inspectHelp = `Usage: ssb inspect [--repo PATH] [--format text|json] [--max-candidate-files N] [--max-candidate-bytes N] [--allow-partial]
 
-  --repo PATH              target Git repository (default ".")
-  --format text|json       stable output format (default "text")
+  --repo PATH                 target Git repository (default ".")
+  --format text|json          stable output format (default "text")
+  --max-candidate-files N     candidate files that may be read (default 40000)
+  --max-candidate-bytes N     candidate bytes that may be read (default 134217728)
+  --allow-partial             return success for explicitly diagnostic partial coverage
 `
 	validateHelp = `Usage: ssb validate [--repo PATH] [--format text|json]
 
@@ -305,25 +309,52 @@ func writeValidationDiagnostics(stderr io.Writer, diagnostics []rulepack.Diagnos
 }
 
 func runInspect(args []string, stdout, stderr io.Writer) int {
+	defaults := inventory.DefaultLimits()
 	flags := flag.NewFlagSet("inspect", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	repoPath := flags.String("repo", ".", "repository path")
 	format := flags.String("format", "text", "output format")
+	maxCandidateFiles := flags.Int(
+		"max-candidate-files",
+		defaults.MaxCandidateFiles,
+		"candidate files that may be read",
+	)
+	maxCandidateBytes := flags.Int64(
+		"max-candidate-bytes",
+		defaults.MaxCandidateBytes,
+		"candidate bytes that may be read",
+	)
+	allowPartial := flags.Bool(
+		"allow-partial",
+		false,
+		"return success for explicitly diagnostic partial coverage",
+	)
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Fprint(stdout, inspectHelp)
 			return 0
 		}
-		fmt.Fprintf(stderr, "error: %s\nnext: ssb inspect --repo PATH [--format text|json]\n", cleanFlagError(err))
+		fmt.Fprintf(stderr, "error: %s\nnext: ssb inspect --help\n", cleanFlagError(err))
 		return 2
 	}
 	if flags.NArg() != 0 {
-		fmt.Fprintf(stderr, "error: inspect does not accept positional arguments\nnext: ssb inspect --repo PATH [--format text|json]\n")
+		fmt.Fprintln(stderr, "error: inspect does not accept positional arguments")
+		fmt.Fprintln(stderr, "next: ssb inspect --help")
 		return 2
 	}
 	if *format != "text" && *format != "json" {
 		fmt.Fprintln(stderr, "error: --format must be text or json")
 		fmt.Fprintln(stderr, "next: ssb inspect --repo PATH --format text")
+		return 2
+	}
+	if *maxCandidateFiles <= 0 {
+		fmt.Fprintln(stderr, "error: --max-candidate-files must be greater than zero")
+		fmt.Fprintln(stderr, "next: pass --max-candidate-files N with a positive integer")
+		return 2
+	}
+	if *maxCandidateBytes <= 0 {
+		fmt.Fprintln(stderr, "error: --max-candidate-bytes must be greater than zero")
+		fmt.Fprintln(stderr, "next: pass --max-candidate-bytes N with a positive integer")
 		return 2
 	}
 
@@ -336,7 +367,11 @@ func runInspect(args []string, stdout, stderr io.Writer) int {
 		}
 		return 3
 	}
-	report, err := inventory.Scan(ctx, repo, inventory.DefaultLimits())
+	report, err := inventory.Scan(ctx, repo, inventory.Limits{
+		MaxCandidateFiles: *maxCandidateFiles,
+		MaxCandidateBytes: *maxCandidateBytes,
+		MaxFileBytes:      defaults.MaxFileBytes,
+	})
 	if err != nil {
 		fmt.Fprintf(stderr, "error: inventory failed: %s\n", err)
 		if errors.Is(err, workspace.ErrPrecondition) {
@@ -353,15 +388,33 @@ func runInspect(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "error: write JSON inventory: %s\n", err)
 			return 3
 		}
-		return 0
+	} else {
+		writeTextInventory(stdout, report)
 	}
-	writeTextInventory(stdout, report)
+	if report.Truncated && !*allowPartial {
+		fmt.Fprintf(stderr, "error: inventory coverage incomplete: %s\n", report.TruncationReason)
+		fmt.Fprintln(
+			stderr,
+			"next: raise --max-candidate-files or --max-candidate-bytes and rerun; use --allow-partial only for diagnostic inventory.",
+		)
+		return 4
+	}
 	return 0
 }
 
 func writeTextInventory(out io.Writer, report inventory.Report) {
 	fmt.Fprintln(out, "Software Standards Bootstrap inventory")
 	fmt.Fprintf(out, "Baseline: %s\n", report.BaselineCommit)
+	fmt.Fprintf(
+		out,
+		"Candidates: files=%d bytes=%d; scanned: files=%d bytes=%d; remaining: files=%d bytes=%d\n",
+		report.CandidateFiles,
+		report.CandidateBytes,
+		report.ScannedFiles,
+		report.ScannedBytes,
+		report.RemainingCandidateFiles,
+		report.RemainingCandidateBytes,
+	)
 	fmt.Fprintf(out, "Files indexed: %d (%d bytes)\n", len(report.Files), report.IndexedBytes)
 	fmt.Fprintf(
 		out,
@@ -388,9 +441,16 @@ func writeTextInventory(out io.Writer, report inventory.Report) {
 		}
 		fmt.Fprintf(out, "- %s [%s, %d bytes, %d lines, %s]\n", strconv.Quote(file.Path), language, file.Bytes, file.Lines, file.SHA256)
 	}
+	if report.Truncated {
+		return
+	}
 	fmt.Fprintln(out, "Next: perform targeted semantic reads, then create .software-standards/assessment.md and evidence-backed rule files.")
 }
 
 func cleanFlagError(err error) string {
-	return strings.TrimPrefix(err.Error(), "flag provided but not defined: ")
+	message := strings.TrimPrefix(err.Error(), "flag provided but not defined: ")
+	if strings.HasPrefix(message, "-") && !strings.HasPrefix(message, "--") {
+		message = "-" + message
+	}
+	return strings.Replace(message, "for flag -", "for flag --", 1)
 }
