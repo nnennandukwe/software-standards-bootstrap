@@ -66,7 +66,7 @@ Tests verify:
 
 ## Public benchmark status
 
-The durable proposal records are in
+The historical inventory-v1 proposal records are in
 [`docs/benchmarks/results/2026-07-23/`](benchmarks/results/2026-07-23/README.md).
 
 | Consumer/version | Fixture coverage | Evidence resolution | Developer retention | End-to-end result |
@@ -85,8 +85,22 @@ was edited.
 
 These proposal records used `ssb-inventory-v1`. They are historical pre-change
 evidence, not acceptance for inventory v2. The inventory-v2 resource harness
-completes all four pins on macOS arm64; Linux resource-envelope evidence and
-fresh Codex/Claude proposal records remain release gates.
+completes all four pins on macOS arm64.
+
+The current inventory-v2 records are in
+[`docs/benchmarks/results/2026-07-26/`](benchmarks/results/2026-07-26/README.md).
+
+| Evidence | Fixture coverage | Evidence resolution | Developer retention | Result |
+|---|---:|---:|---:|---|
+| Linux amd64 resource envelope | 4/4 complete | Exact pins | Not applicable | Pass |
+| Codex desktop 26.721.31836 (build 5828), `gpt-5.6-sol` | 4/4 proposals | 100% | Pending | Review gate |
+
+All four inventory-v2 Codex runs completed without truncation. They produced
+33 fresh rule proposals and 3 proposed skills, all still pending explicit
+developer review. The native Linux amd64 run completed the same four pins,
+confirmed the 10-second per-repository envelope, and kept the selected
+512-entry/4 MiB policy below 256 MiB combined peak RSS. Fresh Claude Code
+inventory-v2 proposal records remain a release gate.
 
 ## Release controls
 
@@ -105,9 +119,8 @@ fresh Codex/Claude proposal records remain release gates.
 The release runbook still blocks `v0.1.0` until:
 
 - the benchmark and consumer records are reviewed and land on `main`;
-- inventory-v2 Linux resource-envelope evidence is recorded;
-- fresh inventory-v2 Codex and Claude proposal records replace the historical
-  v1 release evidence;
+- fresh inventory-v2 Claude proposal records complement the recorded Codex
+  proposals;
 - a developer records keep, edit-and-keep, defer, or reject decisions;
 - at least 70% of high and very-high candidates are kept or edit-and-kept;
 - the edit/delete/rerender and explicitly requested ADR behavior is verified

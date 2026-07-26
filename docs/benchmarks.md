@@ -53,12 +53,24 @@ The benchmark pins are evaluation inputs, not runtime dependencies. `ssb` never 
 
 ## Recorded results
 
-The public-safe result ledger for the 2026-07-23 release evaluation is in
+The historical public-safe result ledger for the 2026-07-23 release evaluation
+is in
 [`docs/benchmarks/results/2026-07-23/`](benchmarks/results/2026-07-23/README.md).
 Each record separates a generated proposal from developer acceptance and
 discloses truncation, evidence resolution, structural dispositions, changed
 paths, and forbidden-action checks.
 
 Those records used `ssb-inventory-v1` and remain immutable historical evidence.
-They are not inventory-v2 release acceptance. The v2 consumer refresh must be
-recorded separately before release.
+They are not inventory-v2 release acceptance.
+
+The current inventory-v2 evidence is in
+[`docs/benchmarks/results/2026-07-26/`](benchmarks/results/2026-07-26/README.md).
+It records:
+
+- a successful native Linux amd64 resource-envelope run;
+- four complete, non-truncated Codex inventories;
+- 33 fresh, evidence-resolving Codex rule proposals and 3 proposed skills; and
+- the mandatory review boundary, with every developer decision still pending.
+
+Fresh Claude Code inventory-v2 proposals and explicit developer retention
+decisions remain required.
