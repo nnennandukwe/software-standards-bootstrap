@@ -62,4 +62,4 @@ jobs:
           getconf LONG_BIT
           git --version
           go version
-          scripts/benchmark-inventory-resources.sh
+          bash scripts/benchmark-inventory-resources.sh
