@@ -43,7 +43,7 @@ jobs:
             git init "$target"
             git -C "$target" remote add origin "$repository"
             git -C "$target" fetch --depth=1 --no-tags origin "$commit"
-            git -C "$target" checkout --detach FETCH_HEAD
+            git -C "$target" checkout -b ssb-resource-evidence FETCH_HEAD
           }
 
           fetch_pin cobra https://github.com/spf13/cobra.git adbc8813901bba65827259daa8e22ff94ec1f30e
