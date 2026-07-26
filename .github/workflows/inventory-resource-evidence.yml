@@ -1,0 +1,60 @@
+name: Inventory resource evidence
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/inventory-resource-evidence.yml"
+      - "internal/evaluation/**"
+      - "internal/inventory/**"
+      - "scripts/benchmark-inventory-resources.sh"
+
+permissions:
+  contents: read
+
+jobs:
+  linux-amd64:
+    name: Linux amd64 resource envelope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.26.5
+          cache: true
+
+      - name: Clone pinned benchmark repositories
+        env:
+          BENCHMARK_ROOT: ${{ runner.temp }}/ssb-benchmark-targets
+        run: |
+          set -eu
+          mkdir -p "$BENCHMARK_ROOT"
+
+          git clone --no-tags https://github.com/spf13/cobra.git "$BENCHMARK_ROOT/cobra"
+          git -C "$BENCHMARK_ROOT/cobra" checkout --detach adbc8813901bba65827259daa8e22ff94ec1f30e
+
+          git clone --no-tags https://github.com/pallets/flask.git "$BENCHMARK_ROOT/flask"
+          git -C "$BENCHMARK_ROOT/flask" checkout --detach 36e4a824f340fdee7ed50937ba8e7f6bc7d17f81
+
+          git clone --no-tags https://github.com/django/django.git "$BENCHMARK_ROOT/django"
+          git -C "$BENCHMARK_ROOT/django" checkout --detach 50c2b7c83661a61da48f78dd0130fc3cbf8ed39f
+
+          git clone --no-tags https://github.com/vercel/next.js.git "$BENCHMARK_ROOT/next.js"
+          git -C "$BENCHMARK_ROOT/next.js" checkout --detach 6c6d1632e1e1f03e32db1dd8dc0a63dee49d68cd
+
+      - name: Record native Linux amd64 resource evidence
+        env:
+          SSB_BENCHMARK_ROOT: ${{ runner.temp }}/ssb-benchmark-targets
+        run: |
+          set -eu
+          uname -a
+          test "$(uname -s)" = "Linux"
+          test "$(uname -m)" = "x86_64"
+          getconf LONG_BIT
+          git --version
+          go version
+          scripts/benchmark-inventory-resources.sh
