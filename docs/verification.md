@@ -94,13 +94,25 @@ The current inventory-v2 records are in
 |---|---:|---:|---:|---|
 | Linux amd64 resource envelope | 4/4 complete | Exact pins | Not applicable | Pass |
 | Codex desktop 26.721.31836 (build 5828), `gpt-5.6-sol` | 4/4 proposals | 100% | Pending | Review gate |
+| Claude Code 2.1.220 | 4/4 proposals | 100% | Pending | Review gate |
 
-All four inventory-v2 Codex runs completed without truncation. They produced
-33 fresh rule proposals and 3 proposed skills, all still pending explicit
-developer review. The native Linux amd64 run completed the same four pins,
-confirmed the 10-second per-repository envelope, and kept the selected
-512-entry/4 MiB policy below 256 MiB combined peak RSS. Fresh Claude Code
-inventory-v2 proposal records remain a release gate.
+All four inventory-v2 Codex runs and all four inventory-v2 Claude Code runs
+completed without truncation and with zero remaining candidate files or bytes.
+Each pass produced 33 fresh rule proposals and 3 proposed skills — 66 rules and
+6 skills in total — all still pending explicit developer review. The native Linux
+amd64 run completed the same four pins, confirmed the 10-second per-repository
+envelope, and kept the selected 512-entry/4 MiB policy below 256 MiB combined
+peak RSS.
+
+The Claude Code model is recorded as self-reported rather than verified: the CLI
+prints only its own version, so the model id could not be independently observed.
+The Claude Code Cobra record additionally documents an independence limitation —
+that session had read the Codex Cobra rule ids before the evaluation ran. The
+other three Claude evaluations did not read their Codex counterparts.
+
+One Claude proposal required a validation correction: a Flask rule's `proof_gap`
+value needed YAML quoting. Only the proposal source was edited and validation
+passed on rerun; no evidence or score changed.
 
 ## Release controls
 
@@ -119,9 +131,8 @@ inventory-v2 proposal records remain a release gate.
 The release runbook still blocks `v0.1.0` until:
 
 - the benchmark and consumer records are reviewed and land on `main`;
-- fresh inventory-v2 Claude proposal records complement the recorded Codex
-  proposals;
-- a developer records keep, edit-and-keep, defer, or reject decisions;
+- a developer records keep, edit-and-keep, defer, or reject decisions for all 66
+  proposed rules and both sets of proposed skills;
 - at least 70% of high and very-high candidates are kept or edit-and-kept;
 - the edit/delete/rerender and explicitly requested ADR behavior is verified
   for both consumers;

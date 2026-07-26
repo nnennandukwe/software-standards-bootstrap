@@ -69,8 +69,17 @@ It records:
 
 - a successful native Linux amd64 resource-envelope run;
 - four complete, non-truncated Codex inventories;
-- 33 fresh, evidence-resolving Codex rule proposals and 3 proposed skills; and
+- 33 fresh, evidence-resolving Codex rule proposals and 3 proposed skills;
+- four complete, non-truncated Claude Code inventories;
+- 33 fresh, evidence-resolving Claude Code rule proposals and 3 proposed skills;
+  and
 - the mandatory review boundary, with every developer decision still pending.
 
-Fresh Claude Code inventory-v2 proposals and explicit developer retention
-decisions remain required.
+Both consumer passes are now recorded. The Claude Code Cobra record documents one
+independence limitation: that session had read the Codex Cobra rule ids before the
+evaluation ran, so it is not a blind run. The other three Claude evaluations did
+not read their Codex counterparts.
+
+Explicit developer retention decisions remain required for all 66 proposed rules
+and for both sets of proposed skills. Proposal completion is not developer
+retention, and neither is end-to-end acceptance.
