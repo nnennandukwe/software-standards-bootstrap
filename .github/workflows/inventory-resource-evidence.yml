@@ -34,17 +34,22 @@ jobs:
           set -eu
           mkdir -p "$BENCHMARK_ROOT"
 
-          git clone --no-tags https://github.com/spf13/cobra.git "$BENCHMARK_ROOT/cobra"
-          git -C "$BENCHMARK_ROOT/cobra" checkout --detach adbc8813901bba65827259daa8e22ff94ec1f30e
+          fetch_pin() {
+            name="$1"
+            repository="$2"
+            commit="$3"
+            target="$BENCHMARK_ROOT/$name"
 
-          git clone --no-tags https://github.com/pallets/flask.git "$BENCHMARK_ROOT/flask"
-          git -C "$BENCHMARK_ROOT/flask" checkout --detach 36e4a824f340fdee7ed50937ba8e7f6bc7d17f81
+            git init "$target"
+            git -C "$target" remote add origin "$repository"
+            git -C "$target" fetch --depth=1 --no-tags origin "$commit"
+            git -C "$target" checkout --detach FETCH_HEAD
+          }
 
-          git clone --no-tags https://github.com/django/django.git "$BENCHMARK_ROOT/django"
-          git -C "$BENCHMARK_ROOT/django" checkout --detach 50c2b7c83661a61da48f78dd0130fc3cbf8ed39f
-
-          git clone --no-tags https://github.com/vercel/next.js.git "$BENCHMARK_ROOT/next.js"
-          git -C "$BENCHMARK_ROOT/next.js" checkout --detach 6c6d1632e1e1f03e32db1dd8dc0a63dee49d68cd
+          fetch_pin cobra https://github.com/spf13/cobra.git adbc8813901bba65827259daa8e22ff94ec1f30e
+          fetch_pin flask https://github.com/pallets/flask.git 36e4a824f340fdee7ed50937ba8e7f6bc7d17f81
+          fetch_pin django https://github.com/django/django.git 50c2b7c83661a61da48f78dd0130fc3cbf8ed39f
+          fetch_pin next.js https://github.com/vercel/next.js.git 6c6d1632e1e1f03e32db1dd8dc0a63dee49d68cd
 
       - name: Record native Linux amd64 resource evidence
         env:
