@@ -99,6 +99,91 @@ func TestAgentSkillRequiresPrimaryTopicMetadata(t *testing.T) {
 	}
 }
 
+func TestAgentSkillSupportsExistingPackProgressiveSelection(t *testing.T) {
+	root := repositoryRoot(t)
+	skill := readText(t, filepath.Join(root, "skills", "software-standards-bootstrap", "SKILL.md"))
+	skill = strings.Join(strings.Fields(skill), " ")
+
+	for _, required := range []string{
+		"existing-pack consumption mode",
+		"Reviewed-pack maintenance mode",
+		"Requested-ADR mode",
+		"do not run `ssb inspect`, `ssb validate`, or `ssb render`",
+		"reconcile each canonical source ID and its selection metadata against every managed-index occurrence",
+		"expect one contextual rule to occur under each of its lens values",
+		"stopping as stale",
+		"base rule active when its path scope matches",
+		"every represented lens dimension",
+		"report the active rule IDs",
+		"Legacy v1 rules have no directive",
+		"mapped, not executed",
+		"ssb validate --repo . --format text",
+		"ssb adr --repo . --dry-run",
+	} {
+		if !strings.Contains(skill, required) {
+			t.Errorf("Agent Skill missing existing-pack contract %q", required)
+		}
+	}
+}
+
+func TestRuleSchemaReferenceDefinesV2ActivationAndProofContract(t *testing.T) {
+	root := repositoryRoot(t)
+	schema := readText(t, filepath.Join(
+		root,
+		"skills",
+		"software-standards-bootstrap",
+		"references",
+		"rule-schema.md",
+	))
+
+	for _, required := range []string{
+		"ssb.dev/rule/v2",
+		"kind: language",
+		"kind: framework",
+		"kind: task",
+		"directive: always",
+		"coverage: full",
+		"mapped, not executed",
+		"implementation",
+		"review",
+		"testing",
+		"security",
+		"documentation",
+		"release",
+	} {
+		if !strings.Contains(schema, required) {
+			t.Errorf("rule schema missing v2 contract %q", required)
+		}
+	}
+}
+
+func TestSmokeTestsDefineHostAgnosticProgressiveSelectionConformance(t *testing.T) {
+	root := repositoryRoot(t)
+	smokeTests := readText(t, filepath.Join(root, "docs", "agent-smoke-tests.md"))
+	smokeTests = strings.Join(strings.Fields(smokeTests), " ")
+
+	for _, required := range []string{
+		"Agent-host behavioral conformance tests",
+		"not part of normal developer usage",
+		"conforming agent host",
+		"Run this suite once for every host compatibility claim",
+		"Existing-pack progressive-selection matrix",
+		"`implementation`",
+		"`review`",
+		"`testing`",
+		"`security`",
+		"reports the active rule IDs",
+		"does not read irrelevant contextual rule bodies",
+		"never reports a mapped verification command as executed or passed",
+		"| Host/version | Skill exposure method |",
+		"reference adapters",
+	} {
+		if !strings.Contains(smokeTests, required) {
+			t.Errorf("agent-host conformance tests missing contract %q", required)
+		}
+	}
+}
+
 func TestDocumentationCarriesPrimaryTopicAcceptance(t *testing.T) {
 	root := repositoryRoot(t)
 	documents := map[string]string{

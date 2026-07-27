@@ -23,9 +23,10 @@ import (
 )
 
 const (
-	SchemaVersion = "ssb.dev/rule/v1"
-	ScoreMethod   = "ssb-score-v1"
-	topicRecovery = "use one primary topic: architecture, compatibility, compliance, correctness, developer-experience, documentation, maintainability, operability, performance, quality, reliability, security, or testability"
+	SchemaVersionV1 = "ssb.dev/rule/v1"
+	SchemaVersionV2 = "ssb.dev/rule/v2"
+	ScoreMethod     = "ssb-score-v1"
+	topicRecovery   = "use one primary topic: architecture, compatibility, compliance, correctness, developer-experience, documentation, maintainability, operability, performance, quality, reliability, security, or testability"
 )
 
 var (
@@ -45,6 +46,20 @@ var (
 		"reliability":          {},
 		"security":             {},
 		"testability":          {},
+	}
+	supportedTasks = map[string]struct{}{
+		"implementation": {},
+		"review":         {},
+		"testing":        {},
+		"security":       {},
+		"documentation":  {},
+		"release":        {},
+	}
+	supportedDirectives = map[string]struct{}{
+		"always":    {},
+		"ask-first": {},
+		"never":     {},
+		"prefer":    {},
 	}
 )
 
@@ -81,12 +96,21 @@ type Evidence struct {
 	Authoritative bool   `yaml:"authoritative,omitempty" json:"authoritative,omitempty"`
 }
 
+// Lens identifies one context dimension used to select a rule. Values within
+// one kind are alternatives; represented kinds are matched together.
+type Lens struct {
+	Kind  string `yaml:"kind" json:"kind"`
+	Value string `yaml:"value,omitempty" json:"value,omitempty"`
+}
+
 // Verification either cites an existing repository check or records a proof
 // gap. ssb never executes the command.
 type Verification struct {
 	Command  string    `yaml:"command,omitempty" json:"command,omitempty"`
 	Source   *Evidence `yaml:"source,omitempty" json:"source,omitempty"`
 	ProofGap string    `yaml:"proof_gap,omitempty" json:"proof_gap,omitempty"`
+	Coverage string    `yaml:"coverage,omitempty" json:"coverage,omitempty"`
+	Proves   string    `yaml:"proves,omitempty" json:"proves,omitempty"`
 }
 
 // Rule is one editable rule source file plus its exact Markdown body.
@@ -95,6 +119,8 @@ type Rule struct {
 	ID              string       `yaml:"id" json:"id"`
 	Title           string       `yaml:"title" json:"title"`
 	Topic           string       `yaml:"topic" json:"topic"`
+	Lenses          []Lens       `yaml:"lenses,omitempty" json:"lenses,omitempty"`
+	Directive       string       `yaml:"directive,omitempty" json:"directive,omitempty"`
 	Scopes          []string     `yaml:"scopes" json:"scopes"`
 	Classification  string       `yaml:"classification" json:"classification"`
 	Importance      string       `yaml:"importance" json:"importance"`
@@ -264,7 +290,7 @@ func parseRule(relative string, data []byte) (Rule, *Diagnostic) {
 			Line:     line,
 			Field:    "frontmatter",
 			Message:  err.Error(),
-			Recovery: "remove unknown or duplicate fields and use the ssb.dev/rule/v1 schema",
+			Recovery: "remove unknown or duplicate fields and use the ssb.dev/rule/v1 or ssb.dev/rule/v2 schema",
 		}
 		return Rule{}, &item
 	}
@@ -279,8 +305,16 @@ func validateRule(ctx context.Context, repo *workspace.Repository, rule Rule, fi
 		diagnostics = append(diagnostics, diagnostic(rule.SourcePath, field, message, recovery))
 	}
 
-	if rule.Schema != SchemaVersion {
-		add("schema", fmt.Sprintf("schema must be %s", SchemaVersion), "update the rule schema value")
+	if rule.Schema != SchemaVersionV1 && rule.Schema != SchemaVersionV2 {
+		add("schema", fmt.Sprintf("schema must be %s or %s", SchemaVersionV1, SchemaVersionV2), "update the rule schema value")
+	}
+	if rule.Schema == SchemaVersionV1 {
+		if len(rule.Lenses) != 0 || rule.Directive != "" ||
+			rule.Verification.Coverage != "" || rule.Verification.Proves != "" {
+			add("schema", "rule v1 must not declare v2 activation or proof metadata", "remove lenses, directive, coverage, and proves or update schema to ssb.dev/rule/v2")
+		}
+	} else if rule.Schema == SchemaVersionV2 {
+		diagnostics = append(diagnostics, validateRuleV2Activation(rule)...)
 	}
 	if !stableIDPattern.MatchString(rule.ID) {
 		add("id", "id must be lower-case kebab-case", "choose a stable id such as verify-before-merge")
@@ -345,6 +379,8 @@ func validateRule(ctx context.Context, repo *workspace.Repository, rule Rule, fi
 	hasCommand := strings.TrimSpace(rule.Verification.Command) != ""
 	hasSource := rule.Verification.Source != nil
 	hasGap := strings.TrimSpace(rule.Verification.ProofGap) != ""
+	hasCoverage := strings.TrimSpace(rule.Verification.Coverage) != ""
+	hasProves := strings.TrimSpace(rule.Verification.Proves) != ""
 	if rule.Classification == "deterministic" {
 		if !hasCommand || !hasSource || hasGap {
 			add("verification", "deterministic rules must cite an existing verification command and source without a proof gap", "cite the existing check or reclassify the rule as guidance")
@@ -355,6 +391,24 @@ func validateRule(ctx context.Context, repo *workspace.Repository, rule Rule, fi
 		}
 		if hasCommand != hasSource {
 			add("verification", "verification command and source must be provided together", "cite the repository location that defines the command")
+		}
+	}
+	if rule.Schema == SchemaVersionV2 {
+		switch {
+		case hasGap:
+			if hasCoverage || hasProves {
+				add("verification", "proof gaps must not declare verification coverage or a proved property", "remove coverage and proves from the proof gap")
+			}
+		case hasCommand && hasSource:
+			if !hasProves {
+				add("verification.proves", "mapped verification must state the bounded property it proves", "describe only the property established when the cited command passes")
+			}
+			if rule.Classification == "deterministic" && rule.Verification.Coverage != "full" {
+				add("verification.coverage", "deterministic rules require full verification coverage", "set coverage to full only when the cited check proves the complete rule")
+			}
+			if rule.Classification == "guidance" && rule.Verification.Coverage != "partial" {
+				add("verification.coverage", "guidance with a mapped check requires partial verification coverage", "set coverage to partial or replace the mapping with a proof gap")
+			}
 		}
 	}
 	if hasSource {
@@ -370,6 +424,50 @@ func validateRule(ctx context.Context, repo *workspace.Repository, rule Rule, fi
 			add("related_skills", fmt.Sprintf("duplicate related skill id %q", skillID), "list each related skill once")
 		}
 		seenSkills[skillID] = struct{}{}
+	}
+	return diagnostics
+}
+
+func validateRuleV2Activation(rule Rule) []Diagnostic {
+	diagnostics := make([]Diagnostic, 0)
+	add := func(field, message, recovery string) {
+		diagnostics = append(diagnostics, diagnostic(rule.SourcePath, field, message, recovery))
+	}
+	if len(rule.Lenses) == 0 {
+		add("lenses", "at least one activation lens is required", "use one base lens or one or more language, framework, and task lenses")
+	}
+	baseCount := 0
+	seen := make(map[string]struct{})
+	for index, lens := range rule.Lenses {
+		field := fmt.Sprintf("lenses[%d]", index)
+		switch lens.Kind {
+		case "base":
+			baseCount++
+			if lens.Value != "" {
+				add(field+".value", "base lens must not have a value", "remove the value from the base lens")
+			}
+		case "language", "framework":
+			if !stableIDPattern.MatchString(lens.Value) {
+				add(field+".value", lens.Kind+" lens requires a lower-case kebab-case value", "add a value such as go, python, cobra, or django")
+			}
+		case "task":
+			if _, supported := supportedTasks[lens.Value]; !supported {
+				add(field+".value", fmt.Sprintf("task lens value %q is not supported", lens.Value), "use implementation, review, testing, security, documentation, or release")
+			}
+		default:
+			add(field+".kind", fmt.Sprintf("lens kind %q is not supported", lens.Kind), "use base, language, framework, or task")
+		}
+		key := lens.Kind + ":" + lens.Value
+		if _, duplicate := seen[key]; duplicate {
+			add("lenses", "duplicate activation lens "+key, "list each lens once")
+		}
+		seen[key] = struct{}{}
+	}
+	if baseCount != 0 && len(rule.Lenses) != 1 {
+		add("lenses", "base must be the sole activation lens", "remove contextual lenses or remove the base lens")
+	}
+	if _, supported := supportedDirectives[rule.Directive]; !supported {
+		add("directive", fmt.Sprintf("directive %q is not supported", rule.Directive), "use always, ask-first, never, or prefer")
 	}
 	return diagnostics
 }

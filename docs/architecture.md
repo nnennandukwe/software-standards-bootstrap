@@ -60,15 +60,31 @@ The rule-pack module parses strict YAML with known-field and unique-key validati
 - exact line-range hashing against baseline blobs;
 - the same binary, size, secret, generated/vendor, symlink, and submodule eligibility boundary used by inspection;
 - required primary-topic validation for rules and referenced skills;
+- v2 activation-lens and directive validation with v1 read compatibility;
 - classification and existing-proof mapping;
+- full versus partial verification coverage and bounded proved-property validation;
 - related Agent Skill path and frontmatter validation; and
 - symlink and traversal rejection.
 
 It never interprets whether a candidate is a good engineering standard. That remains host-agent judgment reviewed by a developer.
 
+Valid `ssb validate --format json` output includes the normalized pack in
+response schema 2. Invalid output omits the pack. This is a local interchange
+boundary, not a catalog import or synchronization mechanism.
+
 ### Renderer
 
-The renderer sorts rules by stable ID and creates one marked root `AGENTS.md` section. It preserves every pre-existing byte outside the section.
+The renderer creates one marked root `AGENTS.md` section and preserves every
+pre-existing byte outside it. It orders base standing orders by directive
+severity, importance, and stable ID; deduplicates mapped verification commands;
+and groups contextual source links by language, framework, and task. Contextual
+rule bodies remain only in their canonical source files for progressive
+loading.
+
+Rule v1 has no lens or directive fields, so the renderer keeps retained v1
+rules in a separate base group labeled “directive not recorded” while
+preserving their original classification. This preserves visibility without
+inventing v2 semantics.
 
 The section stores:
 
@@ -81,7 +97,12 @@ A source edit leaves the old section internally valid and allows deterministic r
 
 The ADR module preserves one existing convention among `docs/adr`, `docs/adrs`, `adr`, or `adrs`; otherwise it defaults to `docs/adr`. Multiple conventions require `--adr-dir`.
 
-It rejects paths outside the repository, symlink components, and submodule prefixes. The next numeric filename is created with exclusive-create semantics. Existing files are never replaced. Content includes only rules and referenced skills that survive developer review, exposes each artifact's primary topic, and always has `Proposed` status.
+It rejects paths outside the repository, symlink components, and submodule
+prefixes. The next numeric filename is created with exclusive-create
+semantics. Existing files are never replaced. Content includes only rules and
+referenced skills that survive developer review, exposes each artifact's
+primary topic, and records v2 lenses, directive, proof coverage, and bounded
+proved property. It always has `Proposed` status.
 
 ## Canonical versus derived state
 
@@ -90,10 +111,15 @@ It rejects paths outside the repository, symlink components, and submodule prefi
 | `.software-standards/assessment.md` | Repository context and discarded candidates | Yes | No |
 | `.software-standards/rules/*.md` | Canonical proposed rule sources | Yes | Evidence mapping only |
 | `.agents/skills/*/SKILL.md` | Canonical proposed procedural workflows | Yes | No |
-| Root `AGENTS.md` managed section | Derived guidance projection | No | No |
+| Root `AGENTS.md` managed section | Derived standing orders and contextual rule router | No | No |
 | Proposed ADR | Adoption record from retained sources | New record only | No |
 | Existing repository checker | Repository-owned deterministic mechanism | Outside ssb | Only when run elsewhere |
 
 ## No network contract
 
-The runtime imports only the Go standard library and `go.yaml.in/yaml/v4`. No package opens sockets or performs update checks. Network access in release workflows and optional public benchmark evaluation is outside the runtime.
+The runtime imports only the Go standard library and `go.yaml.in/yaml/v4`. No
+package opens sockets or performs update checks. V2 lenses and valid-pack JSON
+make later catalog ingestion possible without adding catalog fetching,
+namespacing, synchronization, or activation to the runtime. Network access in
+release workflows and optional public benchmark evaluation is outside the
+runtime.

@@ -62,6 +62,210 @@ Run the cited repository check and report its result.
 	}
 }
 
+func TestValidateAcceptsRuleV2ActivationAndProofMetadata(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeFile(t, filepath.Join(repo, ".software-standards", "assessment.md"), "# Assessment\n")
+	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "verify-before-merge.md"), validRuleV2(
+		baseline,
+		excerptHash("package main\n"),
+		excerptHash("verify:\n\tgo test ./...\n"),
+	))
+	writeFile(t, filepath.Join(repo, ".agents", "skills", "verify-change", "SKILL.md"), `---
+name: verify-change
+description: Verify changes with the repository's existing check.
+metadata:
+  topic: correctness
+---
+# Verify
+`)
+
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+	}
+	if len(pack.Rules) != 1 {
+		t.Fatalf("unexpected rules: %#v", pack.Rules)
+	}
+	rule := pack.Rules[0]
+	if rule.Schema != "ssb.dev/rule/v2" || rule.Directive != "always" {
+		t.Fatalf("unexpected v2 contract: %#v", rule)
+	}
+	if len(rule.Lenses) != 3 ||
+		rule.Lenses[0] != (rulepack.Lens{Kind: "language", Value: "go"}) ||
+		rule.Lenses[1] != (rulepack.Lens{Kind: "framework", Value: "cobra"}) ||
+		rule.Lenses[2] != (rulepack.Lens{Kind: "task", Value: "review"}) {
+		t.Fatalf("unexpected lenses: %#v", rule.Lenses)
+	}
+	if rule.Verification.Coverage != "full" ||
+		rule.Verification.Proves != "The Go test suite proves the retained assertions when it passes." {
+		t.Fatalf("unexpected verification metadata: %#v", rule.Verification)
+	}
+}
+
+func TestValidateRejectsInvalidRuleV2ActivationAndProofMetadata(t *testing.T) {
+	tests := []struct {
+		name       string
+		mutateRule func(string) string
+		want       string
+	}{
+		{
+			name: "missing lenses",
+			mutateRule: func(rule string) string {
+				start := strings.Index(rule, "lenses:\n")
+				end := strings.Index(rule[start:], "directive:")
+				return rule[:start] + rule[start+end:]
+			},
+			want: "at least one activation lens is required",
+		},
+		{
+			name: "base mixed with contextual lens",
+			mutateRule: func(rule string) string {
+				return strings.Replace(rule, "lenses:\n", "lenses:\n  - kind: base\n", 1)
+			},
+			want: "base must be the sole activation lens",
+		},
+		{
+			name: "base has value",
+			mutateRule: func(rule string) string {
+				start := strings.Index(rule, "lenses:\n")
+				end := strings.Index(rule[start:], "directive:")
+				return rule[:start] + "lenses:\n  - kind: base\n    value: repository\n" + rule[start+end:]
+			},
+			want: "base lens must not have a value",
+		},
+		{
+			name: "contextual lens missing value",
+			mutateRule: func(rule string) string {
+				return strings.Replace(rule, "  - kind: language\n    value: go\n", "  - kind: language\n", 1)
+			},
+			want: "language lens requires a lower-case kebab-case value",
+		},
+		{
+			name: "unknown lens kind",
+			mutateRule: func(rule string) string {
+				return strings.Replace(rule, "kind: framework", "kind: cloud", 1)
+			},
+			want: `lens kind "cloud" is not supported`,
+		},
+		{
+			name: "unknown task value",
+			mutateRule: func(rule string) string {
+				return strings.Replace(rule, "value: review", "value: deployment", 1)
+			},
+			want: `task lens value "deployment" is not supported`,
+		},
+		{
+			name: "duplicate lens",
+			mutateRule: func(rule string) string {
+				return strings.Replace(rule, "  - kind: framework\n", "  - kind: language\n    value: go\n  - kind: framework\n", 1)
+			},
+			want: "duplicate activation lens language:go",
+		},
+		{
+			name: "unknown directive",
+			mutateRule: func(rule string) string {
+				return strings.Replace(rule, "directive: always", "directive: enforce", 1)
+			},
+			want: `directive "enforce" is not supported`,
+		},
+		{
+			name: "deterministic partial coverage",
+			mutateRule: func(rule string) string {
+				return strings.Replace(rule, "coverage: full", "coverage: partial", 1)
+			},
+			want: "deterministic rules require full verification coverage",
+		},
+		{
+			name: "mapped verification missing bounded property",
+			mutateRule: func(rule string) string {
+				return strings.Replace(rule, "  proves: The Go test suite proves the retained assertions when it passes.\n", "", 1)
+			},
+			want: "mapped verification must state the bounded property it proves",
+		},
+		{
+			name: "guidance full coverage",
+			mutateRule: func(rule string) string {
+				return strings.Replace(rule, "classification: deterministic", "classification: guidance", 1)
+			},
+			want: "guidance with a mapped check requires partial verification coverage",
+		},
+		{
+			name: "proof gap with coverage metadata",
+			mutateRule: func(rule string) string {
+				start := strings.Index(rule, "verification:\n")
+				end := strings.Index(rule[start:], "related_skills:")
+				replacement := "verification:\n  proof_gap: No existing check proves this.\n  coverage: partial\n"
+				return rule[:start] + replacement + rule[start+end:]
+			},
+			want: "proof gaps must not declare verification coverage or a proved property",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			writeFile(t, filepath.Join(repo, ".software-standards", "assessment.md"), "# Assessment\n")
+			rule := validRuleV2(baseline, excerptHash("package main\n"), excerptHash("verify:\n\tgo test ./...\n"))
+			writeFile(t, filepath.Join(repo, ".software-standards", "rules", "verify-before-merge.md"), test.mutateRule(rule))
+			writeFile(t, filepath.Join(repo, ".agents", "skills", "verify-change", "SKILL.md"), `---
+name: verify-change
+description: Verify changes with the repository's existing check.
+metadata:
+  topic: correctness
+---
+# Verify
+`)
+
+			ws, err := workspace.Open(context.Background(), repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !diagnosticsContain(diagnostics, test.want) {
+				t.Fatalf("diagnostics %#v do not contain %q", diagnostics, test.want)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsRuleV2FieldsOnRuleV1(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeFile(t, filepath.Join(repo, ".software-standards", "assessment.md"), "# Assessment\n")
+	rule := validRule(baseline, excerptHash("package main\n"), excerptHash("verify:\n\tgo test ./...\n"))
+	rule = strings.Replace(rule, "scopes:\n", "lenses:\n  - kind: base\ndirective: prefer\nscopes:\n", 1)
+	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "verify-before-merge.md"), rule)
+	writeFile(t, filepath.Join(repo, ".agents", "skills", "verify-change", "SKILL.md"), `---
+name: verify-change
+description: Verify changes with the repository's existing check.
+metadata:
+  topic: correctness
+---
+# Verify
+`)
+
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !diagnosticsContain(diagnostics, "rule v1 must not declare v2 activation or proof metadata") {
+		t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+	}
+}
+
 func TestValidateRejectsUngroundedOrInternallyInconsistentRules(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -502,6 +706,55 @@ verification:
     path: Makefile
     lines: 1-2
     excerpt_sha256: %s
+related_skills:
+  - verify-change
+---
+Run the repository's existing verification command before merging a Go change.
+`, baseline, evidenceHash, verificationHash)
+}
+
+func validRuleV2(baseline, evidenceHash, verificationHash string) string {
+	return fmt.Sprintf(`---
+schema: ssb.dev/rule/v2
+id: verify-before-merge
+title: Verify before merge
+topic: correctness
+lenses:
+  - kind: language
+    value: go
+  - kind: framework
+    value: cobra
+  - kind: task
+    value: review
+directive: always
+scopes:
+  - "**/*.go"
+classification: deterministic
+importance: high
+score:
+  method: ssb-score-v1
+  total: 70
+  factors:
+    prevalence: 15
+    consistency: 15
+    authority: 15
+    risk: 15
+    applicability: 10
+confidence: high
+baseline_commit: %s
+evidence:
+  - path: main.go
+    lines: 1-1
+    excerpt_sha256: %s
+    authoritative: true
+verification:
+  command: go test ./...
+  source:
+    path: Makefile
+    lines: 1-2
+    excerpt_sha256: %s
+  coverage: full
+  proves: The Go test suite proves the retained assertions when it passes.
 related_skills:
   - verify-change
 ---

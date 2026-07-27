@@ -56,8 +56,16 @@ Tests verify:
 - binary, oversized, generated/vendor, secret-like, symlink, and submodule exclusion;
 - stable inventory-v2 candidate accounting, exact resource boundaries, and
   fail-closed incomplete coverage;
-- strict schema, score, evidence, primary-topic, classification, skill-reference, and baseline failures;
-- primary-topic projection for rules in `AGENTS.md` and for rules and skills in the ADR;
+- strict v1/v2 schema, score, evidence, primary-topic, classification,
+  activation-lens, directive, proof-coverage, skill-reference, and baseline
+  failures;
+- v1 compatibility and v2 progressive projection: base standing orders are
+  inline, contextual rule bodies remain in canonical files, commands are
+  deduplicated, and proof is labeled as mapped rather than executed;
+- primary-topic projection for rules in `AGENTS.md` and lenses, directive,
+  proof coverage, and primary topics for rules and skills in the ADR;
+- valid JSON interchange output containing a normalized pack, with invalid
+  output limited to diagnostics;
 - new/existing `AGENTS.md`, direct drift, malformed/duplicate markers, symlink targets, dry runs, source edits, and deletions;
 - staged-render write failure without replacement or temporary-file residue;
 - default, existing, ambiguous, traversal, symlink, submodule, collision-safe, and dry-run ADR behavior;

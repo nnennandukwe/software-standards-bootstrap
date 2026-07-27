@@ -4,7 +4,7 @@ Software Standards Bootstrap (`ssb`) is an Apache-2.0 command-line tool and port
 
 The host agent performs semantic analysis. The `ssb` binary supplies deterministic safety, inventory, validation, rendering, and ADR contracts. It never calls a model, sends telemetry, makes network requests, executes repository code, or performs Git mutations.
 
-## What v0.1 produces
+## What `ssb` produces
 
 ```text
 .software-standards/
@@ -16,7 +16,11 @@ AGENTS.md
 docs/adr/NNNN-agentic-rules.md
 ```
 
-The rule files and skills are editable proposal sources. Root `AGENTS.md` is a lossy managed projection. The ADR is generated only after a developer has reviewed, edited, or deleted the proposed files, and it remains `Proposed` until the developer-created pull request is merged.
+The rule files and skills are editable proposal sources. Root `AGENTS.md` is a
+lossy managed router: it inlines base standing orders and links contextual
+rules by language, framework, and task. The ADR is generated only after a
+developer has reviewed, edited, or deleted the proposed files, and it remains
+`Proposed` until the developer-created pull request is merged.
 
 ## Requirements
 
@@ -68,7 +72,11 @@ Exit codes:
 - `3`: unexpected internal failure
 - `4`: inventory coverage incomplete
 
-`inspect` and `validate` are read-only. `render` may change only the bounded Software Standards Bootstrap section in root `AGENTS.md`. `adr` exclusively creates one new record and refuses overwrite or path escape.
+`inspect` and `validate` are read-only. Valid JSON from `validate` includes the
+normalized pack as a local interchange envelope; invalid output omits the pack
+and reports diagnostics. `render` may change only the bounded Software
+Standards Bootstrap section in root `AGENTS.md`. `adr` exclusively creates one
+new record and refuses overwrite or path escape.
 
 ## Agent Skill workflow
 
@@ -79,7 +87,7 @@ Use the software-standards-bootstrap skill to analyze this repository
 and generate an evidence-backed rules pack.
 ```
 
-The skill:
+When no pack exists, the skill:
 
 1. runs `ssb inspect`;
 2. performs targeted authority, risk, and structural-pattern review without executing repository code;
@@ -87,6 +95,19 @@ The skill:
 4. runs `ssb validate` and `ssb render`;
 5. lists every changed and untracked path; and
 6. waits for the developer to edit or delete proposal sources before an ADR is requested.
+
+When a pack already exists, the skill does not reinspect, validate, render, or
+rewrite it. It reconciles the managed router against every canonical rule's
+selection frontmatter, selects base rules whose scopes match the affected
+paths plus contextual rules matching scope and each represented language,
+framework, and task dimension, reports the active rule IDs, and treats
+uncertain context conservatively by loading potentially relevant rules.
+
+That prohibition applies to rule consumption, not the documented review
+continuation. An explicit request to validate or rerender developer-edited
+sources uses a bounded maintenance mode, and an explicit post-review ADR
+request previews and creates only the `Proposed` record. Neither mode
+reinspects or rewrites canonical sources.
 
 The workflow has no fixed candidate count. Candidates below 25 remain assessment-only. A rule requires one authoritative source or three consistent occurrences across two files.
 
@@ -104,17 +125,28 @@ Every rule records:
 
 - schema and stable ID;
 - exactly one primary topic from the controlled software-engineering taxonomy;
+- one base lens or contextual language, framework, and task lenses;
+- an `always`, `ask-first`, `never`, or `prefer` directive;
 - repository-relative scopes;
 - `guidance` or `deterministic` classification;
 - `ssb-score-v1` factors, total, and importance band;
 - confidence and baseline commit;
 - exact evidence line ranges and SHA-256 excerpt hashes;
-- an existing verification command with its repository source, or an explicit proof gap; and
+- an existing verification command with its repository source, coverage, and
+  bounded proved property, or an explicit proof gap; and
 - related Agent Skill IDs when the standard is procedural.
 
 Referenced skills carry the same required primary-topic metadata, based on the workflow's intended engineering outcome. Generated `AGENTS.md` guidance and the Proposed ADR expose these topics so reviewers can see whether the retained standards primarily concern correctness, compatibility, maintainability, performance, security, or another supported concern. Prefer a narrow topic; `quality` is the fallback only when no narrower topic fits.
 
-A rule is `deterministic` only when it cites an existing repository check. `ssb` records that mapping but does not run the command or claim it passed.
+New proposals use `ssb.dev/rule/v2`; existing v1 packs remain valid and
+renderable. A v2 rule is `deterministic` only when a cited repository check
+fully covers the rule and the source records the exact bounded property proved
+when that command passes. Guidance may map partial proof or record a proof gap.
+`ssb` records that mapping but does not run the command or claim it passed.
+
+The v2 metadata is suitable for later catalog ingestion, but stable rule IDs
+remain repository-local. A separate catalog must assign its own namespace,
+version, import review, and lifecycle.
 
 See [the rule format](docs/rule-format.md), [topic taxonomy](skills/software-standards-bootstrap/references/topics.md), [architecture](docs/architecture.md), and [primary-source research](docs/research/competitive-and-format-research.md).
 
@@ -133,7 +165,10 @@ See [the rule format](docs/rule-format.md), [topic taxonomy](skills/software-sta
 
 ## Non-goals
 
-v0.1 does not provide a generic rules catalog, configuration synchronization, tool-specific rule projections, checker generation, hosted services, direct model APIs, telemetry, hooks, automatic refresh, or downstream product activation.
+`ssb` does not provide a generic rules catalog, catalog import, configuration
+synchronization, tool-specific rule projections, checker generation, hosted
+services, direct model APIs, telemetry, hooks, automatic refresh, or downstream
+product activation.
 
 ## Development
 

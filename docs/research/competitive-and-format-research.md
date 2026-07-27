@@ -2,6 +2,7 @@
 
 Status: implementation input for Software Standards Bootstrap v0.1
 Researched: 2026-07-23
+Updated: 2026-07-27 for progressive rule lenses
 Method: primary sources only (official specifications, product documentation, and project repositories)
 
 ## Executive conclusion
@@ -93,6 +94,25 @@ The differentiation claim should remain narrow:
 - **Selection:** developers edit or delete source files and inspect the Git diff.
 - **Adoption record:** generate a `Proposed` ADR from the files that survive review.
 - **No synchronization claim:** no hooks, refresh daemon, central catalog, model API, staged changes, commits, branches, pushes, PRs, or downstream activation.
+
+## Post-v0.1 progressive-selection refinement
+
+`ssb.dev/rule/v2` adopts the selection metadata that can be reused without
+turning `ssb` into a catalog. A rule can declare a base, language, framework,
+or task lens; a directive; and explicit verification coverage. The generated
+`AGENTS.md` becomes a concise router: base standing orders remain inline while
+contextual rules are linked from language, framework, and task indexes. The
+portable skill selects the base rules plus the contextual subset matching the
+request, stack, and affected paths; path scope also controls whether a base
+rule is active.
+
+This is deliberately smaller than the centralized-rules lifecycle. `ssb`
+continues to derive repository-local proposals from a pinned repository
+snapshot. It does not import, fetch, install, update, override, or synchronize
+an organizational catalog. Valid `ssb validate --format json` output can expose
+the normalized pack as a future interchange boundary, but a later catalog must
+assign its own namespace and release version while preserving the source
+baseline and evidence provenance.
 
 ## Git behavior the implementation can rely on
 
