@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/cli"
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/rulepack"
 )
 
 func TestInspectJSONIsReadOnlyAndMachineReadable(t *testing.T) {
@@ -281,11 +282,26 @@ func TestValidateUsesExitOneForRulePackFailuresAndNeverWrites(t *testing.T) {
 		SchemaVersion int  `json:"schema_version"`
 		Valid         bool `json:"valid"`
 		RuleCount     int  `json:"rule_count"`
+		Pack          *struct {
+			BaselineCommit string `json:"baseline_commit"`
+			Rules          []struct {
+				Schema     string `json:"schema"`
+				ID         string `json:"id"`
+				SourcePath string `json:"source_path"`
+				Body       string `json:"body"`
+			} `json:"rules"`
+		} `json:"pack"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &validResponse); err != nil {
 		t.Fatal(err)
 	}
-	if validResponse.SchemaVersion != 1 || !validResponse.Valid || validResponse.RuleCount != 1 {
+	if validResponse.SchemaVersion != 2 || !validResponse.Valid || validResponse.RuleCount != 1 ||
+		validResponse.Pack == nil || validResponse.Pack.BaselineCommit != baseline ||
+		len(validResponse.Pack.Rules) != 1 ||
+		validResponse.Pack.Rules[0].Schema != rulepack.SchemaVersionV1 ||
+		validResponse.Pack.Rules[0].ID != "verify-before-merge" ||
+		validResponse.Pack.Rules[0].SourcePath == "" ||
+		!strings.Contains(validResponse.Pack.Rules[0].Body, "Run the repository verification command") {
 		t.Fatalf("unexpected valid response: %#v", validResponse)
 	}
 	if after := git(t, repo, "status", "--porcelain=v1", "-z"); after != before {
@@ -305,7 +321,8 @@ func TestValidateUsesExitOneForRulePackFailuresAndNeverWrites(t *testing.T) {
 		t.Fatalf("invalid pack response: exit=%d stderr=%q", code, stderr.String())
 	}
 	var invalidResponse struct {
-		Valid       bool `json:"valid"`
+		Valid       bool            `json:"valid"`
+		Pack        json.RawMessage `json:"pack"`
 		Diagnostics []struct {
 			Path    string `json:"path"`
 			Message string `json:"message"`
@@ -315,8 +332,50 @@ func TestValidateUsesExitOneForRulePackFailuresAndNeverWrites(t *testing.T) {
 		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
 	}
 	if invalidResponse.Valid || len(invalidResponse.Diagnostics) == 0 ||
+		len(invalidResponse.Pack) != 0 ||
 		!strings.Contains(invalidResponse.Diagnostics[0].Message, "excerpt hash does not match") {
 		t.Fatalf("unexpected invalid response: %#v", invalidResponse)
+	}
+}
+
+func TestValidateJSONExportsRuleV2InterchangeFields(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidPackV2(t, repo, baseline)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{"validate", "--repo", repo, "--format", "json"}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("valid v2 pack failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	var response struct {
+		SchemaVersion int  `json:"schema_version"`
+		Valid         bool `json:"valid"`
+		Pack          *struct {
+			Rules []struct {
+				Schema       string          `json:"schema"`
+				Lenses       []rulepack.Lens `json:"lenses"`
+				Directive    string          `json:"directive"`
+				Verification struct {
+					Coverage string `json:"coverage"`
+					Proves   string `json:"proves"`
+				} `json:"verification"`
+			} `json:"rules"`
+		} `json:"pack"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.SchemaVersion != 2 || !response.Valid || response.Pack == nil ||
+		len(response.Pack.Rules) != 1 ||
+		response.Pack.Rules[0].Schema != rulepack.SchemaVersionV2 ||
+		len(response.Pack.Rules[0].Lenses) != 2 ||
+		response.Pack.Rules[0].Lenses[0] != (rulepack.Lens{Kind: "language", Value: "go"}) ||
+		response.Pack.Rules[0].Lenses[1] != (rulepack.Lens{Kind: "task", Value: "review"}) ||
+		response.Pack.Rules[0].Directive != "always" ||
+		response.Pack.Rules[0].Verification.Coverage != "full" ||
+		response.Pack.Rules[0].Verification.Proves != "The retained Go assertions when the command passes." {
+		t.Fatalf("unexpected v2 interchange response: %#v", response)
 	}
 }
 
@@ -497,6 +556,53 @@ verification:
     path: Makefile
     lines: 1-2
     excerpt_sha256: %s
+---
+Run the repository verification command before merging.
+`, baseline, excerptHash("package main\n"), excerptHash("verify:\n\tgo test ./...\n")))
+}
+
+func writeValidPackV2(t *testing.T, repo, baseline string) {
+	t.Helper()
+	writeFile(t, filepath.Join(repo, ".software-standards", "assessment.md"), "# Assessment\n")
+	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "verify-before-merge.md"), fmt.Sprintf(`---
+schema: ssb.dev/rule/v2
+id: verify-before-merge
+title: Verify before merge
+topic: correctness
+lenses:
+  - kind: language
+    value: go
+  - kind: task
+    value: review
+directive: always
+scopes:
+  - "**/*.go"
+classification: deterministic
+importance: high
+score:
+  method: ssb-score-v1
+  total: 70
+  factors:
+    prevalence: 15
+    consistency: 15
+    authority: 15
+    risk: 15
+    applicability: 10
+confidence: high
+baseline_commit: %s
+evidence:
+  - path: main.go
+    lines: 1-1
+    excerpt_sha256: %s
+    authoritative: true
+verification:
+  command: go test ./...
+  source:
+    path: Makefile
+    lines: 1-2
+    excerpt_sha256: %s
+  coverage: full
+  proves: The retained Go assertions when the command passes.
 ---
 Run the repository verification command before merging.
 `, baseline, excerptHash("package main\n"), excerptHash("verify:\n\tgo test ./...\n")))

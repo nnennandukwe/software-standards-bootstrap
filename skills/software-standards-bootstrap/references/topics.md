@@ -22,8 +22,10 @@ Assign exactly one primary topic to every rule and generated Agent Skill. The to
 
 1. Choose the topic that best explains why a developer must follow the rule or workflow.
 2. Prefer the narrowest accurate topic. Use `quality` only when no narrower topic fits.
-3. Do not assign multiple topics in v0.1. If several concerns apply, choose the dominant one and explain the tradeoff in the assessment.
+3. Do not assign multiple topics. If several concerns apply, choose the dominant one and explain the tradeoff in the assessment.
 4. Keep topic independent from:
+   - `lenses`, which select language, framework, task, or base context;
+   - `directive`, which records behavioral modality;
    - `classification`, which records whether proof is guidance or deterministic;
    - `importance`, which comes from the score;
    - `confidence`, which records evidence certainty; and

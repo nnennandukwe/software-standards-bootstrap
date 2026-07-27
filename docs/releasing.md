@@ -9,6 +9,7 @@
 - Codex and Claude Code smoke-test records identify exact consumer versions and fixture commits.
 - GitHub immutable releases are enabled for future releases.
 - `CHANGELOG.md` contains the release notes.
+- The portable skill's `metadata.version` matches the contract being released.
 
 Do not tag a release from an unreviewed working tree.
 

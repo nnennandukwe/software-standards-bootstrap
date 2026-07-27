@@ -270,11 +270,20 @@ func render(pack rulepack.Pack, number int) []byte {
 		fmt.Fprintf(&output, "- Source: `%s`\n", rule.SourcePath)
 		fmt.Fprintf(&output, "- Scope: %s\n", markdownCodeList(rule.Scopes))
 		fmt.Fprintf(&output, "- Primary topic: `%s`\n", rule.Topic)
+		if rule.Schema == rulepack.SchemaVersionV2 {
+			fmt.Fprintf(&output, "- Lenses: %s\n", markdownLensList(rule.Lenses))
+			fmt.Fprintf(&output, "- Directive: `%s`\n", rule.Directive)
+		}
 		fmt.Fprintf(&output, "- Classification: `%s`\n", rule.Classification)
 		fmt.Fprintf(&output, "- Importance: `%s` (%d/100, `%s`)\n", rule.Importance, rule.Score.Total, rule.Score.Method)
 		fmt.Fprintf(&output, "- Confidence: `%s`\n", rule.Confidence)
-		if rule.Verification.Command != "" {
-			fmt.Fprintf(&output, "- Existing verification: `%s` (mapped, not executed)\n", rule.Verification.Command)
+		command := strings.TrimSpace(rule.Verification.Command)
+		if command != "" {
+			fmt.Fprintf(&output, "- Existing verification: `%s` (mapped, not executed)\n", command)
+			if rule.Schema == rulepack.SchemaVersionV2 {
+				fmt.Fprintf(&output, "- Verification coverage: `%s`\n", rule.Verification.Coverage)
+				fmt.Fprintf(&output, "- Proves when the mapped command passes: %s\n", strings.TrimSpace(rule.Verification.Proves))
+			}
 		} else {
 			fmt.Fprintf(&output, "- Proof gap: %s\n", strings.TrimSpace(rule.Verification.ProofGap))
 		}
@@ -313,4 +322,16 @@ func markdownCodeList(values []string) string {
 		quoted = append(quoted, "`"+value+"`")
 	}
 	return strings.Join(quoted, ", ")
+}
+
+func markdownLensList(lenses []rulepack.Lens) string {
+	values := make([]string, 0, len(lenses))
+	for _, lens := range lenses {
+		value := lens.Kind
+		if lens.Value != "" {
+			value += ":" + lens.Value
+		}
+		values = append(values, value)
+	}
+	return markdownCodeList(values)
 }

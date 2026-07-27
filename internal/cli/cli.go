@@ -219,6 +219,7 @@ type validationResponse struct {
 	RuleCount      int                   `json:"rule_count"`
 	SkillCount     int                   `json:"skill_count"`
 	Diagnostics    []rulepack.Diagnostic `json:"diagnostics"`
+	Pack           *rulepack.Pack        `json:"pack,omitempty"`
 }
 
 func runValidate(args []string, stdout, stderr io.Writer) int {
@@ -260,7 +261,7 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 		return 3
 	}
 	response := validationResponse{
-		SchemaVersion:  1,
+		SchemaVersion:  2,
 		Valid:          len(diagnostics) == 0,
 		BaselineCommit: pack.BaselineCommit,
 		RuleCount:      len(pack.Rules),
@@ -269,6 +270,9 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 	}
 	if response.Diagnostics == nil {
 		response.Diagnostics = make([]rulepack.Diagnostic, 0)
+	}
+	if response.Valid {
+		response.Pack = &pack
 	}
 
 	if *format == "json" {

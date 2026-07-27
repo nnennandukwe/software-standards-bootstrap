@@ -69,6 +69,107 @@ func TestCreateDefaultsToConciseProposedADRWithOnlySurvivingArtifacts(t *testing
 	}
 }
 
+func TestCreateRecordsRuleV2ActivationDirectiveAndProofCoverage(t *testing.T) {
+	repo := committedRepository(t)
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack := rulepack.Pack{
+		BaselineCommit: ws.Baseline(),
+		AssessmentPath: ".software-standards/assessment.md",
+		Rules: []rulepack.Rule{{
+			Schema:         rulepack.SchemaVersionV2,
+			ID:             "review-cobra-command",
+			Title:          "Review Cobra commands",
+			Topic:          "maintainability",
+			Lenses:         []rulepack.Lens{{Kind: "language", Value: "go"}, {Kind: "framework", Value: "cobra"}, {Kind: "task", Value: "review"}},
+			Directive:      "prefer",
+			Scopes:         []string{"cmd/**"},
+			Classification: "guidance",
+			Importance:     "medium",
+			Score:          rulepack.Score{Method: rulepack.ScoreMethod, Total: 50},
+			Confidence:     "medium",
+			SourcePath:     ".software-standards/rules/review-cobra-command.md",
+			Body:           "Review the command family together.\n",
+			Verification: rulepack.Verification{
+				Command:  "go test ./...",
+				Coverage: "partial",
+				Proves:   "The retained command assertions when the command passes.",
+			},
+		}},
+	}
+
+	result, err := adr.Create(context.Background(), ws, pack, adr.Options{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(result.Content)
+	for _, required := range []string{
+		"- Lenses: `language:go`, `framework:cobra`, `task:review`",
+		"- Directive: `prefer`",
+		"- Verification coverage: `partial`",
+		"- Proves when the mapped command passes: The retained command assertions when the command passes.",
+		"- Existing verification: `go test ./...` (mapped, not executed)",
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("ADR missing %q:\n%s", required, content)
+		}
+	}
+}
+
+func TestCreatePreservesRuleV1MappedProofSemantics(t *testing.T) {
+	repo := committedRepository(t)
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack := testPack(ws.Baseline(), "verify-before-merge", "Run the retained verification command.", "")
+	pack.Rules[0].Classification = "deterministic"
+	pack.Rules[0].Verification = rulepack.Verification{Command: "go test ./..."}
+
+	result, err := adr.Create(context.Background(), ws, pack, adr.Options{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(result.Content)
+	if !strings.Contains(content, "- Existing verification: `go test ./...` (mapped, not executed)") ||
+		strings.Contains(content, "- Lenses:") ||
+		strings.Contains(content, "- Directive:") ||
+		strings.Contains(content, "- Verification coverage:") ||
+		strings.Contains(content, "- Proves when the mapped command passes:") {
+		t.Fatalf("v1 ADR changed legacy proof semantics:\n%s", content)
+	}
+}
+
+func TestCreateTreatsWhitespaceVerificationCommandAsAbsent(t *testing.T) {
+	repo := committedRepository(t)
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack := testPack(ws.Baseline(), "review-change", "Review the change semantically.", "")
+	pack.Rules[0].Schema = rulepack.SchemaVersionV2
+	pack.Rules[0].Lenses = []rulepack.Lens{{Kind: "task", Value: "review"}}
+	pack.Rules[0].Directive = "prefer"
+	pack.Rules[0].Verification = rulepack.Verification{
+		Command:  " \t ",
+		ProofGap: "No repository check proves semantic review quality.",
+	}
+
+	result, err := adr.Create(context.Background(), ws, pack, adr.Options{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(result.Content)
+	if !strings.Contains(content, "- Proof gap: No repository check proves semantic review quality.") ||
+		strings.Contains(content, "- Existing verification:") ||
+		strings.Contains(content, "- Verification coverage:") ||
+		strings.Contains(content, "- Proves when the mapped command passes:") {
+		t.Fatalf("ADR treated whitespace-only command as mapped proof:\n%s", content)
+	}
+}
+
 func TestCreatePreservesExistingConventionAndRequiresChoiceWhenAmbiguous(t *testing.T) {
 	t.Run("existing convention", func(t *testing.T) {
 		repo := committedRepository(t)
@@ -199,6 +300,7 @@ func TestCreateWriteFailureLeavesNoPartialADR(t *testing.T) {
 
 func testPack(baseline, ruleID, body, skillID string) rulepack.Pack {
 	rule := rulepack.Rule{
+		Schema:         rulepack.SchemaVersionV1,
 		ID:             ruleID,
 		Title:          "Retained rule",
 		Topic:          "correctness",
