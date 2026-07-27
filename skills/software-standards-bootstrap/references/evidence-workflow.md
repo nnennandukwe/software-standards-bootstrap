@@ -23,6 +23,25 @@ Examples:
 - a green build does not prove every integration or production interaction; and
 - prose guidance without a checker remains guidance with a proof gap.
 
+For rule v2, write the bounded property into `verification.proves`. Use
+`coverage: full` only when the existing check proves the complete rule. Use
+`coverage: partial` when the command proves only part of otherwise semantic
+guidance. A command is always mapped, not executed by `ssb`.
+
+## Preferred examples and counterexamples
+
+Use repository examples only when their role is supported by evidence:
+
+- point to a preferred example when an authoritative source or repeated
+  pattern establishes it as the shape to follow;
+- point to a counterexample only when repository authority identifies the
+  pattern as deprecated, unsafe, or intentionally avoided; and
+- cite the exact evidence location in the rule instead of copying a large code
+  block into `AGENTS.md`.
+
+Do not invent examples, infer that old code is bad merely because it differs,
+or turn an incidental occurrence into a gold-standard pattern.
+
 ## Assessment-only candidates
 
 Keep a candidate in `.software-standards/assessment.md` when:
