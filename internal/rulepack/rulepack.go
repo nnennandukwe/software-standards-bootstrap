@@ -299,6 +299,50 @@ func parseRule(relative string, data []byte) (Rule, *Diagnostic) {
 	return rule, nil
 }
 
+// ValidateCandidateRule validates complete proposed rule bytes against the
+// current commit without requiring the candidate to exist in the worktree.
+func ValidateCandidateRule(
+	ctx context.Context,
+	repo *workspace.Repository,
+	relative string,
+	data []byte,
+) (Rule, []Diagnostic) {
+	rule, parseDiagnostic := parseRule(relative, data)
+	if parseDiagnostic != nil {
+		return Rule{}, []Diagnostic{*parseDiagnostic}
+	}
+	return rule, validateRule(ctx, repo, rule, path.Base(relative))
+}
+
+// ValidateRetainedRule validates an adopted rule against the historical
+// baseline explicitly recorded in its frontmatter.
+func ValidateRetainedRule(
+	ctx context.Context,
+	repo *workspace.Repository,
+	relative string,
+	data []byte,
+) (Rule, []Diagnostic) {
+	rule, parseDiagnostic := parseRule(relative, data)
+	if parseDiagnostic != nil {
+		return Rule{}, []Diagnostic{*parseDiagnostic}
+	}
+	historical, err := repo.AtCommit(ctx, rule.BaselineCommit)
+	if err != nil {
+		diagnostics := validateRule(ctx, repo, rule, path.Base(relative))
+		contractDiagnostics := make([]Diagnostic, 0, len(diagnostics))
+		for _, item := range diagnostics {
+			if item.Field == "baseline_commit" ||
+				strings.HasPrefix(item.Field, "evidence") ||
+				strings.HasPrefix(item.Field, "verification") {
+				continue
+			}
+			contractDiagnostics = append(contractDiagnostics, item)
+		}
+		return rule, contractDiagnostics
+	}
+	return rule, validateRule(ctx, historical, rule, path.Base(relative))
+}
+
 func validateRule(ctx context.Context, repo *workspace.Repository, rule Rule, fileName string) []Diagnostic {
 	diagnostics := make([]Diagnostic, 0)
 	add := func(field, message, recovery string) {
@@ -560,13 +604,25 @@ func loadSkill(root, skillID string) (Skill, []Diagnostic, error) {
 	if err != nil || len(data) == 0 {
 		return Skill{}, diagnostics, err
 	}
+	skill, parsed := validateSkillBytes(relative, skillID, data)
+	return skill, append(diagnostics, parsed...), nil
+}
+
+// ValidateCandidateSkill validates complete proposed Agent Skill bytes without
+// requiring the candidate to exist in the worktree.
+func ValidateCandidateSkill(relative, skillID string, data []byte) (Skill, []Diagnostic) {
+	return validateSkillBytes(relative, skillID, data)
+}
+
+func validateSkillBytes(relative, skillID string, data []byte) (Skill, []Diagnostic) {
+	diagnostics := make([]Diagnostic, 0)
 	frontmatter, body, splitErr := splitFrontmatter(data)
 	if splitErr != nil {
-		return Skill{}, append(diagnostics, diagnostic(relative, "frontmatter", splitErr.Error(), "add Agent Skill YAML frontmatter")), nil
+		return Skill{}, append(diagnostics, diagnostic(relative, "frontmatter", splitErr.Error(), "add Agent Skill YAML frontmatter"))
 	}
 	var metadata skillFrontmatter
 	if err := yaml.Load(frontmatter, &metadata, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
-		return Skill{}, append(diagnostics, diagnostic(relative, "frontmatter", err.Error(), "use only Agent Skills core specification fields")), nil
+		return Skill{}, append(diagnostics, diagnostic(relative, "frontmatter", err.Error(), "use only Agent Skills core specification fields"))
 	}
 	if metadata.Name != skillID {
 		diagnostics = append(diagnostics, diagnostic(relative, "name", fmt.Sprintf("skill name %q must match directory %q", metadata.Name, skillID), "align the skill name and directory"))
@@ -592,7 +648,7 @@ func loadSkill(root, skillID string) (Skill, []Diagnostic, error) {
 		Topic:       topic,
 		SourcePath:  relative,
 		Body:        string(body),
-	}, diagnostics, nil
+	}, diagnostics
 }
 
 func findSymlinkComponent(root, relative string) (string, bool, error) {

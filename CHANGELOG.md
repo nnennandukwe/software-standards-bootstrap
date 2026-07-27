@@ -4,6 +4,14 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## [Unreleased]
 
+### Added
+
+- Added the governed `ssb prune` lifecycle-review protocol with pinned local
+  capability profiles, explicit provenance, complete rule/skill inventory,
+  evidence-backed semantic proposals, digest-bound approval, dry-run-first
+  application and recovery, separate rerender/ADR states, and external
+  content-addressed verification receipts.
+
 ### Changed
 
 - Replaced arbitrary indexed-output caps with measured inventory-v2 candidate
@@ -22,6 +30,8 @@ All notable changes are documented here. The project follows semantic versioning
 - Added existing-pack progressive selection to the portable Agent Skill.
 - Advanced the portable skill metadata version to `0.2.0` for the v2
   generation and existing-pack selection contract.
+- Advanced the portable skill metadata version to `0.3.0` for governed
+  lifecycle review.
 
 ## [0.1.0] - 2026-07-23
 

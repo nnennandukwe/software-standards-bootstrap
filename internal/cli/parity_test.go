@@ -16,8 +16,9 @@ func TestREADMEAndAgentSkillMatchTheExecutableCommandContract(t *testing.T) {
 	for _, form := range []string{
 		"ssb inspect  [--repo PATH] [--format text|json] [resource limits]",
 		"ssb validate [--repo PATH] [--format text|json]",
-		"ssb render   [--repo PATH] [--dry-run]",
-		"ssb adr      [--repo PATH] [--adr-dir PATH] [--dry-run]",
+		"ssb render   [--repo PATH] [--review ID] [--dry-run]",
+		"ssb adr      [--repo PATH] [--review ID] [--adr-dir PATH] [--dry-run]",
+		"ssb prune    <inspect|validate|approve|apply|recover|status|verify> [options]",
 	} {
 		if !strings.Contains(readme, form) {
 			t.Errorf("README missing canonical form %q", form)
@@ -31,6 +32,16 @@ func TestREADMEAndAgentSkillMatchTheExecutableCommandContract(t *testing.T) {
 	} {
 		if !strings.Contains(readme, required) {
 			t.Errorf("README missing inspect contract %q", required)
+		}
+	}
+	for _, required := range []string{
+		"ssb prune inspect --repo . --review <id> --capabilities <profile>",
+		"ssb prune validate --repo . --review <id> --format text",
+		"ssb prune status --repo . --review <id>",
+		"Application remains a dry run unless `--write` is explicitly authorized.",
+	} {
+		if !strings.Contains(skill, required) {
+			t.Errorf("Agent Skill missing prune contract %q", required)
 		}
 	}
 

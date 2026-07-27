@@ -41,6 +41,7 @@ func TestScanRejectsAFileBoundaryLargerThanTheBatchByteCeiling(t *testing.T) {
 			MaxFileBytes:      5 << 20,
 		},
 		defaultBatchPolicy,
+		ws.VerifyInspectSnapshot,
 	)
 	if err == nil || !strings.Contains(err.Error(), "max_file_bytes") {
 		t.Fatalf("scan error = %v, want incompatible max_file_bytes", err)
@@ -84,6 +85,7 @@ func BenchmarkBatchPolicies(b *testing.B) {
 							repo,
 							DefaultLimits(),
 							policy,
+							repo.VerifyInspectSnapshot,
 						)
 						if err != nil {
 							b.Fatal(err)

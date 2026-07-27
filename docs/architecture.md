@@ -15,6 +15,23 @@ assessment + rule/skill source files
           └── ssb adr ─────── Proposed record from retained sources
 ```
 
+For an adopted pack, the governed lifecycle protocol adds another explicit
+state machine:
+
+```text
+pinned inventory + capability profile + provenance declarations
+          │
+          ▼
+immutable context → semantic proposal → human approval → application
+                                                        │
+                                                        ├→ rerender
+                                                        ├→ optional ADR
+                                                        └→ receipt verification
+```
+
+No arrow is inferred from the presence of a later artifact. Each transition is
+validated and recorded separately.
+
 Git is the selection and approval surface. The CLI does not stage, commit, branch, push, open a pull request, or activate a rule in another system.
 
 ## Modules
@@ -49,6 +66,45 @@ timestamps or absolute paths, so output remains stable for the same commit and
 limits.
 
 Before success, the module rechecks attached `HEAD`, the exact commit, tracked/staged status, and the absence of a pre-existing pack.
+
+Prune inventory uses the same bounded blob protocol but requires an existing
+committed pack. It rechecks the exact commit and clean tracked state without
+misclassifying that pack as a generation collision.
+
+### Governed lifecycle review
+
+The prune module inventories all canonical rules and every repository Agent
+Skill, including unreferenced skills and each skill's bounded, tracked support
+files. A support file excluded by the inventory safety/resource policy blocks
+the review. It embeds a local capability profile that names an exact host
+version, exact model/provider identity, observation time, and content-addressed
+conformance evidence. There is no implicit “latest” profile and no network
+lookup.
+
+Review schemas are separate from `ssb.dev/rule/v1` and `/v2`; lifecycle
+metadata does not require a rule-v3 migration. Context and proposal files are
+immutable inputs once approved. Candidate replacements are complete files.
+Events form a digest chain binding the context, proposal, baseline, decision,
+and results.
+
+The review bundle retains exact copies of the selected capability profile,
+all referenced conformance evidence, and the optional provenance declaration
+under `inputs/`. Context loading rechecks those durable copies.
+
+Application accepts only approved actions, verifies current source and
+candidate digests, refuses unrelated tracked changes, and writes a recovery
+journal before mutation. Replacement skill targets enumerate the complete
+entrypoint/support bundle, including intended regular-file modes. Existing
+paths are atomically moved to a phase-specific private
+claim before replacement; exclusive creation prevents a concurrent repository
+writer from being overwritten. A repository-wide mutation lock separates
+claims owned by different reviews. Rollback and recovery restore only
+recognized pre/poststate bytes and remove directories created by the failed transition.
+Dry run is the default. Unknown provenance can only produce
+`unable-to-determine`, and that disposition cannot be approved for application.
+
+Verification consumes externally produced, content-addressed receipts. It
+does not run the commands named by those receipts.
 
 ### Rule pack
 
@@ -113,6 +169,9 @@ proved property. It always has `Proposed` status.
 | `.agents/skills/*/SKILL.md` | Canonical proposed procedural workflows | Yes | No |
 | Root `AGENTS.md` managed section | Derived standing orders and contextual rule router | No | No |
 | Proposed ADR | Adoption record from retained sources | New record only | No |
+| Review `context.json` | Complete pinned lifecycle input | No | Inventory and capability evidence |
+| Review `proposal.yaml` | Semantic dispositions and complete candidates | Host-authored before approval | Evidence mapping only |
+| Review `events.jsonl` | Digest-chained human/tool transitions | Append only | Transition integrity |
 | Existing repository checker | Repository-owned deterministic mechanism | Outside ssb | Only when run elsewhere |
 
 ## No network contract
