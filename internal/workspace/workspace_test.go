@@ -88,6 +88,68 @@ func TestOpenForInspectRejectsExistingPackWithoutChangingIt(t *testing.T) {
 	}
 }
 
+func TestOpenForPruneRequiresCommittedPackAndPreservesInspectBoundary(t *testing.T) {
+	repo := committedRepository(t)
+
+	_, err := workspace.OpenForPrune(context.Background(), repo)
+	assertErrorContains(t, err, "requires an existing .software-standards pack")
+
+	rule := filepath.Join(repo, ".software-standards", "rules", "keep-me.md")
+	writeFile(t, rule, "developer work\n")
+	git(t, repo, "add", ".software-standards")
+	git(t, repo, "commit", "-m", "adopt standards")
+
+	got, err := workspace.OpenForPrune(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("adopted pack must be eligible for prune inspection: %v", err)
+	}
+	if got.Baseline() == "" {
+		t.Fatal("expected a commit-backed prune baseline")
+	}
+
+	_, err = workspace.OpenForInspect(context.Background(), repo)
+	assertErrorContains(t, err, "edit or remove the existing pack")
+}
+
+func TestOpenForPruneRejectsUntrackedCanonicalConfiguration(t *testing.T) {
+	for name, relative := range map[string]string{
+		"skill entrypoint": ".agents/skills/untracked/SKILL.md",
+		"skill support":    ".agents/skills/committed/references/new.md",
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := committedRepository(t)
+			writeFile(t, filepath.Join(root, ".software-standards", "rules", "keep.md"), "committed\n")
+			writeFile(t, filepath.Join(root, ".agents", "skills", "committed", "SKILL.md"), "committed\n")
+			git(t, root, "add", ".software-standards", ".agents/skills")
+			git(t, root, "commit", "-m", "adopt standards")
+			writeFile(t, filepath.Join(root, filepath.FromSlash(relative)), "untracked\n")
+			_, err := workspace.OpenForPrune(context.Background(), root)
+			if err == nil || !strings.Contains(err.Error(), "untracked configuration") {
+				t.Fatalf("error = %v, want untracked configuration block", err)
+			}
+		})
+	}
+}
+
+func TestVerifyPruneSnapshotRejectsConcurrentTrackedChangesButAllowsPack(t *testing.T) {
+	repo := committedRepository(t)
+	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "keep-me.md"), "developer work\n")
+	git(t, repo, "add", ".software-standards")
+	git(t, repo, "commit", "-m", "adopt standards")
+
+	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.VerifyPruneSnapshot(context.Background()); err != nil {
+		t.Fatalf("unchanged adopted pack must remain valid: %v", err)
+	}
+
+	writeFile(t, filepath.Join(repo, "README.md"), "changed concurrently\n")
+	err = ws.VerifyPruneSnapshot(context.Background())
+	assertErrorContains(t, err, "tracked or staged files changed during prune inspection")
+}
+
 func TestOpenForInspectResolvesNestedPathToWorktreeRoot(t *testing.T) {
 	repo := committedRepository(t)
 	nested := filepath.Join(repo, "path", "with spaces", "日本語")

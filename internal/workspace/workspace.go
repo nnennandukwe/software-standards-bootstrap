@@ -20,6 +20,7 @@ import (
 var ErrPrecondition = errors.New("repository precondition failed")
 
 var gitVersionPattern = regexp.MustCompile(`^git version ([0-9]+)\.([0-9]+)(?:\.|$)`)
+var objectIDPattern = regexp.MustCompile(`^[0-9a-f]{40,64}$`)
 
 // PreconditionError describes an expected, actionable repository-state error.
 type PreconditionError struct {
@@ -58,6 +59,20 @@ func (r *Repository) Root() string { return r.root }
 // Baseline returns the full object ID of the commit inspected by ssb.
 func (r *Repository) Baseline() string { return r.baseline }
 
+// AtCommit returns a read-only repository view pinned to an explicit commit.
+// It is used to validate historical evidence retained by an adopted pack.
+func (r *Repository) AtCommit(ctx context.Context, commit string) (*Repository, error) {
+	if !objectIDPattern.MatchString(commit) {
+		return nil, fmt.Errorf("commit must be a full lowercase object id")
+	}
+	output, err := r.Git(ctx, "rev-parse", "--verify", "--end-of-options", commit+"^{commit}")
+	if err != nil {
+		return nil, fmt.Errorf("resolve historical commit %s: %w", commit, err)
+	}
+	resolved := trimGitLine(output)
+	return &Repository{root: r.root, baseline: resolved, gitPath: r.gitPath}, nil
+}
+
 // OpenForInspect applies the strict, clean-start inspection preconditions.
 func OpenForInspect(ctx context.Context, path string) (*Repository, error) {
 	repo, err := open(ctx, path, true)
@@ -66,6 +81,23 @@ func OpenForInspect(ctx context.Context, path string) (*Repository, error) {
 	}
 
 	if err := rejectExistingPack(repo.root); err != nil {
+		return nil, err
+	}
+	return repo, nil
+}
+
+// OpenForPrune applies clean-snapshot preconditions while requiring an adopted
+// standards pack. Unlike OpenForInspect, it never treats the existing pack as
+// an overwrite collision.
+func OpenForPrune(ctx context.Context, path string) (*Repository, error) {
+	repo, err := open(ctx, path, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireExistingPack(repo.root); err != nil {
+		return nil, err
+	}
+	if err := repo.RejectUntrackedConfigurations(ctx); err != nil {
 		return nil, err
 	}
 	return repo, nil
@@ -80,6 +112,27 @@ func rejectExistingPack(root string) error {
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("inspect existing pack: %w", err)
+	}
+	return nil
+}
+
+func requireExistingPack(root string) error {
+	packPath := filepath.Join(root, ".software-standards")
+	info, err := os.Lstat(packPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return &PreconditionError{
+			Problem:  "prune inspection requires an existing .software-standards pack",
+			Recovery: "generate, review, and adopt a standards pack before running ssb prune inspect",
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("inspect existing pack: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return &PreconditionError{
+			Problem:  ".software-standards must be a real directory for prune inspection",
+			Recovery: "move the adopted pack inside the repository and rerun ssb prune inspect",
+		}
 	}
 	return nil
 }
@@ -166,17 +219,66 @@ func open(ctx context.Context, path string, requireClean bool) (*Repository, err
 // collision after inventory reads. A concurrent repository change invalidates
 // the result rather than producing mixed-baseline evidence.
 func (r *Repository) VerifyInspectSnapshot(ctx context.Context) error {
+	if err := r.verifyStableSnapshot(ctx, "inspection"); err != nil {
+		return err
+	}
+	return rejectExistingPack(r.root)
+}
+
+// VerifyPruneSnapshot rechecks the immutable prune input while preserving the
+// existing adopted pack.
+func (r *Repository) VerifyPruneSnapshot(ctx context.Context) error {
+	if err := r.verifyStableSnapshot(ctx, "prune inspection"); err != nil {
+		return err
+	}
+	if err := requireExistingPack(r.root); err != nil {
+		return err
+	}
+	return r.RejectUntrackedConfigurations(ctx)
+}
+
+// RejectUntrackedConfigurations prevents a current rule or repository skill
+// from falling outside the commit-backed review and later being overwritten.
+func (r *Repository) RejectUntrackedConfigurations(ctx context.Context) error {
+	output, err := r.Git(
+		ctx,
+		"ls-files", "--others", "--exclude-standard", "-z", "--",
+		".software-standards/rules", ".agents/skills",
+	)
+	if err != nil {
+		return fmt.Errorf("list untracked configurations: %w", err)
+	}
+	for _, record := range bytes.Split(output, []byte{0}) {
+		if len(record) == 0 {
+			continue
+		}
+		candidate := string(record)
+		isRule := strings.HasPrefix(candidate, ".software-standards/rules/") &&
+			path.Dir(candidate) == ".software-standards/rules" &&
+			strings.HasSuffix(candidate, ".md")
+		isSkill := strings.HasPrefix(candidate, ".agents/skills/")
+		if isRule || isSkill {
+			return &PreconditionError{
+				Problem:  "untracked configuration " + strconv.Quote(candidate) + " is outside the commit-backed prune inventory",
+				Recovery: "commit, move, or remove the untracked rule or skill file before continuing",
+			}
+		}
+	}
+	return nil
+}
+
+func (r *Repository) verifyStableSnapshot(ctx context.Context, operation string) error {
 	if _, err := r.Git(ctx, "symbolic-ref", "-q", "HEAD"); err != nil {
 		return &PreconditionError{
-			Problem:  "HEAD became detached during inspection",
+			Problem:  "HEAD became detached during " + operation,
 			Recovery: "switch to a branch and rerun ssb inspect",
 		}
 	}
 	current, err := r.Git(ctx, "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}")
 	if err != nil || trimGitLine(current) != r.baseline {
 		return &PreconditionError{
-			Problem:  "HEAD changed during inspection",
-			Recovery: "rerun ssb inspect against the new stable baseline",
+			Problem:  "HEAD changed during " + operation,
+			Recovery: "rerun the command against the new stable baseline",
 		}
 	}
 	status, err := r.Git(ctx, "status", "--porcelain=v1", "-z", "--untracked-files=no", "--ignore-submodules=untracked")
@@ -185,11 +287,11 @@ func (r *Repository) VerifyInspectSnapshot(ctx context.Context) error {
 	}
 	if len(status) != 0 {
 		return &PreconditionError{
-			Problem:  "tracked or staged files changed during inspection",
-			Recovery: "commit, stash, or restore tracked changes and rerun ssb inspect",
+			Problem:  "tracked or staged files changed during " + operation,
+			Recovery: "commit, stash, or restore tracked changes and rerun the command",
 		}
 	}
-	return rejectExistingPack(r.root)
+	return nil
 }
 
 // Git runs Git with the repository fixed by -C and returns stdout. Arguments

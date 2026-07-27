@@ -222,8 +222,9 @@ func TestHelpDocumentsOnlyTheCanonicalCommandForms(t *testing.T) {
 	for _, form := range []string{
 		"ssb inspect  [--repo PATH] [--format text|json]",
 		"ssb validate [--repo PATH] [--format text|json]",
-		"ssb render   [--repo PATH] [--dry-run]",
-		"ssb adr      [--repo PATH] [--adr-dir PATH] [--dry-run]",
+		"ssb render   [--repo PATH] [--review ID] [--dry-run]",
+		"ssb adr      [--repo PATH] [--review ID] [--adr-dir PATH] [--dry-run]",
+		"ssb prune    <inspect|validate|approve|apply|recover|status|verify> [options]",
 	} {
 		if !strings.Contains(stdout.String(), form) {
 			t.Fatalf("help missing %q:\n%s", form, stdout.String())
@@ -264,6 +265,168 @@ func TestEachSubcommandProvidesSuccessfulFocusedHelp(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestEachPruneSubcommandProvidesFocusedHelp(t *testing.T) {
+	for _, command := range []string{"inspect", "validate", "approve", "apply", "recover", "status", "verify"} {
+		t.Run(command, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := cli.Run([]string{"prune", command, "--help"}, &stdout, &stderr)
+			if code != 0 || stderr.Len() != 0 {
+				t.Fatalf("%s help failed: exit=%d stderr=%q", command, code, stderr.String())
+			}
+			if !strings.Contains(stdout.String(), "Usage: ssb prune "+command) ||
+				!strings.Contains(stdout.String(), "--review ID") {
+				t.Fatalf("%s help is not actionable:\n%s", command, stdout.String())
+			}
+		})
+	}
+}
+
+func TestReviewAwareRenderAndADRValidateTransitionBeforeWriting(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidPack(t, repo, baseline)
+	for _, test := range []struct {
+		command []string
+		target  string
+	}{
+		{
+			command: []string{"render", "--repo", repo, "--review", "missing-review"},
+			target:  filepath.Join(repo, "AGENTS.md"),
+		},
+		{
+			command: []string{"adr", "--repo", repo, "--review", "missing-review"},
+			target:  filepath.Join(repo, "docs", "adr", "0001-agentic-rules.md"),
+		},
+	} {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		code := cli.Run(test.command, &stdout, &stderr)
+		if code != 2 {
+			t.Fatalf("%v exit = %d, stderr=%q", test.command, code, stderr.String())
+		}
+		if _, err := os.Stat(test.target); !os.IsNotExist(err) {
+			t.Fatalf("%v wrote %s before validating review: %v", test.command, test.target, err)
+		}
+	}
+}
+
+func TestPruneCLIWalksExplicitStatesWithoutImplicitVerification(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidPack(t, repo, baseline)
+	git(t, repo, "add", ".software-standards")
+	git(t, repo, "commit", "-m", "adopt standards")
+
+	profileDir := t.TempDir()
+	evidence := filepath.Join(profileDir, "host-run.json")
+	writeFile(t, evidence, "{\"supported\":true}\n")
+	profile := filepath.Join(profileDir, "capabilities.yaml")
+	writeFile(t, profile, `schema: ssb.dev/capability-profile/v1
+id: cli-fixture
+host: {name: codex, version: 1.2.3}
+model: {provider: openai, id: gpt-example}
+observed_at: 2026-07-27T18:00:00Z
+evidence:
+  - id: host-run
+    kind: conformance
+    path: host-run.json
+    sha256: `+fileSHA256(t, evidence)+`
+capabilities:
+  - id: repository-instructions
+    status: supported
+    evidence_ids: [host-run]
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{
+		"prune", "inspect", "--repo", repo, "--review", "cli-review",
+		"--capabilities", profile, "--format", "json",
+	}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("inspect exit=%d stderr=%q", code, stderr.String())
+	}
+	contextPath := filepath.Join(repo, ".software-standards", "reviews", "cli-review", "context.json")
+	contextData, err := os.ReadFile(contextPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reviewContext struct {
+		ContextDigest string `json:"context_digest"`
+		Artifacts     []struct {
+			Kind, ID, Path, SHA256 string
+		} `json:"artifacts"`
+	}
+	if err := json.Unmarshal(contextData, &reviewContext); err != nil {
+		t.Fatal(err)
+	}
+	if len(reviewContext.Artifacts) != 1 {
+		t.Fatalf("artifacts = %#v", reviewContext.Artifacts)
+	}
+	artifact := reviewContext.Artifacts[0]
+	proposalPath := filepath.Join(filepath.Dir(contextPath), "proposal.yaml")
+	writeFile(t, proposalPath, "schema: [malformed\n")
+	stdout.Reset()
+	stderr.Reset()
+	if code := cli.Run([]string{
+		"prune", "validate", "--repo", repo, "--review", "cli-review",
+	}, &stdout, &stderr); code != 1 {
+		t.Fatalf("malformed proposal exit=%d, want 1; stderr=%q", code, stderr.String())
+	}
+	proposal := fmt.Sprintf(`schema: ssb.dev/prune-proposal/v1
+review_id: cli-review
+context_digest: %s
+actions:
+  - id: review-keep-rule
+    disposition: unable-to-determine
+    sources:
+      - kind: %s
+        id: %s
+        path: %s
+        sha256: %s
+    rationale: Provenance was not declared.
+    confidence: low
+    unresolved_questions:
+      - Who authored and adopted this rule?
+`, reviewContext.ContextDigest, artifact.Kind, artifact.ID, artifact.Path, artifact.SHA256)
+	writeFile(t, proposalPath, proposal)
+
+	for _, command := range [][]string{
+		{"prune", "validate", "--repo", repo, "--review", "cli-review"},
+		{"prune", "approve", "--repo", repo, "--review", "cli-review", "--reject", "review-keep-rule"},
+		{"prune", "apply", "--repo", repo, "--review", "cli-review"},
+		{"prune", "apply", "--repo", repo, "--review", "cli-review", "--write"},
+	} {
+		stdout.Reset()
+		stderr.Reset()
+		if code := cli.Run(command, &stdout, &stderr); code != 0 {
+			t.Fatalf("%v exit=%d stdout=%q stderr=%q", command, code, stdout.String(), stderr.String())
+		}
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = cli.Run([]string{
+		"prune", "status", "--repo", repo, "--review", "cli-review", "--format", "json",
+	}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), `"applied": true`) ||
+		!strings.Contains(stdout.String(), `"verified": false`) {
+		t.Fatalf("status exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := cli.Run([]string{
+		"prune", "verify", "--repo", repo, "--review", "cli-review", "--receipts", t.TempDir(),
+	}, &stdout, &stderr); code != 1 {
+		t.Fatalf("evidence-free verify exit=%d, want 1; stderr=%q", code, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := cli.Run([]string{
+		"prune", "recover", "--repo", repo, "--review", "cli-review",
+	}, &stdout, &stderr); code != 2 {
+		t.Fatalf("journal-free recover exit=%d, want 2; stderr=%q", code, stderr.String())
 	}
 }
 
@@ -610,6 +773,16 @@ Run the repository verification command before merging.
 
 func excerptHash(excerpt string) string {
 	sum := sha256.Sum256([]byte(excerpt))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func fileSHA256(t *testing.T, filePath string) string {
+	t.Helper()
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 

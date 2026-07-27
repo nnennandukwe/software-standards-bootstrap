@@ -9,8 +9,14 @@ The host agent performs semantic analysis. The `ssb` binary supplies determinist
 ```text
 .software-standards/
 ├── assessment.md
-└── rules/
-    └── <rule-id>.md
+├── rules/
+│   └── <rule-id>.md
+└── reviews/<review-id>/
+    ├── context.json
+    ├── proposal.yaml
+    ├── candidates/
+    ├── inputs/
+    └── events.jsonl
 .agents/skills/<skill-name>/SKILL.md
 AGENTS.md
 docs/adr/NNNN-agentic-rules.md
@@ -54,8 +60,9 @@ go install github.com/nnennandukwe/software-standards-bootstrap/cmd/ssb@v0.1.0
 ```text
 ssb inspect  [--repo PATH] [--format text|json] [resource limits]
 ssb validate [--repo PATH] [--format text|json]
-ssb render   [--repo PATH] [--dry-run]
-ssb adr      [--repo PATH] [--adr-dir PATH] [--dry-run]
+ssb render   [--repo PATH] [--review ID] [--dry-run]
+ssb adr      [--repo PATH] [--review ID] [--adr-dir PATH] [--dry-run]
+ssb prune    <inspect|validate|approve|apply|recover|status|verify> [options]
 ```
 
 `inspect` accepts `--max-candidate-files N` and
@@ -67,7 +74,7 @@ the inventory complete and must not be used to generate a proposal.
 Exit codes:
 
 - `0`: success
-- `1`: rule-pack validation failure
+- `1`: rule-pack or prune-proposal validation failure
 - `2`: usage or repository precondition failure
 - `3`: unexpected internal failure
 - `4`: inventory coverage incomplete
@@ -77,6 +84,20 @@ normalized pack as a local interchange envelope; invalid output omits the pack
 and reports diagnostics. `render` may change only the bounded Software
 Standards Bootstrap section in root `AGENTS.md`. `adr` exclusively creates one
 new record and refuses overwrite or path escape.
+
+`prune` is the current name for a governed lifecycle review of an adopted
+pack. It does not mean automatic cleanup. The workflow compares every rule and
+repository Agent Skill with a developer-selected, point-in-time host/model
+capability profile and proposes `keep`, `update`, `consolidate`, `remove`, or
+`unable-to-determine`. Every actionable disposition requires repository and
+capability evidence. Unknown provenance remains unable to determine.
+
+Prune inspection fails closed on incomplete inventory and writes only an
+immutable review context. The Agent Skill writes the semantic proposal. The
+CLI validates it, records one digest-bound human approval, shows application
+as a dry run by default, and applies only after `--write`. Application,
+rerendering, optional ADR creation, and receipt-backed verification are
+separate events. See [the prune protocol](docs/prune.md).
 
 ## Agent Skill workflow
 
@@ -97,7 +118,8 @@ When no pack exists, the skill:
 6. waits for the developer to edit or delete proposal sources before an ADR is requested.
 
 When a pack already exists, the skill does not reinspect, validate, render, or
-rewrite it. It reconciles the managed router against every canonical rule's
+rewrite it unless the developer explicitly requests the governed prune-review
+mode. In ordinary consumption it reconciles the managed router against every canonical rule's
 selection frontmatter, selects base rules whose scopes match the affected
 paths plus contextual rules matching scope and each represented language,
 framework, and task dimension, reports the active rule IDs, and treats
@@ -161,14 +183,19 @@ See [the rule format](docs/rule-format.md), [topic taxonomy](skills/software-sta
 - Incomplete coverage is disclosed in text and JSON output and returns exit
   `4` unless the caller explicitly requests diagnostic partial output.
 - Existing packs, malformed markers, projection drift, target collisions, symlink escapes, submodule targets, and ADR ambiguity fail closed.
+- Prune review contexts pin explicit capability evidence, retain unknown
+  provenance as unknown, and bind approval and later events to exact digests.
+- Prune application is dry-run by default and uses a recovery journal; it
+  never stages or commits the resulting files.
 - Writes are bounded, staged locally, and left uncommitted.
 
 ## Non-goals
 
-`ssb` does not provide a generic rules catalog, catalog import, configuration
-synchronization, tool-specific rule projections, checker generation, hosted
-services, direct model APIs, telemetry, hooks, automatic refresh, or downstream
-product activation.
+`ssb` does not provide a generic rules catalog, automatic synchronization with
+an online model registry, vendor-release-note trust, tool-specific rule
+projections, checker generation, hosted services, direct model APIs, telemetry,
+hooks, automatic refresh, unreviewed rewriting/deletion, or downstream product
+activation. The `prune` name and command architecture remain revisable.
 
 ## Development
 
