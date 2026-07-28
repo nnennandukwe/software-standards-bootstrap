@@ -1,10 +1,15 @@
 # Software Standards Bootstrap
 
-Software Standards Bootstrap (`ssb`) is an Apache-2.0 command-line tool and portable Agent Skill for turning evidence from a real Git repository into a reviewable standards proposal.
+Software Standards Bootstrap (ssb) is a CLI tool and agent skill for developing repo rules, agent skills, and AGENTS.md inside greenfield repos to make your repos more agent friendly.
+Agentifying your repos in this manner helps developers get even better use out of AI tools that can extract well documented patterns in your code quality and conventions per repo, formatted into markdown files that AI agents can easily ingest and interpret.
 
-The host agent performs semantic analysis. The `ssb` binary supplies deterministic safety, inventory, validation, rendering, and ADR contracts. It never calls a model, sends telemetry, makes network requests, executes repository code, or performs Git mutations.
+When you run this tool from inside your coding agent, it will get instructions to perform semantic analysis of your repo. `ssb` is solely meant to provide deterministic safety, inventory, validation, rendering, and ADR contracts for the results of the repo analysis. Your coding agent will analyze your repo and extract conventions your code follows based on programming language, frameworks, and your code quality practices. From there, it'll propose candidates for official coding rules, AGENTS.md content, and agent skills to be added to your repo.
 
-## What `ssb` produces
+As a developer, you then have the ability to approve, edit, or reject the creation of the agent-native artifacts it generates. And finally, you'll have the option to create an official ADR (architecture decision record) for the addition of these artifacts into your repo.
+
+(`ssb` never calls a model, sends telemetry, makes network requests, executes repository code, or performs Git mutations. We leave that to your coding agent.)
+
+## Scaffolding that `ssb` generates
 
 ```text
 .software-standards/
@@ -16,9 +21,9 @@ AGENTS.md
 docs/adr/NNNN-agentic-rules.md
 ```
 
-The rule files and skills are editable proposal sources. Root `AGENTS.md` is a
-lossy managed router: it inlines base standing orders and links contextual
-rules by language, framework, and task. The ADR is generated only after a
+The rule files and skills are editable proposals for updates to your codebase.
+`AGENTS.md` is a managed router file that links generated coding
+rules by language, framework, and coding task. An ADR is generated only after a
 developer has reviewed, edited, or deleted the proposed files, and it remains
 `Proposed` until the developer-created pull request is merged.
 
@@ -26,7 +31,7 @@ developer has reviewed, edited, or deleted the proposed files, and it remains
 
 - Git 2.39 or newer
 - A commit-backed, attached `HEAD`
-- Go 1.26.5 only when building from source
+- Go 1.26.5 **only when building from source**
 
 `ssb inspect` requires no tracked or staged changes. Untracked-only files are allowed. The other commands operate on the uncommitted proposal files created by the Agent Skill.
 
