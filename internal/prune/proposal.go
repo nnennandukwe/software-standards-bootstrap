@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -78,7 +79,7 @@ func ValidateProposal(context Context, proposal Proposal, reviewRoot string) []D
 			add(actionID, "confidence", "confidence must be low, medium, or high", "record an honest confidence band")
 		}
 
-		validateActionShape(action, reviewRoot, context.Inventory.Limits.MaxFileBytes, candidateBudgetOK, add)
+		validateActionShape(action, reviewRoot, context.Inventory.Limits.MaxFileBytes, candidateBudgetOK, runtime.GOOS, add)
 		if action.Target != nil {
 			for _, targetPath := range candidateTargetPaths(*action.Target) {
 				if prior, duplicate := targets[targetPath]; duplicate {
@@ -256,6 +257,7 @@ func validateActionShape(
 	reviewRoot string,
 	maxFileBytes int64,
 	candidateBudgetOK bool,
+	goos string,
 	add func(string, string, string, string),
 ) {
 	sourceCount := len(action.Sources)
@@ -293,8 +295,8 @@ func validateActionShape(
 	if action.Target.Kind != ArtifactRule && action.Target.Kind != ArtifactSkill {
 		add(action.ID, "target.kind", "target kind must be rule or skill", "use the canonical artifact kind")
 	}
-	if action.Target.Mode != "100644" && action.Target.Mode != "100755" {
-		add(action.ID, "target.mode", "candidate mode must be 100644 or 100755", "record the intended tracked regular-file mode")
+	if err := validateCandidateMode(action.Target.Mode, goos); err != nil {
+		add(action.ID, "target.mode", err.Error(), candidateModeRecovery(action.Target.Mode, goos))
 	}
 	if action.Target.Kind == ArtifactRule && len(action.Target.SupportingFiles) != 0 {
 		add(action.ID, "target.supporting_files", "rule candidates cannot contain skill supporting files", "remove supporting_files from the rule target")
@@ -324,8 +326,8 @@ func validateActionShape(
 			add(action.ID, field+".target_path", "duplicate supporting target "+supporting.TargetPath, "write each replacement file exactly once")
 		}
 		seenSupporting[supporting.TargetPath] = struct{}{}
-		if supporting.Mode != "100644" && supporting.Mode != "100755" {
-			add(action.ID, field+".mode", "supporting candidate mode must be 100644 or 100755", "record the intended tracked regular-file mode")
+		if err := validateCandidateMode(supporting.Mode, goos); err != nil {
+			add(action.ID, field+".mode", err.Error(), candidateModeRecovery(supporting.Mode, goos))
 		}
 		if !safeRelativePath(supporting.SourcePath) ||
 			!strings.HasPrefix(supporting.SourcePath, "candidates/"+action.ID+"/") {
@@ -336,6 +338,23 @@ func validateActionShape(
 			validateCandidateFile(action.ID, field, supporting.SourcePath, supporting.SHA256, reviewRoot, maxFileBytes, add)
 		}
 	}
+}
+
+func validateCandidateMode(mode, goos string) error {
+	if mode != "100644" && mode != "100755" {
+		return fmt.Errorf("candidate mode must be 100644 or 100755")
+	}
+	if goos == "windows" && mode == "100755" {
+		return fmt.Errorf("cannot materialize Git executable mode 100755 on Windows without changing the index")
+	}
+	return nil
+}
+
+func candidateModeRecovery(mode, goos string) string {
+	if goos == "windows" && mode == "100755" {
+		return "apply this review from a POSIX host, or use 100644 only when executable intent is not required; ssb will not stage an index-only chmod"
+	}
+	return "record the intended tracked regular-file mode"
 }
 
 func validateCandidateFile(

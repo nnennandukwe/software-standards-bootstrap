@@ -285,7 +285,7 @@ Use the replacement workflow.
 		TargetPath: ".agents/skills/orphan-skill/SKILL.md",
 		SourcePath: entrySource,
 		SHA256:     fileDigest(t, entryPath),
-		Mode:       "100755",
+		Mode:       "100644",
 		SupportingFiles: []prune.CandidateFileRef{{
 			TargetPath: ".agents/skills/orphan-skill/references/new.md",
 			SourcePath: supportSource,
@@ -322,13 +322,6 @@ Use the replacement workflow.
 	got, err := os.ReadFile(filepath.Join(root, ".agents", "skills", "orphan-skill", "references", "new.md"))
 	if err != nil || string(got) != "new support\n" {
 		t.Fatalf("replacement support = %q, %v", got, err)
-	}
-	entryInfo, err := os.Stat(filepath.Join(root, ".agents", "skills", "orphan-skill", "SKILL.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if entryInfo.Mode().Perm() != 0o755 {
-		t.Fatalf("replacement entrypoint mode = %v; want 0755", entryInfo.Mode().Perm())
 	}
 }
 

@@ -109,6 +109,11 @@ supporting_files:
 Omitted old support is removed. Do not propose an actionable disposition when
 any tracked skill file is absent from the bounded inventory.
 
+Modes are exact Git tree modes, not advisory metadata. On Windows, do not
+propose `100755`: the CLI fails validation rather than silently writing a
+non-executable file or changing the Git index. Use a POSIX host when the
+replacement bundle requires executable entrypoints or supporting scripts.
+
 Every actionable disposition requires non-empty rationale, an honest
 `low`/`medium`/`high` confidence band, at least one repository evidence
 reference, and at least one non-unknown capability reference. Use

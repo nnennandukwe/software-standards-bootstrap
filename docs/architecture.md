@@ -100,6 +100,12 @@ claim before replacement; exclusive creation prevents a concurrent repository
 writer from being overwritten. A repository-wide mutation lock separates
 claims owned by different reviews. Rollback and recovery restore only
 recognized pre/poststate bytes and remove directories created by the failed transition.
+
+Git executable mode is a platform capability, not a best-effort hint. Windows
+proposal validation rejects `100755` candidates because the filesystem cannot
+materialize that Git tree mode without changing the index, and the CLI does not
+stage. It does not report an application state after silently writing a
+non-executable file.
 Dry run is the default. Unknown provenance can only produce
 `unable-to-determine`, and that disposition cannot be approved for application.
 
