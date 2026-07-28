@@ -229,3 +229,93 @@ func TestRepositoryMutationLockSerializesDistinctReviews(t *testing.T) {
 		t.Fatalf("error = %v, want cross-review serialization", err)
 	}
 }
+
+func TestCandidateModePortabilityContract(t *testing.T) {
+	tests := []struct {
+		name    string
+		mode    string
+		goos    string
+		wantErr string
+	}{
+		{name: "portable regular file on Windows", mode: "100644", goos: "windows"},
+		{name: "executable file on POSIX", mode: "100755", goos: "linux"},
+		{
+			name:    "executable file on Windows",
+			mode:    "100755",
+			goos:    "windows",
+			wantErr: "cannot materialize Git executable mode 100755 on Windows without changing the index",
+		},
+		{name: "unsupported mode", mode: "100600", goos: "linux", wantErr: "must be 100644 or 100755"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateCandidateMode(test.mode, test.goos)
+			if test.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validateCandidateMode(%q, %q) = %v", test.mode, test.goos, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("validateCandidateMode(%q, %q) = %v, want %q", test.mode, test.goos, err, test.wantErr)
+			}
+			if test.goos == "windows" && test.mode == "100755" {
+				recovery := candidateModeRecovery(test.mode, test.goos)
+				if !strings.Contains(recovery, "POSIX host") ||
+					!strings.Contains(recovery, "ssb will not stage") {
+					t.Fatalf("recovery = %q, want POSIX and no-staging guidance", recovery)
+				}
+			}
+		})
+	}
+}
+
+func TestWindowsValidationBlocksExecutableEntrypointAndSupportBeforeMutation(t *testing.T) {
+	action := Action{
+		ID:          "update-skill",
+		Disposition: DispositionUpdate,
+		Sources: []ArtifactRef{{
+			Kind: ArtifactSkill,
+			ID:   "example-skill",
+			Path: ".agents/skills/example-skill/SKILL.md",
+		}},
+		Target: &CandidateRef{
+			Kind:       ArtifactSkill,
+			ID:         "example-skill",
+			TargetPath: ".agents/skills/example-skill/SKILL.md",
+			SourcePath: "candidates/update-skill/SKILL.md",
+			Mode:       "100755",
+			SupportingFiles: []CandidateFileRef{{
+				TargetPath: ".agents/skills/example-skill/scripts/check.sh",
+				SourcePath: "candidates/update-skill/scripts/check.sh",
+				Mode:       "100755",
+			}},
+		},
+	}
+	var diagnostics []Diagnostic
+	validateActionShape(
+		action,
+		t.TempDir(),
+		1<<20,
+		false,
+		"windows",
+		func(actionID, field, message, recovery string) {
+			diagnostics = append(diagnostics, Diagnostic{
+				Path: actionID, Field: field, Message: message, Recovery: recovery,
+			})
+		},
+	)
+	modeDiagnostics := 0
+	for _, diagnostic := range diagnostics {
+		if strings.HasSuffix(diagnostic.Field, "mode") {
+			modeDiagnostics++
+			if !strings.Contains(diagnostic.Message, "cannot materialize Git executable mode") ||
+				!strings.Contains(diagnostic.Recovery, "POSIX host") {
+				t.Fatalf("non-actionable mode diagnostic: %#v", diagnostic)
+			}
+		}
+	}
+	if modeDiagnostics != 2 {
+		t.Fatalf("diagnostics = %#v, want root and supporting mode blocks", diagnostics)
+	}
+}

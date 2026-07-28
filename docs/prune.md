@@ -80,6 +80,12 @@ old supporting files are removed. Each candidate file is individually
 path-bound, mode-bound, size-bounded, and content-addressed. The complete
 candidate set also stays within the review's file/byte budget.
 
+Candidate modes use Git tree values `100644` and `100755`. POSIX hosts can
+materialize either mode. Windows can materialize `100644`, but rejects
+`100755` during proposal validation because the executable bit would require
+an index-only Git change. `ssb` never stages that change or silently downgrades
+the approved mode. Apply executable candidates from a POSIX host instead.
+
 All tracked skill files must be eligible for the bounded text inventory.
 Binary, generated, secret-like, vendored, non-regular, or oversized support
 fails inspection closed instead of being read outside the inventory boundary.
