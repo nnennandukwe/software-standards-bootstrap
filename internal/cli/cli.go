@@ -74,7 +74,7 @@ Commands:
   approve   record one explicit decision for every action
   apply     show a dry run; pass --write to apply approved changes
   recover   restore an interrupted application
-  status    report proposal, approval, application, render, ADR, and verification separately
+  status    report proposal, approval, no-change, application, render, ADR, and verification separately
   verify    validate external content-addressed check receipts
 `
 	pruneInspectHelp = `Usage: ssb prune inspect --review ID --capabilities PATH [--provenance PATH] [--repo PATH] [--format text|json] [resource limits]
@@ -108,7 +108,7 @@ Commands:
 
   --review ID              interrupted review bundle identifier
   --repo PATH              target Git repository (default ".")
-  --clear-stale-lock       clear a crash-left lock only when a recovery journal exists
+  --clear-stale-lock       clear review-owned crash-left locks after confirming no process is active
 `
 	pruneStatusHelp = `Usage: ssb prune status --review ID [--repo PATH] [--format text|json]
 
@@ -154,7 +154,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-func runADR(args []string, stdout, stderr io.Writer) int {
+func runADR(args []string, stdout, stderr io.Writer) (exitCode int) {
 	flags := flag.NewFlagSet("adr", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	repoPath := flags.String("repo", ".", "repository path")
@@ -184,7 +184,7 @@ func runADR(args []string, stdout, stderr io.Writer) int {
 		}
 		return 3
 	}
-	pack, diagnostics, err := rulepack.Validate(ctx, repo)
+	pack, diagnostics, err := validateRulePackForCommand(ctx, repo, *reviewID)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: validation failed unexpectedly: %s\n", err)
 		return 3
@@ -200,7 +200,12 @@ func runADR(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return writePruneError(stderr, err)
 		}
-		defer transition.Cancel()
+		defer func() {
+			if cancelErr := transition.Cancel(); cancelErr != nil {
+				fmt.Fprintf(stderr, "error: release ADR review transition: %s\n", cancelErr)
+				exitCode = 3
+			}
+		}()
 		if !*dryRun {
 			preview, previewErr := adr.Create(ctx, repo, pack, adr.Options{Directory: *adrDir, DryRun: true})
 			if previewErr != nil {
@@ -235,16 +240,22 @@ func runADR(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	if *reviewID != "" {
-		if _, err := transition.Complete(result); err != nil {
-			rollbackErr := os.Remove(filepath.Join(repo.Root(), filepath.FromSlash(result.Path)))
-			if rollbackErr == nil {
-				rollbackErr = removeEmptyDirectories(adrRollbackDirs)
-			}
-			if rollbackErr != nil {
-				fmt.Fprintf(stderr, "error: ADR event was not recorded: %s; rollback failed: %v\n", err, rollbackErr)
-			} else {
-				fmt.Fprintf(stderr, "error: ADR event was not recorded: %s; created ADR was removed\n", err)
-			}
+		event, err := transition.Complete(result)
+		transitionErr := reconcileTransitionCompletion(
+			event,
+			err,
+			"ADR",
+			"created ADR was removed",
+			func() error {
+				rollbackErr := os.Remove(filepath.Join(repo.Root(), filepath.FromSlash(result.Path)))
+				if rollbackErr == nil {
+					rollbackErr = removeEmptyDirectories(adrRollbackDirs)
+				}
+				return rollbackErr
+			},
+		)
+		if transitionErr != nil {
+			fmt.Fprintf(stderr, "error: %s\n", transitionErr)
 			return 3
 		}
 	}
@@ -253,7 +264,18 @@ func runADR(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func runRender(args []string, stdout, stderr io.Writer) int {
+func validateRulePackForCommand(
+	ctx context.Context,
+	repo *workspace.Repository,
+	reviewID string,
+) (rulepack.Pack, []rulepack.Diagnostic, error) {
+	if reviewID != "" {
+		return rulepack.ValidateRetainedPack(ctx, repo)
+	}
+	return rulepack.Validate(ctx, repo)
+}
+
+func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 	flags := flag.NewFlagSet("render", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	repoPath := flags.String("repo", ".", "repository path")
@@ -282,7 +304,7 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 		}
 		return 3
 	}
-	pack, diagnostics, err := rulepack.Validate(ctx, repo)
+	pack, diagnostics, err := validateRulePackForCommand(ctx, repo, *reviewID)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: validation failed unexpectedly: %s\n", err)
 		return 3
@@ -298,7 +320,12 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return writePruneError(stderr, err)
 		}
-		defer transition.Cancel()
+		defer func() {
+			if cancelErr := transition.Cancel(); cancelErr != nil {
+				fmt.Fprintf(stderr, "error: release render review transition: %s\n", cancelErr)
+				exitCode = 3
+			}
+		}()
 		before, err = captureFile(filepath.Join(repo.Root(), "AGENTS.md"))
 		if err != nil {
 			fmt.Fprintf(stderr, "error: capture AGENTS.md before review-aware render: %s\n", err)
@@ -322,24 +349,57 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	}
+	if *reviewID != "" {
+		event, err := transition.Complete(result)
+		transitionErr := reconcileTransitionCompletion(
+			event,
+			err,
+			"render",
+			"AGENTS.md was restored",
+			func() error {
+				return restoreFile(filepath.Join(repo.Root(), "AGENTS.md"), before)
+			},
+		)
+		if transitionErr != nil {
+			fmt.Fprintf(stderr, "error: %s\n", transitionErr)
+			return 3
+		}
+	}
 	if result.Changed {
 		fmt.Fprintf(stdout, "Rendered %s from %d validated rule(s).\n", result.Path, len(pack.Rules))
 	} else {
 		fmt.Fprintf(stdout, "%s is already byte-stable for the current rule sources.\n", result.Path)
 	}
-	if *reviewID != "" {
-		if _, err := transition.Complete(result); err != nil {
-			rollbackErr := restoreFile(filepath.Join(repo.Root(), "AGENTS.md"), before)
-			if rollbackErr != nil {
-				fmt.Fprintf(stderr, "error: render event was not recorded: %s; AGENTS.md rollback failed: %v\n", err, rollbackErr)
-			} else {
-				fmt.Fprintf(stderr, "error: render event was not recorded: %s; AGENTS.md was restored\n", err)
-			}
-			return 3
-		}
-	}
 	fmt.Fprintln(stdout, "Next: review the uncommitted diff; edit or delete rule source files and rerun as needed.")
 	return 0
+}
+
+func reconcileTransitionCompletion(
+	event prune.Event,
+	completionErr error,
+	label, rollbackSuccess string,
+	rollback func() error,
+) error {
+	if completionErr == nil {
+		return nil
+	}
+	if event.EventDigest != "" {
+		return completionErr
+	}
+	if rollbackErr := rollback(); rollbackErr != nil {
+		return fmt.Errorf(
+			"%s event was not recorded: %w; rollback failed: %v",
+			label,
+			completionErr,
+			rollbackErr,
+		)
+	}
+	return fmt.Errorf(
+		"%s event was not recorded: %w; %s",
+		label,
+		completionErr,
+		rollbackSuccess,
+	)
 }
 
 type validationResponse struct {
@@ -693,7 +753,7 @@ func runPruneValidate(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return writePruneError(stderr, err)
 	}
-	review, diagnostics, err := prune.LoadReview(repo.Root(), *reviewID)
+	review, diagnostics, err := prune.ValidateReview(context.Background(), repo, *reviewID)
 	if err != nil {
 		return writePruneError(stderr, err)
 	}
@@ -769,12 +829,18 @@ func runPruneApply(args []string, stdout, stderr io.Writer) int {
 	}
 	if result.DryRun {
 		fmt.Fprintf(stdout, "Dry run: %d approved file change(s).\n", len(result.Changes))
+		fmt.Fprintf(stdout, "Plan: %s\n", result.PlanDigest)
 		for _, change := range result.Changes {
 			fmt.Fprintf(stdout, "- %s %s (%s)\n", change.Kind, strconv.Quote(change.Path), change.ActionID)
 		}
 		fmt.Fprintln(stdout, "Next: review this plan, then rerun with --write.")
+	} else if result.NoChangesApproved {
+		fmt.Fprintln(stdout, "No changes were approved; the review is complete without application or verification.")
+		fmt.Fprintf(stdout, "Plan: %s\n", result.PlanDigest)
+		fmt.Fprintf(stdout, "Next: run ssb prune status --review %s to inspect the recorded review outcome.\n", *reviewID)
 	} else {
 		fmt.Fprintf(stdout, "Applied %d approved file change(s); rerender and verify remain separate states.\n", len(result.Changes))
+		fmt.Fprintf(stdout, "Plan: %s\n", result.PlanDigest)
 		for _, change := range result.Changes {
 			fmt.Fprintf(stdout, "- %s %s (%s)\n", change.Kind, strconv.Quote(change.Path), change.ActionID)
 		}
@@ -803,7 +869,7 @@ func runPruneRecover(args []string, stdout, stderr io.Writer) int {
 	if err := prune.Recover(context.Background(), repo.Root(), *reviewID, *clearStaleLock); err != nil {
 		return writePruneError(stderr, err)
 	}
-	fmt.Fprintln(stdout, "Recovered the interrupted prune application.")
+	fmt.Fprintln(stdout, "Recovery completed; crash-left locks and any application journal were reconciled.")
 	return 0
 }
 
@@ -841,9 +907,9 @@ func runPruneStatus(args []string, stdout, stderr io.Writer) int {
 			Summary     pruneProposalSummary `json:"summary"`
 		}{status, diagnostics, summary})
 	}
-	fmt.Fprintf(stdout, "Review %s: inspected=%t proposed=%t valid=%t approved=%t applied=%t rendered=%t adr=%t verified=%t\n",
+	fmt.Fprintf(stdout, "Review %s: inspected=%t proposed=%t valid=%t approved=%t no-changes-approved=%t applied=%t rendered=%t adr=%t verified=%t\n",
 		status.ReviewID, status.Inspected, status.Proposed, status.ProposalValid, status.Approved,
-		status.Applied, status.Rendered, status.ADRRecorded, status.Verified)
+		status.NoChangesApproved, status.Applied, status.Rendered, status.ADRRecorded, status.Verified)
 	if status.Proposed {
 		if review, _, loadErr := prune.LoadReview(repo.Root(), *reviewID); loadErr == nil {
 			writePruneSummary(stdout, summarizePruneProposal(review.Proposal))

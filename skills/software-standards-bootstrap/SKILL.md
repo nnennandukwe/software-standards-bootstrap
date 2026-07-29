@@ -102,6 +102,10 @@ Use this mode only for an explicit lifecycle-review request. `prune` is a
 working concept, not permission to delete. Follow
 [the governed lifecycle review contract](references/prune-review.md).
 
+For a skill with tracked supporting files, accept actionable provenance only
+when the manifest declares the exact bytes and origin of `SKILL.md` and every
+supporting file. Treat a partial bundle declaration as unknown provenance.
+
 Require the developer to identify the local point-in-time capability profile
 and optional provenance declaration. Never select an implicit latest model,
 query an online registry, or treat release notes as conformance proof. Run:
@@ -115,6 +119,11 @@ rules and skills separately and together; then write only `proposal.yaml` and
 complete candidate files inside that review bundle. Do not edit canonical
 rules, skills, `AGENTS.md`, or ADRs.
 
+Treat profile, provenance, and receipt arguments as paths relative to the
+process working directory unless they are absolute. If a skill-only review
+will explicitly rerender, complete that separate transition before
+verification; do not add rendered output after verification.
+
 Validate without approving:
 
 ```bash
@@ -122,8 +131,10 @@ ssb prune validate --repo . --review <id> --format text
 ssb prune status --repo . --review <id>
 ```
 
-Report every disposition, rationale, evidence reference, confidence band, and
-unresolved question. Stop for human review. Do not run `approve`, `apply`,
+Report every disposition, rationale, evidence reference or structured evidence
+gap, confidence band, and unresolved question. Every
+`unable-to-determine` action must name the exact artifact and missing evidence;
+an unresolved question alone is invalid. Stop for human review. Do not run `approve`, `apply`,
 `render`, `adr`, or `verify` on the developer's behalf unless the developer
 separately and explicitly requests that exact transition. Application remains a dry run unless `--write` is explicitly authorized.
 

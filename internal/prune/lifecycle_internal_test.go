@@ -7,48 +7,90 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/inventory"
 )
 
 func TestValidateReviewEventsRejectsEmptyRerenderPayload(t *testing.T) {
-	proposal := Proposal{Actions: []Action{{
-		ID:          "keep-rule",
-		Disposition: DispositionKeep,
-	}}}
-	approval, _ := json.Marshal(ApprovalPayload{Approved: []string{"keep-rule"}})
-	applied, _ := json.Marshal(ApplyResult{DryRun: false, Changes: []Change{}})
+	proposal := Proposal{Actions: []Action{
+		{
+			ID:          "keep-rule",
+			Disposition: DispositionKeep,
+		},
+		{
+			ID:          "remove-skill",
+			Disposition: DispositionRemove,
+			Sources: []ArtifactRef{{
+				Kind: ArtifactSkill,
+				ID:   "old-skill",
+				Path: ".agents/skills/old-skill/SKILL.md",
+			}},
+		},
+	}}
+	approved := ApprovalPayload{Approved: []string{"keep-rule", "remove-skill"}}
+	approval, _ := json.Marshal(approved)
 	review := Review{
 		Context: Context{
 			ReviewID:       "review-one",
 			BaselineCommit: "baseline",
 			ContextDigest:  "context",
+			Artifacts: []Artifact{
+				{
+					Kind: ArtifactRule, ID: "keep-rule",
+					Path:   ".software-standards/rules/keep-rule.md",
+					SHA256: "sha256:" + strings.Repeat("a", 64),
+					Mode:   "100644",
+				},
+				{
+					Kind: ArtifactSkill, ID: "old-skill",
+					Path:   ".agents/skills/old-skill/SKILL.md",
+					SHA256: "sha256:" + strings.Repeat("c", 64),
+					Mode:   "100644",
+				},
+			},
 		},
 		Proposal:       proposal,
 		ProposalDigest: "proposal",
 		Events: []Event{
-			{ID: "approved-001", ReviewID: "review-one", Kind: EventApproved, RecordedAt: "2026-07-27T18:00:00Z", BaselineCommit: "baseline", ContextDigest: "context", ProposalDigest: "proposal", Payload: approval},
-			{ID: "applied-002", ReviewID: "review-one", Kind: EventApplied, RecordedAt: "2026-07-27T18:01:00Z", BaselineCommit: "baseline", ContextDigest: "context", ProposalDigest: "proposal", Payload: applied},
-			{ID: "rendered-003", ReviewID: "review-one", Kind: EventRendered, RecordedAt: "2026-07-27T18:02:00Z", BaselineCommit: "baseline", ContextDigest: "context", ProposalDigest: "proposal", Payload: json.RawMessage(`{}`)},
+			{ID: "approved-001", ReviewID: "review-one", Kind: EventApproved, RecordedAt: "2026-07-27T18:00:00Z", BaselineCommit: "baseline", ContextDigest: "context", ProposalDigest: "proposal", Payload: approval, EventDigest: "sha256:" + strings.Repeat("b", 64)},
 		},
 	}
+	plan, err := canonicalApplicationPlan(review, approved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, _ := json.Marshal(ApplyResult{DryRun: false, PlanDigest: plan.PlanDigest, Changes: plan.Changes})
+	review.Events = append(review.Events,
+		Event{ID: "applied-002", ReviewID: "review-one", Kind: EventApplied, RecordedAt: "2026-07-27T18:01:00Z", BaselineCommit: "baseline", ContextDigest: "context", ProposalDigest: "proposal", Payload: applied},
+		Event{ID: "rendered-003", ReviewID: "review-one", Kind: EventRendered, RecordedAt: "2026-07-27T18:02:00Z", BaselineCommit: "baseline", ContextDigest: "context", ProposalDigest: "proposal", Payload: json.RawMessage(`{}`)},
+	)
 	if err := validateReviewEvents(review); err == nil || !strings.Contains(err.Error(), "rerender payload") {
 		t.Fatalf("error = %v, want invalid rerender payload", err)
 	}
 }
 
 func TestAppendEventFailurePreservesCompletePriorLog(t *testing.T) {
-	root := t.TempDir()
+	repoRoot := t.TempDir()
+	root := filepath.Join(repoRoot, ".software-standards", "reviews", "review-one")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	eventPath := filepath.Join(root, "events.jsonl")
 	prior := []byte("{\"complete\":true}\n")
 	if err := os.WriteFile(eventPath, prior, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	originalWriter := writeEventLogAtomically
-	writeEventLogAtomically = func(string, []byte, os.FileMode) error {
+	writeEventLogAtomically = func(*reviewStore, []byte, os.FileMode) error {
 		return errors.New("injected replacement failure")
 	}
 	t.Cleanup(func() { writeEventLogAtomically = originalWriter })
 
-	err := appendEvent(Review{Root: root}, Event{Schema: EventSchema, ID: "approved-001"})
+	err := appendEvent(Review{
+		RepoRoot: repoRoot,
+		Root:     root,
+		Context:  Context{ReviewID: "review-one"},
+	}, Event{Schema: EventSchema, ID: "approved-001"})
 	if err == nil {
 		t.Fatal("expected injected append failure")
 	}
@@ -61,12 +103,351 @@ func TestAppendEventFailurePreservesCompletePriorLog(t *testing.T) {
 	}
 }
 
+func TestAtomicReviewWriteReportsRenameAndTemporaryCleanupFailures(t *testing.T) {
+	repoRoot := t.TempDir()
+	reviewRoot := filepath.Join(repoRoot, ".software-standards", "reviews", "review-one")
+	if err := os.MkdirAll(reviewRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	eventPath := filepath.Join(reviewRoot, "events.jsonl")
+	prior := []byte("{\"complete\":true}\n")
+	if err := os.WriteFile(eventPath, prior, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, err := openReviewStore(repoRoot, "review-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	renameFailure := errors.New("injected rename failure")
+	removeFailure := errors.New("injected temporary cleanup failure")
+	originalRename := renameAtomicReviewFile
+	originalRemove := removeAtomicReviewFile
+	renameAtomicReviewFile = func(*os.Root, string, string) error {
+		return renameFailure
+	}
+	removeAtomicReviewFile = func(root *os.Root, name string) error {
+		if strings.HasPrefix(filepath.Base(name), ".ssb-prune-") {
+			return removeFailure
+		}
+		return originalRemove(root, name)
+	}
+	t.Cleanup(func() {
+		renameAtomicReviewFile = originalRename
+		removeAtomicReviewFile = originalRemove
+	})
+
+	err = store.AtomicWrite("events.jsonl", []byte("{\"next\":true}\n"), 0o644)
+	if !errors.Is(err, renameFailure) || !errors.Is(err, removeFailure) {
+		t.Fatalf("error = %v, want joined rename and cleanup failures", err)
+	}
+	if !strings.Contains(err.Error(), ".ssb-prune-") ||
+		!strings.Contains(err.Error(), "inspect and remove this residual file") {
+		t.Fatalf("error = %v, want exact residual-path recovery guidance", err)
+	}
+	after, readErr := os.ReadFile(eventPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(after) != string(prior) {
+		t.Fatalf("failed replacement changed prior event log: %q", after)
+	}
+	entries, readDirErr := os.ReadDir(reviewRoot)
+	if readDirErr != nil {
+		t.Fatal(readDirErr)
+	}
+	foundResidual := false
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".ssb-prune-") {
+			foundResidual = true
+		}
+	}
+	if !foundResidual {
+		t.Fatal("injected cleanup failure did not preserve the reported residual file")
+	}
+}
+
+func TestAppendEventCannotFollowReviewRootSwapInsideWriter(t *testing.T) {
+	repoRoot := t.TempDir()
+	root := filepath.Join(repoRoot, ".software-standards", "reviews", "review-one")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	eventPath := filepath.Join(root, "events.jsonl")
+	prior := []byte("{\"complete\":true}\n")
+	if err := os.WriteFile(eventPath, prior, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(t.TempDir(), "review-one")
+	originalWriter := writeEventLogAtomically
+	writeEventLogAtomically = func(store *reviewStore, data []byte, mode os.FileMode) error {
+		if err := os.Rename(root, external); err != nil {
+			return err
+		}
+		if err := os.Symlink(external, root); err != nil {
+			return err
+		}
+		return originalWriter(store, data, mode)
+	}
+	t.Cleanup(func() { writeEventLogAtomically = originalWriter })
+
+	err := appendEvent(Review{
+		RepoRoot: repoRoot,
+		Root:     root,
+		Context:  Context{ReviewID: "review-one"},
+	}, Event{Schema: EventSchema, ID: "approved-001"})
+	if err == nil {
+		t.Fatal("review-root swap inside event writer unexpectedly succeeded")
+	}
+	after, readErr := os.ReadFile(filepath.Join(external, "events.jsonl"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(after) != string(prior) {
+		t.Fatalf("external event log changed after swap: %q", after)
+	}
+}
+
+func TestReviewLockCleanupCannotFollowReviewRootSwapInsideRemover(t *testing.T) {
+	repoRoot := t.TempDir()
+	root := filepath.Join(repoRoot, ".software-standards", "reviews", "review-one")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, unlock, err := acquireReviewLock(repoRoot, "review-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(t.TempDir(), "review-one")
+	originalRemover := removeReviewTransitionLock
+	removeReviewTransitionLock = func(store *reviewStore) error {
+		if err := os.Rename(root, external); err != nil {
+			return err
+		}
+		if err := os.Symlink(external, root); err != nil {
+			return err
+		}
+		return originalRemover(store)
+	}
+	t.Cleanup(func() { removeReviewTransitionLock = originalRemover })
+
+	if err := unlock(); err == nil {
+		t.Fatal("review-root swap inside lock remover unexpectedly succeeded")
+	}
+	lockData, readErr := os.ReadFile(filepath.Join(external, ".transition.lock"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(lockData) != "review-one\n" {
+		t.Fatalf("external review lock changed after swap: %q", lockData)
+	}
+}
+
+func TestApplicationJournalOperationsCannotFollowReviewRootSwap(t *testing.T) {
+	for name, exercise := range map[string]func(*reviewStore) error{
+		"create": func(store *reviewStore) error {
+			return store.WriteExclusive("application-journal.json", []byte("new journal\n"), 0o600)
+		},
+		"remove": func(store *reviewStore) error {
+			return store.Remove("application-journal.json")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repoRoot := t.TempDir()
+			reviewRoot := filepath.Join(repoRoot, ".software-standards", "reviews", "review-one")
+			if err := os.MkdirAll(reviewRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			journalPath := filepath.Join(reviewRoot, "application-journal.json")
+			if name == "remove" {
+				if err := os.WriteFile(journalPath, []byte("approved journal\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			store, err := openReviewStore(repoRoot, "review-one")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			external := filepath.Join(t.TempDir(), "review-one")
+			if err := os.Rename(reviewRoot, external); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(external, reviewRoot); err != nil {
+				t.Skipf("symlinks are unavailable: %v", err)
+			}
+
+			if err := exercise(store); err == nil {
+				t.Fatalf("%s unexpectedly followed the swapped review root", name)
+			}
+			externalJournal := filepath.Join(external, "application-journal.json")
+			data, readErr := os.ReadFile(externalJournal)
+			if name == "create" {
+				if !errors.Is(readErr, os.ErrNotExist) {
+					t.Fatalf("external journal was created: %q, %v", data, readErr)
+				}
+			} else if readErr != nil || string(data) != "approved journal\n" {
+				t.Fatalf("external journal changed: %q, %v", data, readErr)
+			}
+		})
+	}
+}
+
+func TestReviewStoreCannotFollowSiblingSymlinkInsideRepository(t *testing.T) {
+	for name, exercise := range map[string]func(*reviewStore) error{
+		"remove lock": func(store *reviewStore) error {
+			return store.Remove(".transition.lock")
+		},
+		"create journal": func(store *reviewStore) error {
+			return store.WriteExclusive("application-journal.json", []byte("new journal\n"), 0o600)
+		},
+		"replace events": func(store *reviewStore) error {
+			return store.AtomicWrite("events.jsonl", []byte("new events\n"), 0o644)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repoRoot := t.TempDir()
+			reviewRoot := filepath.Join(repoRoot, ".software-standards", "reviews", "review-one")
+			victim := filepath.Join(repoRoot, "victim")
+			if err := os.MkdirAll(reviewRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(victim, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeFile := func(name, content string, mode os.FileMode) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(victim, name), []byte(content), mode); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writeFile(".transition.lock", "victim lock\n", 0o600)
+			writeFile("events.jsonl", "victim events\n", 0o644)
+			store, err := openReviewStore(repoRoot, "review-one")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			original := filepath.Join(repoRoot, ".software-standards", "reviews", ".review-one-original")
+			if err := os.Rename(reviewRoot, original); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join("..", "..", "victim"), reviewRoot); err != nil {
+				t.Skipf("symlinks are unavailable: %v", err)
+			}
+
+			if err := exercise(store); err == nil {
+				t.Fatalf("%s followed an in-repository sibling symlink", name)
+			}
+			lockData, lockErr := os.ReadFile(filepath.Join(victim, ".transition.lock"))
+			eventData, eventErr := os.ReadFile(filepath.Join(victim, "events.jsonl"))
+			if lockErr != nil || string(lockData) != "victim lock\n" {
+				t.Fatalf("victim lock changed: %q, %v", lockData, lockErr)
+			}
+			if eventErr != nil || string(eventData) != "victim events\n" {
+				t.Fatalf("victim events changed: %q, %v", eventData, eventErr)
+			}
+			if _, err := os.Lstat(filepath.Join(victim, "application-journal.json")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("victim journal was created: %v", err)
+			}
+		})
+	}
+}
+
+func TestLockedReviewSessionRejectsRealDirectoryReplacement(t *testing.T) {
+	repoRoot := t.TempDir()
+	reviewRoot := filepath.Join(repoRoot, ".software-standards", "reviews", "review-one")
+	replacement := filepath.Join(repoRoot, ".software-standards", "reviews", "replacement")
+	if err := os.MkdirAll(reviewRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(replacement, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(reviewRoot, "context.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(replacement, "context.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, unlock, err := acquireReviewLock(repoRoot, "review-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := filepath.Join(repoRoot, ".software-standards", "reviews", ".review-one-original")
+	if err := os.Rename(reviewRoot, original); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, reviewRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := loadReviewFromStore(store); err == nil ||
+		!strings.Contains(err.Error(), "changed") {
+		t.Fatalf("load error = %v, want locked review identity rejection", err)
+	}
+	if err := appendEvent(Review{
+		RepoRoot: repoRoot,
+		Root:     reviewRoot,
+		Context:  Context{ReviewID: "review-one"},
+		store:    store,
+	}, Event{Schema: EventSchema, ID: "approved-001"}); err == nil ||
+		!strings.Contains(err.Error(), "changed") {
+		t.Fatalf("append error = %v, want locked review identity rejection", err)
+	}
+	if _, err := os.Lstat(filepath.Join(reviewRoot, "events.jsonl")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("replacement review received an event: %v", err)
+	}
+	if err := unlock(); err == nil || !strings.Contains(err.Error(), "changed") {
+		t.Fatalf("unlock error = %v, want locked review identity rejection", err)
+	}
+}
+
+func TestReviewPublicationCannotFollowPackRootSwap(t *testing.T) {
+	repoRoot := t.TempDir()
+	packRoot := filepath.Join(repoRoot, ".software-standards")
+	if err := os.MkdirAll(packRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	staging, target, err := createReviewStagingStore(repoRoot, "review-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer staging.Close()
+	if err := staging.WriteExclusive("context.json", []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(t.TempDir(), "software-standards")
+	if err := os.Rename(packRoot, external); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, packRoot); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	if err := staging.Publish(target); err == nil {
+		t.Fatal("review publication followed the swapped pack root")
+	}
+	if _, err := os.Lstat(filepath.Join(external, "reviews", "review-one")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("external review was published: %v", err)
+	}
+}
+
 func TestApplicationRollbackRemovesCreatedDirectories(t *testing.T) {
 	root := t.TempDir()
 	relative := ".agents/skills/new-skill/references/check.md"
 	content := []byte("candidate\n")
 	operations := []operation{{
-		Change:         Change{Path: relative, Kind: "write", SHA256: digestBytes(content)},
+		Change: Change{
+			Path: relative,
+			Kind: "write",
+			Poststate: FileState{
+				Exists: true,
+				SHA256: digestBytes(content),
+				Mode:   "100644",
+			},
+		},
 		Content:        content,
 		ExpectedAbsent: true,
 	}}
@@ -128,10 +509,10 @@ func TestClaimedMutationPreservesConcurrentReplacement(t *testing.T) {
 
 func TestApplicationJournalCleanupFailureNamesRecoveryCommand(t *testing.T) {
 	original := removeApplicationJournal
-	removeApplicationJournal = func(string) error { return errors.New("injected cleanup failure") }
+	removeApplicationJournal = func(*reviewStore) error { return errors.New("injected cleanup failure") }
 	t.Cleanup(func() { removeApplicationJournal = original })
 
-	err := cleanupApplicationJournal("application-journal.json", "review-one")
+	err := cleanupApplicationJournal(nil, "review-one")
 	if err == nil || !strings.Contains(err.Error(), "ssb prune recover --review review-one") {
 		t.Fatalf("error = %v, want exact recovery command", err)
 	}
@@ -230,6 +611,268 @@ func TestRepositoryMutationLockSerializesDistinctReviews(t *testing.T) {
 	}
 }
 
+func TestLockReleaseFailuresAreReported(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".software-standards"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := acquireMutationLock(root, "review-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := removePruneMutationLock
+	removePruneMutationLock = func(*os.Root, os.FileInfo) error {
+		return errors.New("injected lock cleanup failure")
+	}
+	t.Cleanup(func() {
+		removePruneMutationLock = original
+		_ = os.Remove(filepath.Join(root, ".software-standards", ".prune-mutation.lock"))
+	})
+	if err := unlock(); err == nil || !strings.Contains(err.Error(), "injected lock cleanup failure") {
+		t.Fatalf("error = %v, want lock cleanup failure", err)
+	}
+}
+
+func TestMutationLockCleanupCannotFollowPackRootSwapInsideRemover(t *testing.T) {
+	repoRoot := t.TempDir()
+	packRoot := filepath.Join(repoRoot, ".software-standards")
+	if err := os.MkdirAll(packRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := acquireMutationLock(repoRoot, "review-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(t.TempDir(), "software-standards")
+	original := removePruneMutationLock
+	removePruneMutationLock = func(root *os.Root, identity os.FileInfo) error {
+		if err := os.Rename(packRoot, external); err != nil {
+			return err
+		}
+		if err := os.Symlink(external, packRoot); err != nil {
+			return err
+		}
+		return original(root, identity)
+	}
+	t.Cleanup(func() { removePruneMutationLock = original })
+
+	if err := unlock(); err == nil {
+		t.Fatal("pack-root swap inside mutation-lock remover unexpectedly succeeded")
+	}
+	lockData, readErr := os.ReadFile(filepath.Join(external, ".prune-mutation.lock"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(lockData) != "review-one\n" {
+		t.Fatalf("external mutation lock changed after swap: %q", lockData)
+	}
+}
+
+func TestTransitionCompleteReportsCommittedEventWhenLockCleanupFails(t *testing.T) {
+	repoRoot := t.TempDir()
+	root := filepath.Join(repoRoot, ".software-standards", "reviews", "review-one")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, unlock, err := acquireReviewLock(repoRoot, "review-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := removeReviewTransitionLock
+	removeReviewTransitionLock = func(*reviewStore) error {
+		return errors.New("injected review lock cleanup failure")
+	}
+	t.Cleanup(func() {
+		removeReviewTransitionLock = original
+		_ = os.Remove(filepath.Join(root, ".transition.lock"))
+	})
+	transition := &Transition{
+		review: Review{
+			RepoRoot: repoRoot,
+			Root:     root,
+			Context: Context{
+				ReviewID:       "review-one",
+				BaselineCommit: "baseline",
+				ContextDigest:  "context",
+			},
+			ProposalDigest: "proposal",
+		},
+		kind:   EventADR,
+		unlock: unlock,
+	}
+	event, err := transition.Complete(adrEventPayload{
+		Path: "docs/adr/0001-prune.md", Created: true,
+	})
+	if err == nil ||
+		event.EventDigest == "" ||
+		!strings.Contains(err.Error(), "recover --review review-one --clear-stale-lock") {
+		t.Fatalf("event = %#v, error = %v, want committed event and exact recovery", event, err)
+	}
+	data, readErr := os.ReadFile(filepath.Join(root, "events.jsonl"))
+	if readErr != nil || !strings.Contains(string(data), event.EventDigest) {
+		t.Fatalf("event log = %q, %v, want committed transition", data, readErr)
+	}
+}
+
+func TestWriteExclusiveRemovesPartialFinalFile(t *testing.T) {
+	original := openExclusiveFile
+	openExclusiveFile = func(name string, flag int, perm os.FileMode) (durableExclusiveFile, error) {
+		file, err := os.OpenFile(name, flag, perm)
+		if err != nil {
+			return nil, err
+		}
+		return &shortWriteExclusiveFile{File: file}, nil
+	}
+	t.Cleanup(func() { openExclusiveFile = original })
+
+	for name, write := range map[string]func(string, []byte, os.FileMode) error{
+		"review artifact": writeExclusive,
+		"governed file":   writeNewExclusive,
+	} {
+		t.Run(name, func(t *testing.T) {
+			target := filepath.Join(t.TempDir(), "target")
+			if err := write(target, []byte("complete content\n"), 0o600); err == nil {
+				t.Fatal("expected injected short write")
+			}
+			if _, err := os.Stat(target); !os.IsNotExist(err) {
+				t.Fatalf("partial final file remains: %v", err)
+			}
+		})
+	}
+}
+
+func TestWriteExclusiveReportsPartialCleanupFailure(t *testing.T) {
+	originalOpen := openExclusiveFile
+	originalRemove := removeIncompleteExclusiveFile
+	openExclusiveFile = func(name string, flag int, perm os.FileMode) (durableExclusiveFile, error) {
+		file, err := os.OpenFile(name, flag, perm)
+		if err != nil {
+			return nil, err
+		}
+		return &shortWriteExclusiveFile{File: file}, nil
+	}
+	removeIncompleteExclusiveFile = func(string) error {
+		return errors.New("injected incomplete cleanup failure")
+	}
+	t.Cleanup(func() {
+		openExclusiveFile = originalOpen
+		removeIncompleteExclusiveFile = originalRemove
+	})
+
+	for name, write := range map[string]func(string, []byte, os.FileMode) error{
+		"review artifact": writeExclusive,
+		"governed file":   writeNewExclusive,
+	} {
+		t.Run(name, func(t *testing.T) {
+			target := filepath.Join(t.TempDir(), "target")
+			t.Cleanup(func() { _ = os.Remove(target) })
+			err := write(target, []byte("complete content\n"), 0o600)
+			if err == nil ||
+				!strings.Contains(err.Error(), "short write") ||
+				!strings.Contains(err.Error(), "injected incomplete cleanup failure") {
+				t.Fatalf("error = %v, want write and cleanup causes", err)
+			}
+		})
+	}
+}
+
+type shortWriteExclusiveFile struct {
+	*os.File
+}
+
+func (file *shortWriteExclusiveFile) Write(data []byte) (int, error) {
+	return file.File.Write(data[:1])
+}
+
+func TestCaptureJournalRejectsDisappearedApprovedPrestate(t *testing.T) {
+	root := t.TempDir()
+	review := Review{
+		Context:        Context{ReviewID: "review-one"},
+		ProposalDigest: "sha256:" + strings.Repeat("a", 64),
+	}
+	plan := applicationPlan{PlanDigest: "sha256:" + strings.Repeat("b", 64)}
+	operations := []operation{{
+		Change: Change{
+			Path: ".agents/skills/old-skill/SKILL.md",
+			Kind: "remove",
+			Prestate: FileState{
+				Exists: true,
+				SHA256: "sha256:" + strings.Repeat("c", 64),
+				Mode:   "100644",
+			},
+			Poststate: FileState{Exists: false},
+		},
+		ExpectedSHA256: "sha256:" + strings.Repeat("c", 64),
+	}}
+	if _, err := captureJournal(root, review, plan, operations); err == nil ||
+		!strings.Contains(err.Error(), "disappeared after preflight") {
+		t.Fatalf("error = %v, want disappeared-prestate block", err)
+	}
+}
+
+func TestCaptureJournalRejectsChangedApprovedPrestate(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, ".agents", "skills", "old-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("changed after preflight\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	review := Review{
+		Context:        Context{ReviewID: "review-one"},
+		ProposalDigest: "sha256:" + strings.Repeat("a", 64),
+	}
+	plan := applicationPlan{PlanDigest: "sha256:" + strings.Repeat("b", 64)}
+	operations := []operation{{
+		Change: Change{
+			Path: ".agents/skills/old-skill/SKILL.md",
+			Kind: "remove",
+			Prestate: FileState{
+				Exists: true,
+				SHA256: "sha256:" + strings.Repeat("c", 64),
+				Mode:   "100644",
+			},
+			Poststate: FileState{Exists: false},
+		},
+		ExpectedSHA256: "sha256:" + strings.Repeat("c", 64),
+	}}
+	if _, err := captureJournal(root, review, plan, operations); err == nil ||
+		!strings.Contains(err.Error(), "changed after preflight") {
+		t.Fatalf("error = %v, want changed-prestate block", err)
+	}
+}
+
+func TestReadCandidateFileRejectsSymlinkAfterValidation(t *testing.T) {
+	repoRoot := t.TempDir()
+	root := filepath.Join(repoRoot, ".software-standards", "reviews", "review-one")
+	outside := filepath.Join(t.TempDir(), "candidate.md")
+	if err := os.WriteFile(outside, []byte("approved bytes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	candidate := filepath.Join(root, "candidates", "update-rule", "candidate.md")
+	if err := os.MkdirAll(filepath.Dir(candidate), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, candidate); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	review := Review{
+		RepoRoot: repoRoot,
+		Root:     root,
+		Context: Context{
+			ReviewID: "review-one",
+			Inventory: inventory.Report{Limits: inventory.Limits{
+				MaxFileBytes: 1 << 20,
+			}},
+		},
+	}
+	if _, err := readCandidateFile(review, "candidates/update-rule/candidate.md"); err == nil ||
+		!strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("error = %v, want candidate symlink block", err)
+	}
+}
+
 func TestCandidateModePortabilityContract(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -270,6 +913,121 @@ func TestCandidateModePortabilityContract(t *testing.T) {
 	}
 }
 
+func TestRequireRegularBundleFileAcceptsRelativeRoot(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "evidence.json")
+	if err := os.WriteFile(target, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	if err := requireRegularBundleFile(".", target); err != nil {
+		t.Fatalf("relative bundle root rejected: %v", err)
+	}
+}
+
+func TestApplicationPlanModePortabilityContract(t *testing.T) {
+	executable := FileState{
+		Exists: true,
+		SHA256: "sha256:" + strings.Repeat("a", 64),
+		Mode:   "100755",
+	}
+	regular := FileState{
+		Exists: true,
+		SHA256: "sha256:" + strings.Repeat("b", 64),
+		Mode:   "100644",
+	}
+	tests := []struct {
+		name    string
+		goos    string
+		change  Change
+		wantErr bool
+	}{
+		{
+			name: "Windows rejects executable prestate removal",
+			goos: "windows",
+			change: Change{
+				Path:      ".agents/skills/example/scripts/check.sh",
+				Kind:      "remove",
+				Prestate:  executable,
+				Poststate: FileState{Exists: false},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Windows rejects executable poststate update",
+			goos: "windows",
+			change: Change{
+				Path:      ".agents/skills/example/scripts/check.sh",
+				Kind:      "write",
+				Prestate:  regular,
+				Poststate: executable,
+			},
+			wantErr: true,
+		},
+		{
+			name: "Windows accepts regular transition",
+			goos: "windows",
+			change: Change{
+				Path:      ".software-standards/rules/example.md",
+				Kind:      "write",
+				Prestate:  regular,
+				Poststate: regular,
+			},
+		},
+		{
+			name: "POSIX accepts executable transition",
+			goos: "linux",
+			change: Change{
+				Path:      ".agents/skills/example/scripts/check.sh",
+				Kind:      "write",
+				Prestate:  executable,
+				Poststate: executable,
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateApplicationPlanModes(applicationPlan{
+				Changes: []Change{test.change},
+			}, test.goos)
+			if test.wantErr {
+				if err == nil ||
+					!strings.Contains(err.Error(), "POSIX host") ||
+					!strings.Contains(err.Error(), "will not stage") {
+					t.Fatalf("error = %v, want POSIX/no-staging guidance", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestApplicationPlanPreservesWindowsModePreconditionClassification(t *testing.T) {
+	executable := FileState{
+		Exists: true,
+		SHA256: "sha256:" + strings.Repeat("a", 64),
+		Mode:   "100755",
+	}
+	planErr := validateApplicationPlanModes(applicationPlan{
+		Changes: []Change{{
+			Path:      ".agents/skills/example/scripts/check.sh",
+			Kind:      "remove",
+			Prestate:  executable,
+			Poststate: FileState{Exists: false},
+		}},
+	}, "windows")
+	err := classifyApplicationPlanError(planErr)
+	if !errors.Is(err, ErrPrecondition) {
+		t.Fatalf("error = %v, want ErrPrecondition", err)
+	}
+	if errors.Is(err, ErrValidation) {
+		t.Fatalf("error = %v, must not be reclassified as ErrValidation", err)
+	}
+}
+
 func TestWindowsValidationBlocksExecutableEntrypointAndSupportBeforeMutation(t *testing.T) {
 	action := Action{
 		ID:          "update-skill",
@@ -295,7 +1053,7 @@ func TestWindowsValidationBlocksExecutableEntrypointAndSupportBeforeMutation(t *
 	var diagnostics []Diagnostic
 	validateActionShape(
 		action,
-		t.TempDir(),
+		nil,
 		1<<20,
 		false,
 		"windows",
@@ -317,5 +1075,135 @@ func TestWindowsValidationBlocksExecutableEntrypointAndSupportBeforeMutation(t *
 	}
 	if modeDiagnostics != 2 {
 		t.Fatalf("diagnostics = %#v, want root and supporting mode blocks", diagnostics)
+	}
+}
+
+func TestCandidateValidationRejectsCaseFoldedTargetCollision(t *testing.T) {
+	action := Action{
+		ID:          "update-skill",
+		Disposition: DispositionUpdate,
+		Sources: []ArtifactRef{{
+			Kind: ArtifactSkill,
+			ID:   "example-skill",
+			Path: ".agents/skills/example-skill/SKILL.md",
+		}},
+		Target: &CandidateRef{
+			Kind:       ArtifactSkill,
+			ID:         "example-skill",
+			TargetPath: ".agents/skills/example-skill/SKILL.md",
+			SourcePath: "candidates/update-skill/SKILL.md",
+			Mode:       "100644",
+			SupportingFiles: []CandidateFileRef{{
+				TargetPath: ".agents/skills/example-skill/skill.md",
+				SourcePath: "candidates/update-skill/skill.md",
+				Mode:       "100644",
+			}},
+		},
+	}
+	var diagnostics []Diagnostic
+	validateActionShape(
+		action,
+		nil,
+		1<<20,
+		false,
+		"linux",
+		func(actionID, field, message, recovery string) {
+			diagnostics = append(diagnostics, Diagnostic{
+				Path: actionID, Field: field, Message: message, Recovery: recovery,
+			})
+		},
+	)
+	for _, diagnostic := range diagnostics {
+		if strings.Contains(diagnostic.Message, "case-insensitive filesystem") {
+			return
+		}
+	}
+	t.Fatalf("diagnostics = %#v, want case-insensitive target collision", diagnostics)
+}
+
+func TestSafeRelativePathRejectsNonPortableForms(t *testing.T) {
+	for _, candidate := range []string{
+		`..\outside`,
+		`.agents\skills\example-skill\SKILL.md`,
+		`C:\outside`,
+		`\\server\share`,
+		`./inside`,
+		`inside//file`,
+		`candidates/update/CON`,
+		`candidates/update/aux.txt`,
+		`candidates/update/CONIN$`,
+		`candidates/update/conout$.txt`,
+		`candidates/update/COM¹`,
+		`candidates/update/com².txt`,
+		`candidates/update/COM³`,
+		`candidates/update/LPT¹`,
+		`candidates/update/lpt².txt`,
+		`candidates/update/LPT³`,
+		`candidates/update/name.`,
+		`candidates/update/name `,
+		`candidates/update/bad?.md`,
+		`inside/../outside`,
+	} {
+		t.Run(candidate, func(t *testing.T) {
+			if safeRelativePath(candidate) {
+				t.Fatalf("safeRelativePath(%q) = true, want false", candidate)
+			}
+		})
+	}
+
+	for _, candidate := range []string{
+		"README.md",
+		".software-standards/rules/example.md",
+		".agents/skills/example-skill/SKILL.md",
+	} {
+		t.Run(candidate, func(t *testing.T) {
+			if !safeRelativePath(candidate) {
+				t.Fatalf("safeRelativePath(%q) = false, want true", candidate)
+			}
+		})
+	}
+}
+
+func TestValidateGovernedTreePathsRejectsNonPortableOrCollidingBaseline(t *testing.T) {
+	for name, paths := range map[string][]string{
+		"reserved device": {
+			".agents/skills/example/SKILL.md",
+			".agents/skills/example/CON",
+		},
+		"console input device": {
+			".agents/skills/example/SKILL.md",
+			".agents/skills/example/CONIN$",
+		},
+		"console output device": {
+			".agents/skills/example/SKILL.md",
+			".agents/skills/example/conout$.txt",
+		},
+		"superscript com device": {
+			".agents/skills/example/SKILL.md",
+			".agents/skills/example/COM¹",
+		},
+		"superscript lpt device": {
+			".agents/skills/example/SKILL.md",
+			".agents/skills/example/lpt³.txt",
+		},
+		"trailing dot": {
+			".agents/skills/example/SKILL.md",
+			".agents/skills/example/name.",
+		},
+		"backslash": {
+			".agents/skills/example/SKILL.md",
+			`.agents/skills/example/references\guide.md`,
+		},
+		"case folded collision": {
+			".agents/skills/example/SKILL.md",
+			".agents/skills/example/references/Guide.md",
+			".agents/skills/example/references/guide.md",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateGovernedTreePaths(paths); err == nil {
+				t.Fatalf("paths = %#v, want portable baseline block", paths)
+			}
+		})
 	}
 }

@@ -75,6 +75,29 @@ func TestREADMEAndAgentSkillMatchTheExecutableCommandContract(t *testing.T) {
 	}
 }
 
+func TestPruneDocumentationKeepsLeadInsAdjacentToExamples(t *testing.T) {
+	root := repositoryRoot(t)
+	skill := readText(t, filepath.Join(root, "skills", "software-standards-bootstrap", "SKILL.md"))
+	reference := readText(t, filepath.Join(
+		root,
+		"skills",
+		"software-standards-bootstrap",
+		"references",
+		"prune-review.md",
+	))
+	pruneDoc := readText(t, filepath.Join(root, "docs", "prune.md"))
+
+	if !strings.Contains(skill, "proof. Run:\n\n```bash\nssb prune inspect") {
+		t.Error("Agent Skill separates the prune-inspection lead-in from its command example")
+	}
+	if !strings.Contains(reference, "and provide:\n\n```yaml\ntarget:") {
+		t.Error("prune reference separates the replacement lead-in from its target example")
+	}
+	if !strings.Contains(pruneDoc, "insufficient.\nFor example:\n\n```yaml\nevidence_gaps:") {
+		t.Error("prune documentation separates the evidence-gap lead-in from its example")
+	}
+}
+
 func repositoryRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)

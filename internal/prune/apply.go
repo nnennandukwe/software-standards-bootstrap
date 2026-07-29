@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -18,7 +19,19 @@ import (
 
 const journalSchema = "ssb.dev/prune-application-journal/v1"
 
-var removeApplicationJournal = os.Remove
+var (
+	removeApplicationJournal = func(store *reviewStore) error {
+		return store.Remove("application-journal.json")
+	}
+	removePruneMutationLock = func(root *os.Root, packIdentity os.FileInfo) error {
+		pack, err := openPinnedPack(root, packIdentity)
+		if err != nil {
+			return err
+		}
+		defer pack.Close()
+		return pack.Remove(".prune-mutation.lock")
+	}
+)
 
 const (
 	prestateClaim  = "pre"
@@ -34,16 +47,19 @@ type ApplyOptions struct {
 
 // Change is one complete-file operation in an application plan.
 type Change struct {
-	ActionID string `json:"action_id"`
-	Path     string `json:"path"`
-	Kind     string `json:"kind"`
-	SHA256   string `json:"sha256,omitempty"`
+	ActionID  string    `json:"action_id"`
+	Path      string    `json:"path"`
+	Kind      string    `json:"kind"`
+	Prestate  FileState `json:"prestate"`
+	Poststate FileState `json:"poststate"`
 }
 
 // ApplyResult reports the bounded plan or completed application.
 type ApplyResult struct {
-	DryRun  bool     `json:"dry_run"`
-	Changes []Change `json:"changes"`
+	DryRun            bool     `json:"dry_run"`
+	NoChangesApproved bool     `json:"no_changes_approved"`
+	PlanDigest        string   `json:"plan_digest"`
+	Changes           []Change `json:"changes"`
 }
 
 type operation struct {
@@ -52,6 +68,12 @@ type operation struct {
 	ExpectedAbsent bool
 	ExpectedSHA256 string
 	Mode           os.FileMode
+}
+
+type candidateInput struct {
+	sourcePath string
+	target     *CandidateRef
+	mode       string
 }
 
 type journalEntry struct {
@@ -65,34 +87,57 @@ type applicationJournal struct {
 	Schema             string         `json:"schema"`
 	ReviewID           string         `json:"review_id"`
 	ProposalDigest     string         `json:"proposal_digest"`
+	PlanDigest         string         `json:"plan_digest"`
 	Entries            []journalEntry `json:"entries"`
 	CreatedDirectories []string       `json:"created_directories,omitempty"`
 }
 
 // Apply computes a dry run by default and mutates only when Write is true.
-func Apply(ctx context.Context, repoPath string, options ApplyOptions) (ApplyResult, error) {
+func Apply(
+	ctx context.Context,
+	repoPath string,
+	options ApplyOptions,
+) (returned ApplyResult, returnErr error) {
 	repo, err := workspace.Open(ctx, repoPath)
 	if err != nil {
 		return ApplyResult{}, err
 	}
+	var lockedReviewStore *reviewStore
+	var unlockReview func() error
+	var unlockMutation func() error
+	defer func() {
+		if unlockMutation != nil {
+			returnErr = errors.Join(returnErr, unlockMutation())
+		}
+		if unlockReview != nil {
+			returnErr = errors.Join(returnErr, unlockReview())
+		}
+	}()
 	if options.Write {
-		unlock, err := acquireReviewLock(repo.Root(), options.ReviewID)
+		lockedReviewStore, unlockReview, err = acquireReviewLock(repo.Root(), options.ReviewID)
 		if err != nil {
 			return ApplyResult{}, err
 		}
-		defer unlock()
-		unlockMutation, err := acquireMutationLock(repo.Root(), options.ReviewID)
+		unlockMutation, err = acquireMutationLock(repo.Root(), options.ReviewID)
 		if err != nil {
 			return ApplyResult{}, err
 		}
-		defer unlockMutation()
 	}
-	review, diagnostics, err := LoadReview(repo.Root(), options.ReviewID)
+	var review Review
+	var diagnostics []Diagnostic
+	if lockedReviewStore != nil {
+		review, diagnostics, err = loadReviewFromStore(lockedReviewStore)
+	} else {
+		review, diagnostics, err = LoadReview(repo.Root(), options.ReviewID)
+	}
 	if err != nil {
 		return ApplyResult{}, err
 	}
 	if len(diagnostics) != 0 {
-		return ApplyResult{}, validationError("proposal has %d error(s); run ssb prune validate", len(diagnostics))
+		return ApplyResult{}, validationError(
+			"proposal is invalid: %s; run ssb prune validate",
+			diagnostics[0].Message,
+		)
 	}
 	approval, err := approvalFor(review)
 	if err != nil {
@@ -116,46 +161,76 @@ func Apply(ctx context.Context, repoPath string, options ApplyOptions) (ApplyRes
 	if err := repo.RejectUntrackedConfigurations(ctx); err != nil {
 		return ApplyResult{}, err
 	}
-	operations, err := planOperations(ctx, repo, review, approval)
+	plan, operations, err := planOperations(ctx, repo, review, approval)
 	if err != nil {
-		return ApplyResult{}, validationError("%v", err)
+		return ApplyResult{}, classifyApplicationPlanError(err)
 	}
-	result := ApplyResult{DryRun: !options.Write, Changes: make([]Change, len(operations))}
-	for index, operation := range operations {
-		result.Changes[index] = operation.Change
+	result := ApplyResult{
+		DryRun:     !options.Write,
+		PlanDigest: plan.PlanDigest,
+		Changes:    make([]Change, len(plan.Changes)),
+	}
+	copy(result.Changes, plan.Changes)
+	if len(result.Changes) == 0 {
+		result.NoChangesApproved = true
+		return result, nil
 	}
 	if !options.Write {
 		return result, nil
 	}
-	journal, err := captureJournal(repo.Root(), review, operations)
+	journal, err := captureJournal(repo.Root(), review, plan, operations)
 	if err != nil {
 		return ApplyResult{}, err
 	}
-	journalPath := filepath.Join(review.Root, "application-journal.json")
+	journalStore := lockedReviewStore
 	journalData, err := json.MarshalIndent(journal, "", "  ")
 	if err != nil {
 		return ApplyResult{}, fmt.Errorf("encode application journal: %w", err)
 	}
-	if err := writeExclusive(journalPath, append(journalData, '\n'), 0o600); err != nil {
+	if err := journalStore.WriteExclusive("application-journal.json", append(journalData, '\n'), 0o600); err != nil {
 		return ApplyResult{}, fmt.Errorf("application recovery journal already exists or cannot be created: %w", err)
 	}
 	completed, executeErr := executeOperations(repo.Root(), operations)
 	if executeErr != nil {
 		rollbackErr := restoreJournalPaths(repo.Root(), journal, completed, operationPoststates(operations))
 		if rollbackErr == nil {
-			_ = os.Remove(journalPath)
+			if removeErr := removeApplicationJournal(journalStore); removeErr != nil {
+				return ApplyResult{}, fmt.Errorf(
+					"apply review: %w; changed files were restored but recovery journal cleanup failed: %v; run ssb prune recover --review %s",
+					executeErr,
+					removeErr,
+					options.ReviewID,
+				)
+			}
 			return ApplyResult{}, fmt.Errorf("apply review: %w; all changed files were restored", executeErr)
 		}
-		return ApplyResult{}, fmt.Errorf("apply review: %w; rollback also failed: %v; run ssb prune recover", executeErr, rollbackErr)
+		return ApplyResult{}, fmt.Errorf(
+			"apply review: %w; rollback also failed: %v; run ssb prune recover --review %s",
+			executeErr,
+			rollbackErr,
+			options.ReviewID,
+		)
 	}
 	payload, err := json.Marshal(result)
 	if err != nil {
 		rollbackErr := restoreJournal(repo.Root(), journal, operationPoststates(operations))
 		if rollbackErr == nil {
-			_ = os.Remove(journalPath)
+			if removeErr := removeApplicationJournal(journalStore); removeErr != nil {
+				return ApplyResult{}, fmt.Errorf(
+					"encode application event: %w; changed files were restored but recovery journal cleanup failed: %v; run ssb prune recover --review %s",
+					err,
+					removeErr,
+					options.ReviewID,
+				)
+			}
 			return ApplyResult{}, fmt.Errorf("encode application event: %w; all changed files were restored", err)
 		}
-		return ApplyResult{}, fmt.Errorf("encode application event: %w; rollback failed: %v; run ssb prune recover", err, rollbackErr)
+		return ApplyResult{}, fmt.Errorf(
+			"encode application event: %w; rollback failed: %v; run ssb prune recover --review %s",
+			err,
+			rollbackErr,
+			options.ReviewID,
+		)
 	}
 	now := options.Now
 	if now == nil {
@@ -165,19 +240,57 @@ func Apply(ctx context.Context, repoPath string, options ApplyOptions) (ApplyRes
 	if err := appendEvent(review, event); err != nil {
 		rollbackErr := restoreJournal(repo.Root(), journal, operationPoststates(operations))
 		if rollbackErr == nil {
-			_ = os.Remove(journalPath)
+			if removeErr := removeApplicationJournal(journalStore); removeErr != nil {
+				return ApplyResult{}, fmt.Errorf(
+					"record application event: %w; changed files were restored but recovery journal cleanup failed: %v; run ssb prune recover --review %s",
+					err,
+					removeErr,
+					options.ReviewID,
+				)
+			}
 			return ApplyResult{}, fmt.Errorf("record application event: %w; all changed files were restored", err)
 		}
-		return ApplyResult{}, fmt.Errorf("record application event: %w; rollback failed: %v; run ssb prune recover", err, rollbackErr)
+		return ApplyResult{}, fmt.Errorf(
+			"record application event: %w; rollback failed: %v; run ssb prune recover --review %s",
+			err,
+			rollbackErr,
+			options.ReviewID,
+		)
 	}
-	if err := cleanupApplicationJournal(journalPath, options.ReviewID); err != nil {
+	if err := unlockMutation(); err != nil {
+		return ApplyResult{}, fmt.Errorf(
+			"application succeeded but lock cleanup failed: %w; run ssb prune recover --review %s --clear-stale-lock",
+			err,
+			options.ReviewID,
+		)
+	}
+	unlockMutation = nil
+	if err := removeReviewTransitionLock(lockedReviewStore); err != nil {
+		return ApplyResult{}, fmt.Errorf(
+			"application succeeded but lock cleanup failed: %w; run ssb prune recover --review %s --clear-stale-lock",
+			err,
+			options.ReviewID,
+		)
+	}
+	// The transition lock is gone, but the identity-pinned descriptor remains
+	// open until the journal is removed. This avoids reopening a replaced path.
+	unlockReview = lockedReviewStore.Close
+	if err := cleanupApplicationJournal(journalStore, options.ReviewID); err != nil {
 		return ApplyResult{}, err
+	}
+	closeReviewStore := unlockReview
+	unlockReview = nil
+	if err := closeReviewStore(); err != nil {
+		return ApplyResult{}, fmt.Errorf(
+			"application succeeded but review descriptor cleanup failed: %w",
+			err,
+		)
 	}
 	return result, nil
 }
 
-func cleanupApplicationJournal(journalPath, reviewID string) error {
-	if err := removeApplicationJournal(journalPath); err != nil {
+func cleanupApplicationJournal(store *reviewStore, reviewID string) error {
+	if err := removeApplicationJournal(store); err != nil {
 		return fmt.Errorf(
 			"application succeeded but recovery journal cleanup failed: %w; run ssb prune recover --review %s",
 			err,
@@ -185,6 +298,16 @@ func cleanupApplicationJournal(journalPath, reviewID string) error {
 		)
 	}
 	return nil
+}
+
+func classifyApplicationPlanError(err error) error {
+	if errors.Is(err, ErrPrecondition) ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, workspace.ErrGitOperation) {
+		return err
+	}
+	return validationError("%v", err)
 }
 
 func approvalFor(review Review) (ApprovalPayload, error) {
@@ -209,174 +332,104 @@ func planOperations(
 	repo *workspace.Repository,
 	review Review,
 	approval ApprovalPayload,
-) ([]operation, error) {
-	repoRoot := repo.Root()
+) (applicationPlan, []operation, error) {
+	plan, err := canonicalApplicationPlan(review, approval)
+	if err != nil {
+		return applicationPlan{}, nil, err
+	}
+	if err := validateApplicationPlanModes(plan, runtime.GOOS); err != nil {
+		return applicationPlan{}, nil, err
+	}
+
+	for _, change := range plan.Changes {
+		target, err := resolvePortablePath(repo.Root(), change.Path)
+		if err != nil {
+			return applicationPlan{}, nil, err
+		}
+		if change.Prestate.Exists {
+			if err := requireCurrentDigest(target, change.Prestate.SHA256); err != nil {
+				return applicationPlan{}, nil, fmt.Errorf(
+					"approved source %s no longer matches its context digest: %w",
+					change.Path,
+					err,
+				)
+			}
+		} else if _, err := os.Lstat(target); err == nil {
+			return applicationPlan{}, nil, fmt.Errorf(
+				"candidate target %s would overwrite an unreviewed worktree file",
+				change.Path,
+			)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return applicationPlan{}, nil, fmt.Errorf("inspect candidate target %s: %w", change.Path, err)
+		}
+	}
+
+	byPath, err := buildCandidateOperations(ctx, repo, review, plan, approval)
+	if err != nil {
+		return applicationPlan{}, nil, err
+	}
+	operations := make([]operation, 0, len(plan.Changes))
+	for _, change := range plan.Changes {
+		item := byPath[change.Path]
+		item.ExpectedAbsent = !change.Prestate.Exists
+		item.ExpectedSHA256 = change.Prestate.SHA256
+		byPath[change.Path] = item
+		operations = append(operations, item)
+	}
+	return plan, operations, nil
+}
+
+func candidateInputsForApproval(
+	review Review,
+	approval ApprovalPayload,
+) map[string]candidateInput {
 	approved := make(map[string]struct{}, len(approval.Approved))
 	for _, id := range approval.Approved {
 		approved[id] = struct{}{}
 	}
-	finalRules := make(map[string]struct{})
-	for _, artifact := range review.Context.Artifacts {
-		if artifact.Kind == ArtifactRule {
-			finalRules[artifact.Path] = struct{}{}
-		}
-	}
-	byPath := make(map[string]operation)
+	candidates := make(map[string]candidateInput)
 	for _, action := range review.Proposal.Actions {
-		if _, ok := approved[action.ID]; !ok {
+		if _, ok := approved[action.ID]; !ok || action.Target == nil {
 			continue
 		}
-		switch action.Disposition {
-		case DispositionKeep:
-			continue
-		case DispositionRemove, DispositionUpdate, DispositionConsolidate:
-			for _, source := range action.Sources {
-				currentPath := filepath.Join(repoRoot, filepath.FromSlash(source.Path))
-				content, err := os.ReadFile(currentPath)
-				if err != nil {
-					return nil, fmt.Errorf("read approved source %s: %w", source.Path, err)
-				}
-				if digestBytes(content) != source.SHA256 {
-					return nil, fmt.Errorf("approved source %s no longer matches its context digest", source.Path)
-				}
-				byPath[source.Path] = operation{Change: Change{
-					ActionID: action.ID,
-					Path:     source.Path,
-					Kind:     "remove",
-				}, ExpectedSHA256: source.SHA256}
-				if source.Kind == ArtifactRule {
-					delete(finalRules, source.Path)
-				}
-				if actionRemovesSupportingFiles(action, source) {
-					for _, supporting := range supportingFilesFor(review, source.Path) {
-						content, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(supporting.Path)))
-						if err != nil {
-							return nil, fmt.Errorf("read skill supporting file %s: %w", supporting.Path, err)
-						}
-						if digestBytes(content) != supporting.SHA256 {
-							return nil, fmt.Errorf("skill supporting file %s no longer matches its context digest", supporting.Path)
-						}
-						byPath[supporting.Path] = operation{
-							Change:         Change{ActionID: action.ID, Path: supporting.Path, Kind: "remove"},
-							ExpectedSHA256: supporting.SHA256,
-						}
-					}
-				}
+		targetCopy := *action.Target
+		candidates[action.Target.TargetPath] = candidateInput{
+			sourcePath: action.Target.SourcePath,
+			target:     &targetCopy,
+			mode:       action.Target.Mode,
+		}
+		for _, supporting := range action.Target.SupportingFiles {
+			candidates[supporting.TargetPath] = candidateInput{
+				sourcePath: supporting.SourcePath,
+				mode:       supporting.Mode,
 			}
-			if action.Target != nil {
-				content, err := readCandidateFile(review, action.Target.SourcePath)
-				if err != nil {
-					return nil, fmt.Errorf("read candidate %s: %w", action.Target.SourcePath, err)
-				}
-				if digestBytes(content) != action.Target.SHA256 {
-					return nil, fmt.Errorf("candidate %s no longer matches its proposal digest", action.Target.SourcePath)
-				}
-				if err := validateCandidate(ctx, repo, *action.Target, content); err != nil {
-					return nil, err
-				}
-				ownedTarget := false
-				expectedTargetDigest := ""
-				for _, source := range action.Sources {
-					ownedTarget = ownedTarget || source.Path == action.Target.TargetPath
-					if source.Path == action.Target.TargetPath {
-						expectedTargetDigest = source.SHA256
-					}
-					for _, supporting := range supportingFilesFor(review, source.Path) {
-						if supporting.Path == action.Target.TargetPath {
-							ownedTarget = true
-							expectedTargetDigest = supporting.SHA256
-						}
-					}
-				}
-				if !ownedTarget {
-					if _, err := os.Lstat(filepath.Join(repoRoot, filepath.FromSlash(action.Target.TargetPath))); err == nil {
-						return nil, fmt.Errorf("candidate target %s would overwrite an unreviewed worktree file", action.Target.TargetPath)
-					} else if !errors.Is(err, os.ErrNotExist) {
-						return nil, fmt.Errorf("inspect candidate target %s: %w", action.Target.TargetPath, err)
-					}
-				}
-				if existing, collision := byPath[action.Target.TargetPath]; collision &&
-					existing.ActionID != action.ID {
-					return nil, fmt.Errorf("actions %s and %s both change %s", existing.ActionID, action.ID, action.Target.TargetPath)
-				}
-				byPath[action.Target.TargetPath] = operation{
-					Change: Change{
-						ActionID: action.ID,
-						Path:     action.Target.TargetPath,
-						Kind:     "write",
-						SHA256:   action.Target.SHA256,
-					},
-					Content:        content,
-					ExpectedAbsent: !ownedTarget,
-					ExpectedSHA256: expectedTargetDigest,
-					Mode:           candidateMode(action.Target.Mode),
-				}
-				if action.Target.Kind == ArtifactRule {
-					finalRules[action.Target.TargetPath] = struct{}{}
-				}
-				for _, supporting := range action.Target.SupportingFiles {
-					supportingContent, err := readCandidateFile(review, supporting.SourcePath)
-					if err != nil {
-						return nil, fmt.Errorf("read candidate %s: %w", supporting.SourcePath, err)
-					}
-					if digestBytes(supportingContent) != supporting.SHA256 {
-						return nil, fmt.Errorf("candidate %s no longer matches its proposal digest", supporting.SourcePath)
-					}
-					ownedSupporting := false
-					expectedSupportingDigest := ""
-					for _, source := range action.Sources {
-						for _, existing := range supportingFilesFor(review, source.Path) {
-							if existing.Path == supporting.TargetPath {
-								ownedSupporting = true
-								expectedSupportingDigest = existing.SHA256
-							}
-						}
-					}
-					if !ownedSupporting {
-						if _, err := os.Lstat(filepath.Join(repoRoot, filepath.FromSlash(supporting.TargetPath))); err == nil {
-							return nil, fmt.Errorf("candidate target %s would overwrite an unreviewed worktree file", supporting.TargetPath)
-						} else if !errors.Is(err, os.ErrNotExist) {
-							return nil, fmt.Errorf("inspect candidate target %s: %w", supporting.TargetPath, err)
-						}
-					}
-					if existing, collision := byPath[supporting.TargetPath]; collision &&
-						existing.ActionID != action.ID {
-						return nil, fmt.Errorf("actions %s and %s both change %s", existing.ActionID, action.ID, supporting.TargetPath)
-					}
-					byPath[supporting.TargetPath] = operation{
-						Change: Change{
-							ActionID: action.ID,
-							Path:     supporting.TargetPath,
-							Kind:     "write",
-							SHA256:   supporting.SHA256,
-						},
-						Content:        supportingContent,
-						ExpectedAbsent: !ownedSupporting,
-						ExpectedSHA256: expectedSupportingDigest,
-						Mode:           candidateMode(supporting.Mode),
-					}
-				}
-			}
-		default:
-			return nil, fmt.Errorf("approved action %s has non-applicable disposition %s", action.ID, action.Disposition)
 		}
 	}
-	if len(finalRules) == 0 {
-		return nil, fmt.Errorf("application would remove every rule; retain or replace at least one rule")
+	return candidates
+}
+
+func validateApplicationPlanModes(plan applicationPlan, goos string) error {
+	if goos != "windows" {
+		return nil
 	}
-	if err := validateResultingGraph(ctx, repo, review, byPath); err != nil {
-		return nil, err
+	for _, change := range plan.Changes {
+		for _, state := range []struct {
+			name string
+			file FileState
+		}{
+			{name: "prestate", file: change.Prestate},
+			{name: "poststate", file: change.Poststate},
+		} {
+			if state.file.Exists && state.file.Mode == "100755" {
+				return preconditionError(
+					"application plan %s for %s uses Git executable mode 100755, which cannot be safely materialized on Windows; apply this review from a POSIX host because ssb will not stage an index-only chmod",
+					state.name,
+					change.Path,
+				)
+			}
+		}
 	}
-	paths := make([]string, 0, len(byPath))
-	for itemPath := range byPath {
-		paths = append(paths, itemPath)
-	}
-	sort.Strings(paths)
-	result := make([]operation, 0, len(paths))
-	for _, itemPath := range paths {
-		result = append(result, byPath[itemPath])
-	}
-	return result, nil
+	return nil
 }
 
 func supportingFilesFor(review Review, skillPath string) []ArtifactFile {
@@ -396,8 +449,20 @@ func actionRemovesSupportingFiles(action Action, source ArtifactRef) bool {
 }
 
 func readCandidateFile(review Review, sourcePath string) ([]byte, error) {
-	target := filepath.Join(review.Root, filepath.FromSlash(sourcePath))
-	info, err := os.Stat(target)
+	store := review.store
+	owned := false
+	if store == nil {
+		var err error
+		store, err = openReviewStore(review.RepoRoot, review.Context.ReviewID)
+		if err != nil {
+			return nil, err
+		}
+		owned = true
+	}
+	if owned {
+		defer store.Close()
+	}
+	data, info, err := store.ReadRegular(sourcePath)
 	if err != nil {
 		return nil, err
 	}
@@ -405,7 +470,7 @@ func readCandidateFile(review Review, sourcePath string) ([]byte, error) {
 	if limit <= 0 || info.Size() > limit {
 		return nil, fmt.Errorf("candidate exceeds max_file_bytes=%d", limit)
 	}
-	return os.ReadFile(target)
+	return data, nil
 }
 
 func candidateMode(mode string) os.FileMode {
@@ -438,6 +503,62 @@ func validateCandidate(
 	return nil
 }
 
+func buildCandidateOperations(
+	ctx context.Context,
+	repo *workspace.Repository,
+	review Review,
+	plan applicationPlan,
+	approval ApprovalPayload,
+) (map[string]operation, error) {
+	candidates := candidateInputsForApproval(review, approval)
+	operations := make(map[string]operation, len(plan.Changes))
+	for _, change := range plan.Changes {
+		item := operation{Change: change}
+		if change.Poststate.Exists {
+			candidate, exists := candidates[change.Path]
+			if !exists {
+				return nil, fmt.Errorf("application plan lacks candidate input for %s", change.Path)
+			}
+			content, err := readCandidateFile(review, candidate.sourcePath)
+			if err != nil {
+				return nil, fmt.Errorf("read candidate %s: %w", candidate.sourcePath, err)
+			}
+			if digestBytes(content) != change.Poststate.SHA256 {
+				return nil, fmt.Errorf(
+					"candidate %s no longer matches its proposal digest",
+					candidate.sourcePath,
+				)
+			}
+			if candidate.target != nil {
+				if err := validateCandidate(ctx, repo, *candidate.target, content); err != nil {
+					return nil, err
+				}
+			}
+			item.Content = content
+			item.Mode = candidateMode(candidate.mode)
+		}
+		operations[change.Path] = item
+	}
+	if err := validateResultingGraph(ctx, repo, review, operations); err != nil {
+		return nil, err
+	}
+	return operations, nil
+}
+
+func validateBuiltApplicationPlan(
+	ctx context.Context,
+	repo *workspace.Repository,
+	review Review,
+	plan applicationPlan,
+	approval ApprovalPayload,
+) error {
+	if err := validateApplicationPlanModes(plan, runtime.GOOS); err != nil {
+		return err
+	}
+	_, err := buildCandidateOperations(ctx, repo, review, plan, approval)
+	return err
+}
+
 func validateResultingGraph(
 	ctx context.Context,
 	repo *workspace.Repository,
@@ -450,14 +571,33 @@ func validateResultingGraph(
 		content []byte
 	}
 	final := make(map[string]finalArtifact, len(review.Context.Artifacts))
+	contextArtifacts := make(map[string]struct{}, len(review.Context.Artifacts))
 	for _, artifact := range review.Context.Artifacts {
-		content, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(artifact.Path)))
+		contextArtifacts[artifact.Path] = struct{}{}
+		if operation, changed := operations[artifact.Path]; changed {
+			if operation.Kind == "remove" {
+				continue
+			}
+			final[artifact.Path] = finalArtifact{
+				kind:    artifact.Kind,
+				content: operation.Content,
+			}
+			continue
+		}
+		target, err := resolvePortablePath(repoRoot, artifact.Path)
+		if err != nil {
+			return fmt.Errorf("resolve resulting-graph source %s: %w", artifact.Path, err)
+		}
+		content, err := os.ReadFile(target)
 		if err != nil {
 			return fmt.Errorf("read resulting-graph source %s: %w", artifact.Path, err)
 		}
 		final[artifact.Path] = finalArtifact{kind: artifact.Kind, content: content}
 	}
 	for itemPath, operation := range operations {
+		if _, existed := contextArtifacts[itemPath]; existed {
+			continue
+		}
 		if operation.Kind == "remove" {
 			delete(final, itemPath)
 			continue
@@ -486,7 +626,10 @@ func validateResultingGraph(
 		if artifact.kind != ArtifactRule {
 			continue
 		}
-		rule, diagnostics := rulepack.ValidateRetainedRule(ctx, repo, itemPath, artifact.content)
+		rule, diagnostics, err := rulepack.ValidateRetainedRule(ctx, repo, itemPath, artifact.content)
+		if err != nil {
+			return fmt.Errorf("validate resulting rule %s: %w", itemPath, err)
+		}
 		if len(diagnostics) != 0 {
 			return fmt.Errorf("resulting rule %s violates the rule contract: %s", itemPath, diagnostics[0].Message)
 		}
@@ -503,11 +646,17 @@ func validateResultingGraph(
 	return nil
 }
 
-func captureJournal(repoRoot string, review Review, operations []operation) (applicationJournal, error) {
+func captureJournal(
+	repoRoot string,
+	review Review,
+	plan applicationPlan,
+	operations []operation,
+) (applicationJournal, error) {
 	journal := applicationJournal{
 		Schema:         journalSchema,
 		ReviewID:       review.Context.ReviewID,
 		ProposalDigest: review.ProposalDigest,
+		PlanDigest:     plan.PlanDigest,
 		Entries:        make([]journalEntry, 0, len(operations)),
 	}
 	createdDirectories, err := missingApplicationDirectories(repoRoot, operations)
@@ -519,7 +668,10 @@ func captureJournal(repoRoot string, review Review, operations []operation) (app
 		if err := safeApplicationTarget(repoRoot, operation.Path); err != nil {
 			return applicationJournal{}, err
 		}
-		target := filepath.Join(repoRoot, filepath.FromSlash(operation.Path))
+		target, err := resolvePortablePath(repoRoot, operation.Path)
+		if err != nil {
+			return applicationJournal{}, err
+		}
 		if operation.ExpectedAbsent {
 			if _, err := os.Lstat(target); err == nil {
 				return applicationJournal{}, fmt.Errorf("new target %s appeared after preflight", operation.Path)
@@ -531,8 +683,10 @@ func captureJournal(repoRoot string, review Review, operations []operation) (app
 		}
 		info, err := os.Lstat(target)
 		if errors.Is(err, os.ErrNotExist) {
-			journal.Entries = append(journal.Entries, journalEntry{Path: operation.Path})
-			continue
+			return applicationJournal{}, fmt.Errorf(
+				"application target %s disappeared after preflight",
+				operation.Path,
+			)
 		}
 		if err != nil {
 			return applicationJournal{}, fmt.Errorf("inspect application target %s: %w", operation.Path, err)
@@ -543,6 +697,13 @@ func captureJournal(repoRoot string, review Review, operations []operation) (app
 		content, err := os.ReadFile(target)
 		if err != nil {
 			return applicationJournal{}, fmt.Errorf("capture application target %s: %w", operation.Path, err)
+		}
+		if digestBytes(content) != operation.Prestate.SHA256 ||
+			materializedMode(info.Mode()) != operation.Prestate.Mode {
+			return applicationJournal{}, fmt.Errorf(
+				"application target %s changed after preflight",
+				operation.Path,
+			)
 		}
 		journal.Entries = append(journal.Entries, journalEntry{
 			Path:    operation.Path,
@@ -560,7 +721,10 @@ func executeOperations(repoRoot string, operations []operation) (map[string]stru
 		if err := safeApplicationTarget(repoRoot, operation.Path); err != nil {
 			return completed, err
 		}
-		target := filepath.Join(repoRoot, filepath.FromSlash(operation.Path))
+		target, err := resolvePortablePath(repoRoot, operation.Path)
+		if err != nil {
+			return completed, err
+		}
 		completed[operation.Path] = struct{}{}
 		switch operation.Kind {
 		case "remove":
@@ -597,7 +761,10 @@ func executeOperations(repoRoot string, operations []operation) (map[string]stru
 		}
 	}
 	for _, operation := range operations {
-		target := filepath.Join(repoRoot, filepath.FromSlash(operation.Path))
+		target, err := resolvePortablePath(repoRoot, operation.Path)
+		if err != nil {
+			return completed, err
+		}
 		if operation.Kind == "remove" {
 			if _, err := os.Lstat(target); err == nil {
 				return completed, fmt.Errorf("target %s reappeared during application", operation.Path)
@@ -606,7 +773,7 @@ func executeOperations(repoRoot string, operations []operation) (map[string]stru
 			}
 			continue
 		}
-		if err := requireCurrentDigest(target, operation.SHA256); err != nil {
+		if err := requireCurrentDigest(target, operation.Poststate.SHA256); err != nil {
 			return completed, fmt.Errorf("verify written target %s: %w", operation.Path, err)
 		}
 	}
@@ -616,7 +783,7 @@ func executeOperations(repoRoot string, operations []operation) (map[string]stru
 func claimExpectedFile(target, expectedDigest, phase string) (string, error) {
 	claim := claimPathForTarget(target, phase)
 	if _, err := os.Lstat(claim); err == nil {
-		return "", fmt.Errorf("claim path already exists; run ssb prune recover")
+		return "", fmt.Errorf("claim path already exists")
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
@@ -675,7 +842,10 @@ func restoreJournalPaths(
 		if err := safeApplicationTarget(repoRoot, entry.Path); err != nil {
 			return err
 		}
-		target := filepath.Join(repoRoot, filepath.FromSlash(entry.Path))
+		target, err := resolvePortablePath(repoRoot, entry.Path)
+		if err != nil {
+			return err
+		}
 		expectedPoststate, hasPoststate := poststates[entry.Path]
 		if !hasPoststate {
 			return fmt.Errorf("missing approved poststate for %s", entry.Path)
@@ -831,7 +1001,11 @@ func currentFileDigest(target string) (string, bool, error) {
 func missingApplicationDirectories(repoRoot string, operations []operation) ([]string, error) {
 	missing := make(map[string]struct{})
 	for _, operation := range operations {
-		parent := filepath.Dir(filepath.Join(repoRoot, filepath.FromSlash(operation.Path)))
+		target, err := resolvePortablePath(repoRoot, operation.Path)
+		if err != nil {
+			return nil, err
+		}
+		parent := filepath.Dir(target)
 		for parent != repoRoot {
 			info, err := os.Lstat(parent)
 			if err == nil {
@@ -865,10 +1039,11 @@ func removeApplicationDirectories(repoRoot string, directories []string) error {
 		return strings.Count(ordered[i], "/") > strings.Count(ordered[j], "/")
 	})
 	for _, relative := range ordered {
-		if !safeRelativePath(relative) {
-			return fmt.Errorf("unsafe application directory %s", relative)
+		target, err := resolvePortablePath(repoRoot, relative)
+		if err != nil {
+			return fmt.Errorf("unsafe application directory %s: %w", relative, err)
 		}
-		if err := os.Remove(filepath.Join(repoRoot, filepath.FromSlash(relative))); err != nil &&
+		if err := os.Remove(target); err != nil &&
 			!errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -888,7 +1063,7 @@ func operationPoststates(operations []operation) map[string]string {
 	result := make(map[string]string, len(operations))
 	for _, operation := range operations {
 		if operation.Kind == "write" {
-			result[operation.Path] = operation.SHA256
+			result[operation.Path] = operation.Poststate.SHA256
 		} else {
 			result[operation.Path] = ""
 		}
@@ -900,32 +1075,11 @@ func writeNewExclusive(target string, content []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
-	file, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	file, err := openExclusiveFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
 		return err
 	}
-	complete := false
-	defer func() {
-		_ = file.Close()
-		if !complete {
-			_ = os.Remove(target)
-		}
-	}()
-	written, err := file.Write(content)
-	if err != nil {
-		return err
-	}
-	if written != len(content) {
-		return io.ErrShortWrite
-	}
-	if err := file.Sync(); err != nil {
-		return err
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-	complete = true
-	return nil
+	return writeDurableExclusive(target, file, content, mode)
 }
 
 func atomicWrite(target string, content []byte, mode os.FileMode) error {
@@ -961,38 +1115,62 @@ func atomicWrite(target string, content []byte, mode os.FileMode) error {
 
 // Recover restores an interrupted application journal, or finalizes journal
 // cleanup when the application event was already recorded.
-func Recover(ctx context.Context, repoPath, reviewID string, clearStaleLock bool) error {
+func Recover(
+	ctx context.Context,
+	repoPath, reviewID string,
+	clearStaleLock bool,
+) (returnErr error) {
 	repo, err := workspace.Open(ctx, repoPath)
 	if err != nil {
 		return err
 	}
 	if clearStaleLock {
-		root, rootErr := reviewRoot(repo.Root(), reviewID)
-		if rootErr != nil {
-			return rootErr
+		store, storeErr := openReviewStore(repo.Root(), reviewID)
+		if storeErr != nil {
+			return storeErr
 		}
-		if _, journalErr := os.Stat(filepath.Join(root, "application-journal.json")); journalErr != nil {
-			return preconditionError("cannot clear a transition lock without an application recovery journal")
-		}
-		if removeErr := os.Remove(filepath.Join(root, ".transition.lock")); removeErr != nil &&
-			!errors.Is(removeErr, os.ErrNotExist) {
-			return fmt.Errorf("clear stale review transition lock: %w", removeErr)
+		if _, readErr := store.Lstat(".transition.lock"); readErr == nil {
+			if removeErr := store.Remove(".transition.lock"); removeErr != nil &&
+				!errors.Is(removeErr, os.ErrNotExist) {
+				_ = store.Close()
+				return fmt.Errorf("clear stale review transition lock: %w", removeErr)
+			}
+		} else if !errors.Is(readErr, os.ErrNotExist) {
+			_ = store.Close()
+			return fmt.Errorf("read stale review transition lock: %w", readErr)
 		}
 		if err := clearMutationLock(repo.Root(), reviewID); err != nil {
+			_ = store.Close()
 			return err
 		}
+		_, journalErr := store.Lstat("application-journal.json")
+		closeErr := store.Close()
+		if errors.Is(journalErr, os.ErrNotExist) {
+			if closeErr != nil {
+				return closeErr
+			}
+			return nil
+		} else if journalErr != nil {
+			return fmt.Errorf("inspect application recovery journal: %w", journalErr)
+		} else if closeErr != nil {
+			return closeErr
+		}
 	}
-	unlock, err := acquireReviewLock(repo.Root(), reviewID)
+	lockedReviewStore, unlock, err := acquireReviewLock(repo.Root(), reviewID)
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer func() {
+		returnErr = errors.Join(returnErr, unlock())
+	}()
 	unlockMutation, err := acquireMutationLock(repo.Root(), reviewID)
 	if err != nil {
 		return err
 	}
-	defer unlockMutation()
-	review, diagnostics, err := LoadReview(repo.Root(), reviewID)
+	defer func() {
+		returnErr = errors.Join(returnErr, unlockMutation())
+	}()
+	review, diagnostics, err := loadReviewFromStore(lockedReviewStore)
 	if err != nil {
 		return err
 	}
@@ -1005,12 +1183,8 @@ func Recover(ctx context.Context, repoPath, reviewID string, clearStaleLock bool
 	if _, err := approvalFor(review); err != nil {
 		return preconditionError("%v", err)
 	}
-	root, err := reviewRoot(repo.Root(), reviewID)
-	if err != nil {
-		return err
-	}
-	journalPath := filepath.Join(root, "application-journal.json")
-	data, err := os.ReadFile(journalPath)
+	journalStore := lockedReviewStore
+	data, _, err := journalStore.ReadRegular("application-journal.json")
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return preconditionError("review has no application recovery journal")
@@ -1024,8 +1198,8 @@ func Recover(ctx context.Context, repoPath, reviewID string, clearStaleLock bool
 	if journal.Schema != journalSchema || journal.ReviewID != reviewID {
 		return fmt.Errorf("application journal identity is invalid")
 	}
-	if !validDigest(journal.ProposalDigest) {
-		return fmt.Errorf("application journal proposal digest is invalid")
+	if !validDigest(journal.ProposalDigest) || !validDigest(journal.PlanDigest) {
+		return fmt.Errorf("application journal proposal or plan digest is invalid")
 	}
 	if journal.ProposalDigest != review.ProposalDigest {
 		return fmt.Errorf("application journal is bound to a different proposal digest")
@@ -1045,7 +1219,14 @@ func Recover(ctx context.Context, repoPath, reviewID string, clearStaleLock bool
 	}
 	for _, event := range review.Events {
 		if event.Kind == EventApplied && event.ProposalDigest == journal.ProposalDigest {
-			return os.Remove(journalPath)
+			var applied ApplyResult
+			if err := decodeStrictJSON(event.Payload, &applied); err != nil {
+				return validationError("application event payload is invalid: %v", err)
+			}
+			if applied.PlanDigest != journal.PlanDigest {
+				return validationError("application journal is bound to a different application plan")
+			}
+			return removeApplicationJournal(journalStore)
 		}
 	}
 	restorePaths, poststates, err := recoverableJournalPaths(repo.Root(), review, journal)
@@ -1055,32 +1236,67 @@ func Recover(ctx context.Context, repoPath, reviewID string, clearStaleLock bool
 	if err := restoreJournalPaths(repo.Root(), journal, restorePaths, poststates); err != nil {
 		return fmt.Errorf("restore application journal: %w", err)
 	}
-	return os.Remove(journalPath)
+	return removeApplicationJournal(journalStore)
 }
 
-func acquireMutationLock(repoRoot, reviewID string) (func(), error) {
+func acquireMutationLock(repoRoot, reviewID string) (func() error, error) {
 	lockPath := filepath.Join(repoRoot, ".software-standards", ".prune-mutation.lock")
-	file, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	root, packIdentity, err := openPruneRepositoryRoot(repoRoot)
 	if err != nil {
+		return nil, err
+	}
+	pack, err := openPinnedPack(root, packIdentity)
+	if err != nil {
+		_ = root.Close()
+		return nil, fmt.Errorf("pin .software-standards for mutation lock: %w", err)
+	}
+	file, err := pack.OpenFile(".prune-mutation.lock", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err == nil {
+		err = writeDurableExclusiveWithCleanup(
+			lockPath,
+			file,
+			[]byte(reviewID+"\n"),
+			0o600,
+			func() error { return pack.Remove(".prune-mutation.lock") },
+		)
+	}
+	closePackErr := pack.Close()
+	if err != nil {
+		_ = root.Close()
 		if errors.Is(err, os.ErrExist) {
 			return nil, preconditionError("another prune application or recovery owns the repository mutation lock")
 		}
 		return nil, fmt.Errorf("create repository prune mutation lock: %w", err)
 	}
-	if _, err := file.WriteString(reviewID + "\n"); err != nil {
-		_ = file.Close()
-		_ = os.Remove(lockPath)
-		return nil, fmt.Errorf("write repository prune mutation lock: %w", err)
+	if closePackErr != nil {
+		_ = root.Close()
+		return nil, fmt.Errorf("close pinned standards pack after mutation lock creation: %w", closePackErr)
 	}
-	return func() {
-		_ = file.Close()
-		_ = os.Remove(lockPath)
+	return func() error {
+		removeErr := removePruneMutationLock(root, packIdentity)
+		closeErr := root.Close()
+		if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return errors.Join(
+				fmt.Errorf("remove repository prune mutation lock %s: %w", lockPath, removeErr),
+				closeErr,
+			)
+		}
+		return closeErr
 	}, nil
 }
 
 func clearMutationLock(repoRoot, reviewID string) error {
-	lockPath := filepath.Join(repoRoot, ".software-standards", ".prune-mutation.lock")
-	data, err := os.ReadFile(lockPath)
+	root, packIdentity, err := openPruneRepositoryRoot(repoRoot)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	pack, err := openPinnedPack(root, packIdentity)
+	if err != nil {
+		return fmt.Errorf("pin .software-standards to clear mutation lock: %w", err)
+	}
+	defer pack.Close()
+	data, err := pack.ReadFile(".prune-mutation.lock")
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -1090,7 +1306,7 @@ func clearMutationLock(repoRoot, reviewID string) error {
 	if strings.TrimSpace(string(data)) != reviewID {
 		return preconditionError("repository mutation lock belongs to another review and cannot be cleared")
 	}
-	if err := os.Remove(lockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := pack.Remove(".prune-mutation.lock"); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("clear repository prune mutation lock: %w", err)
 	}
 	return nil
@@ -1105,33 +1321,20 @@ func recoverableJournalPaths(
 	if err != nil {
 		return nil, nil, err
 	}
-	approved := make(map[string]struct{}, len(approval.Approved))
-	for _, id := range approval.Approved {
-		approved[id] = struct{}{}
+	plan, err := canonicalApplicationPlan(review, approval)
+	if err != nil {
+		return nil, nil, err
 	}
-	poststate := make(map[string]string)
-	for _, action := range review.Proposal.Actions {
-		if _, ok := approved[action.ID]; !ok || action.Disposition == DispositionKeep {
-			continue
-		}
-		for _, source := range action.Sources {
-			poststate[source.Path] = ""
-			if actionRemovesSupportingFiles(action, source) {
-				for _, supporting := range supportingFilesFor(review, source.Path) {
-					poststate[supporting.Path] = ""
-				}
-			}
-		}
-		if action.Target != nil {
-			poststate[action.Target.TargetPath] = action.Target.SHA256
-			for _, supporting := range action.Target.SupportingFiles {
-				poststate[supporting.TargetPath] = supporting.SHA256
-			}
-		}
+	if journal.PlanDigest != plan.PlanDigest {
+		return nil, nil, fmt.Errorf("application journal is bound to a different application plan")
 	}
+	poststate := planOperationPoststates(plan)
 	restore := make(map[string]struct{})
 	for _, entry := range journal.Entries {
-		target := filepath.Join(repoRoot, filepath.FromSlash(entry.Path))
+		target, err := resolvePortablePath(repoRoot, entry.Path)
+		if err != nil {
+			return nil, nil, err
+		}
 		data, readErr := os.ReadFile(target)
 		absent := errors.Is(readErr, os.ErrNotExist)
 		if readErr != nil && !absent {
@@ -1185,29 +1388,16 @@ func validateJournalPlan(
 	if err != nil {
 		return err
 	}
-	approved := make(map[string]struct{}, len(approval.Approved))
-	for _, id := range approval.Approved {
-		approved[id] = struct{}{}
+	plan, err := canonicalApplicationPlan(review, approval)
+	if err != nil {
+		return err
 	}
-	expected := make(map[string]struct{})
-	for _, action := range review.Proposal.Actions {
-		if _, ok := approved[action.ID]; !ok || action.Disposition == DispositionKeep {
-			continue
-		}
-		for _, source := range action.Sources {
-			expected[source.Path] = struct{}{}
-			if actionRemovesSupportingFiles(action, source) {
-				for _, supporting := range supportingFilesFor(review, source.Path) {
-					expected[supporting.Path] = struct{}{}
-				}
-			}
-		}
-		if action.Target != nil {
-			expected[action.Target.TargetPath] = struct{}{}
-			for _, supporting := range action.Target.SupportingFiles {
-				expected[supporting.TargetPath] = struct{}{}
-			}
-		}
+	if journal.PlanDigest != plan.PlanDigest {
+		return fmt.Errorf("application journal is bound to a different application plan")
+	}
+	expected := make(map[string]Change, len(plan.Changes))
+	for _, change := range plan.Changes {
+		expected[change.Path] = change
 	}
 	if len(journal.Entries) != len(expected) {
 		return fmt.Errorf("application journal does not match the approved operation count")
@@ -1229,50 +1419,63 @@ func validateJournalPlan(
 			return fmt.Errorf("application journal directory %s is outside the approved operation plan", directory)
 		}
 	}
-	baselineDigests := make(map[string]string, len(review.Context.Artifacts))
-	for _, artifact := range review.Context.Artifacts {
-		baselineDigests[artifact.Path] = artifact.SHA256
-		for _, supporting := range artifact.SupportingFiles {
-			baselineDigests[supporting.Path] = supporting.SHA256
-		}
-	}
 	for _, entry := range journal.Entries {
-		if _, ok := expected[entry.Path]; !ok {
+		change, ok := expected[entry.Path]
+		if !ok {
 			return fmt.Errorf("application journal target %s is not in the approved operation plan", entry.Path)
 		}
-		baselineDigest, existedAtBaseline := baselineDigests[entry.Path]
-		if !existedAtBaseline {
+		if !change.Prestate.Exists {
 			if entry.Existed || len(entry.Content) != 0 || entry.Mode != 0 {
 				return fmt.Errorf("application journal invents prestate for new target %s", entry.Path)
 			}
 			continue
 		}
-		if !entry.Existed || digestBytes(entry.Content) != baselineDigest {
+		if !entry.Existed || digestBytes(entry.Content) != change.Prestate.SHA256 {
 			return fmt.Errorf("application journal prestate does not match %s", entry.Path)
 		}
 		baselineEntry, exists, err := repo.EntryAtBaseline(ctx, entry.Path)
 		if err != nil || !exists {
 			return fmt.Errorf("read baseline mode for %s", entry.Path)
 		}
-		expectedMode := uint32(0o644)
-		if baselineEntry.Mode == "100755" {
-			expectedMode = 0o755
-		}
-		if entry.Mode != expectedMode {
+		if entry.Mode > 0o777 ||
+			materializedMode(os.FileMode(entry.Mode)) != baselineEntry.Mode {
 			return fmt.Errorf("application journal mode does not match %s", entry.Path)
 		}
 	}
 	return nil
 }
 
+func planOperationPoststates(plan applicationPlan) map[string]string {
+	result := make(map[string]string, len(plan.Changes))
+	for _, change := range plan.Changes {
+		if change.Poststate.Exists {
+			result[change.Path] = change.Poststate.SHA256
+		} else {
+			result[change.Path] = ""
+		}
+	}
+	return result
+}
+
 func safeApplicationTarget(repoRoot, relative string) error {
 	if !validApplicationPath(relative) {
 		return fmt.Errorf("application target %s is not a canonical rule or skill path", relative)
 	}
+	target, err := resolvePortablePath(repoRoot, relative)
+	if err != nil {
+		return err
+	}
 	current := repoRoot
-	components := strings.Split(relative, "/")
-	for _, component := range components[:len(components)-1] {
-		current = filepath.Join(current, component)
+	parent := filepath.Dir(target)
+	relativeParent, err := filepath.Rel(repoRoot, parent)
+	if err != nil {
+		return fmt.Errorf("resolve application target parent %s: %w", relative, err)
+	}
+	for _, component := range strings.Split(filepath.ToSlash(relativeParent), "/") {
+		if component == "." {
+			continue
+		}
+		current = filepath.Join(current, filepath.FromSlash(component))
 		info, err := os.Lstat(current)
 		if errors.Is(err, os.ErrNotExist) {
 			continue

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -88,6 +89,164 @@ func TestBuildContextFailsClosedOnIncompleteInventory(t *testing.T) {
 	}
 }
 
+func TestBuildContextRejectsBackslashCapabilityEvidenceBeforeRead(t *testing.T) {
+	repo := lifecycleRepository(t)
+	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	profileDir := t.TempDir()
+	outsideEvidence := filepath.Join(filepath.Dir(profileDir), "outside.json")
+	writeFile(t, outsideEvidence, "{\"supported\":true}\n")
+	profilePath := filepath.Join(profileDir, "capabilities.yaml")
+	writeFile(t, profilePath, `schema: ssb.dev/capability-profile/v1
+id: unsafe-path
+host: {name: codex, version: 1.2.3}
+model: {provider: openai, id: gpt-example}
+observed_at: 2026-07-27T18:00:00Z
+evidence:
+  - id: host-run
+    kind: conformance
+    path: ..\outside.json
+    sha256: `+fileDigest(t, outsideEvidence)+`
+capabilities:
+  - id: repository-instructions
+    status: supported
+    evidence_ids: [host-run]
+`)
+
+	_, err = prune.BuildContext(context.Background(), ws, prune.ContextOptions{
+		ReviewID:        "unsafe-path",
+		Capabilities:    profilePath,
+		InventoryLimits: inventory.DefaultLimits(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsafe capability evidence path") {
+		t.Fatalf("error = %v, want unsafe capability evidence path", err)
+	}
+}
+
+func TestBuildContextRejectsSymlinkedCapabilityEvidenceBeforeRead(t *testing.T) {
+	repo := lifecycleRepository(t)
+	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	profileDir := t.TempDir()
+	outsideEvidence := filepath.Join(filepath.Dir(profileDir), "outside-symlink-evidence.json")
+	writeFile(t, outsideEvidence, "{\"supported\":true}\n")
+	evidencePath := filepath.Join(profileDir, "host-run.json")
+	if err := os.Symlink(outsideEvidence, evidencePath); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	profilePath := filepath.Join(profileDir, "capabilities.yaml")
+	writeFile(t, profilePath, `schema: ssb.dev/capability-profile/v1
+id: unsafe-symlink
+host: {name: codex, version: 1.2.3}
+model: {provider: openai, id: gpt-example}
+observed_at: 2026-07-27T18:00:00Z
+evidence:
+  - id: host-run
+    kind: conformance
+    path: host-run.json
+    sha256: `+fileDigest(t, outsideEvidence)+`
+capabilities:
+  - id: repository-instructions
+    status: supported
+    evidence_ids: [host-run]
+`)
+
+	_, err = prune.BuildContext(context.Background(), ws, prune.ContextOptions{
+		ReviewID:        "unsafe-symlink",
+		Capabilities:    profilePath,
+		InventoryLimits: inventory.DefaultLimits(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "path contains a symlink") {
+		t.Fatalf("error = %v, want symlinked capability evidence block", err)
+	}
+}
+
+func TestBuildContextAcceptsRelativeCapabilityProfile(t *testing.T) {
+	repo := lifecycleRepository(t)
+	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := capabilityProfile(t)
+	t.Chdir(filepath.Dir(profile))
+
+	if _, err := prune.BuildContext(context.Background(), ws, prune.ContextOptions{
+		ReviewID:        "relative-profile",
+		Capabilities:    filepath.Base(profile),
+		InventoryLimits: inventory.DefaultLimits(),
+	}); err != nil {
+		t.Fatalf("relative capability profile rejected: %v", err)
+	}
+}
+
+func TestBuildContextRejectsDuplicateCapabilityEvidencePath(t *testing.T) {
+	repo := lifecycleRepository(t)
+	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profileDir := t.TempDir()
+	evidencePath := filepath.Join(profileDir, "host-run.json")
+	writeFile(t, evidencePath, "{\"supported\":true}\n")
+	profilePath := filepath.Join(profileDir, "capabilities.yaml")
+	writeFile(t, profilePath, `schema: ssb.dev/capability-profile/v1
+id: duplicate-evidence
+host: {name: codex, version: 1.2.3}
+model: {provider: openai, id: gpt-example}
+observed_at: 2026-07-27T18:00:00Z
+evidence:
+  - id: host-run
+    kind: conformance
+    path: host-run.json
+    sha256: `+fileDigest(t, evidencePath)+`
+  - id: host-run-again
+    kind: conformance
+    path: host-run.json
+    sha256: `+fileDigest(t, evidencePath)+`
+capabilities:
+  - id: repository-instructions
+    status: supported
+    evidence_ids: [host-run]
+`)
+
+	_, err = prune.BuildContext(context.Background(), ws, prune.ContextOptions{
+		ReviewID:        "duplicate-evidence",
+		Capabilities:    profilePath,
+		InventoryLimits: inventory.DefaultLimits(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "duplicate capability evidence path") {
+		t.Fatalf("error = %v, want duplicate evidence path rejection", err)
+	}
+}
+
+func TestBuildContextRejectsNonPortableTrackedSkillSupport(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows cannot create the POSIX-only baseline fixture")
+	}
+	repo := lifecycleRepository(t)
+	writeFile(t, filepath.Join(repo, ".agents", "skills", "orphan-skill", "CON"), "support\n")
+	git(t, repo, "add", ".agents/skills/orphan-skill/CON")
+	git(t, repo, "commit", "-m", "add non-portable support")
+	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = prune.BuildContext(context.Background(), ws, prune.ContextOptions{
+		ReviewID:        "non-portable-baseline",
+		Capabilities:    capabilityProfile(t),
+		InventoryLimits: inventory.DefaultLimits(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "non-portable governed path") {
+		t.Fatalf("error = %v, want non-portable baseline block", err)
+	}
+}
+
 func TestBuildContextFailsClosedWhenSkillSupportExceedsInventoryBoundary(t *testing.T) {
 	repo := lifecycleRepository(t)
 	writeFile(t, filepath.Join(repo, ".agents", "skills", "orphan-skill", "assets", "large.txt"), strings.Repeat("x", 2048))
@@ -132,6 +291,75 @@ func TestBuildContextMarksMissingProvenanceUnknown(t *testing.T) {
 	}
 }
 
+func TestBuildContextRequiresProvenanceForEverySkillBundleFile(t *testing.T) {
+	repo := lifecycleRepository(t)
+	supportPath := filepath.Join(repo, ".agents", "skills", "orphan-skill", "scripts", "check.sh")
+	writeFile(t, supportPath, "#!/bin/sh\nexit 0\n")
+	git(t, repo, "add", ".agents/skills/orphan-skill/scripts/check.sh")
+	git(t, repo, "commit", "-m", "add skill support")
+
+	entryPath := filepath.Join(repo, ".agents", "skills", "orphan-skill", "SKILL.md")
+	provenance := filepath.Join(t.TempDir(), "provenance.yaml")
+	writeFile(t, provenance, `schema: ssb.dev/artifact-provenance/v1
+artifacts:
+  - path: .agents/skills/orphan-skill/SKILL.md
+    sha256: `+fileDigest(t, entryPath)+`
+    origin: generated
+    declaration: Generated before the supporting script was added.
+`)
+	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := prune.BuildContext(context.Background(), ws, prune.ContextOptions{
+		ReviewID:        "partial-provenance",
+		Capabilities:    capabilityProfile(t),
+		Provenance:      provenance,
+		InventoryLimits: inventory.DefaultLimits(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, artifact := range got.Artifacts {
+		if artifact.ID == "orphan-skill" {
+			if artifact.Origin != prune.OriginUnknown {
+				t.Fatalf("skill origin = %q, want unknown for partially declared bundle", artifact.Origin)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("orphan-skill artifact is missing")
+	}
+
+	writeFile(t, provenance, `schema: ssb.dev/artifact-provenance/v1
+artifacts:
+  - path: .agents/skills/orphan-skill/SKILL.md
+    sha256: `+fileDigest(t, entryPath)+`
+    origin: generated
+    declaration: Generated entrypoint.
+  - path: .agents/skills/orphan-skill/scripts/check.sh
+    sha256: `+fileDigest(t, supportPath)+`
+    origin: user-authored
+    declaration: Maintainer-authored supporting script.
+`)
+	got, err = prune.BuildContext(context.Background(), ws, prune.ContextOptions{
+		ReviewID:        "mixed-provenance",
+		Capabilities:    capabilityProfile(t),
+		Provenance:      provenance,
+		InventoryLimits: inventory.DefaultLimits(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, artifact := range got.Artifacts {
+		if artifact.ID == "orphan-skill" && artifact.Origin != prune.OriginMixed {
+			t.Fatalf("skill origin = %q, want mixed for differently authored bundle files", artifact.Origin)
+		}
+	}
+}
+
 func TestValidateProposalRequiresCompleteNonOverlappingActions(t *testing.T) {
 	context := prune.Context{
 		Schema:        prune.ContextSchema,
@@ -171,7 +399,7 @@ func TestValidateProposalRequiresCompleteNonOverlappingActions(t *testing.T) {
 		Actions: []prune.Action{{
 			ID:          "keep-rule",
 			Disposition: prune.DispositionKeep,
-			Sources:     []prune.ArtifactRef{prune.Reference(context.Artifacts[0])},
+			Sources:     []prune.ArtifactRef{artifactReference(context.Artifacts[0])},
 			Rationale:   "Repository and host evidence still support this rule.",
 			Confidence:  prune.ConfidenceHigh,
 			RepositoryEvidence: []prune.EvidenceRef{{
@@ -219,7 +447,7 @@ func TestValidateProposalForcesUnknownProvenanceToUnableToDetermine(t *testing.T
 	action := prune.Action{
 		ID:          "remove-unknown",
 		Disposition: prune.DispositionRemove,
-		Sources:     []prune.ArtifactRef{prune.Reference(context.Artifacts[0])},
+		Sources:     []prune.ArtifactRef{artifactReference(context.Artifacts[0])},
 		Rationale:   "The capability evidence suggests this is redundant.",
 		Confidence:  prune.ConfidenceMedium,
 		RepositoryEvidence: []prune.EvidenceRef{{
@@ -249,8 +477,17 @@ func TestValidateProposalForcesUnknownProvenanceToUnableToDetermine(t *testing.T
 	proposal.Actions[0].CapabilityRefs = nil
 	proposal.Actions[0].RepositoryEvidence = nil
 	proposal.Actions[0].UnresolvedQuestions = []string{"Who authored and adopted this rule?"}
+	if diagnostics := prune.ValidateProposal(context, proposal, t.TempDir()); len(diagnostics) == 0 ||
+		!strings.Contains(diagnostics[0].Message, "structured evidence gap") {
+		t.Fatalf("diagnostics = %#v, want structured evidence gap requirement", diagnostics)
+	}
+	proposal.Actions[0].EvidenceGaps = []prune.EvidenceGap{{
+		Kind:         prune.EvidenceGapProvenance,
+		ArtifactPath: context.Artifacts[0].Path,
+		Detail:       "No provenance declaration matches the inventoried rule bytes.",
+	}}
 	if diagnostics := prune.ValidateProposal(context, proposal, t.TempDir()); len(diagnostics) != 0 {
-		t.Fatalf("unable-to-determine proposal rejected: %#v", diagnostics)
+		t.Fatalf("evidence-bound unable-to-determine proposal rejected: %#v", diagnostics)
 	}
 }
 
@@ -346,6 +583,15 @@ func fileDigest(t *testing.T, path string) string {
 	}
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func artifactReference(artifact prune.Artifact) prune.ArtifactRef {
+	return prune.ArtifactRef{
+		Kind:   artifact.Kind,
+		ID:     artifact.ID,
+		Path:   artifact.Path,
+		SHA256: artifact.SHA256,
+	}
 }
 
 func git(t *testing.T, dir string, args ...string) string {

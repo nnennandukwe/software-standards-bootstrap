@@ -2,6 +2,7 @@ package workspace_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -111,6 +112,21 @@ func TestOpenForPruneRequiresCommittedPackAndPreservesInspectBoundary(t *testing
 	assertErrorContains(t, err, "edit or remove the existing pack")
 }
 
+func TestOpenForPruneDirtyWorktreeNamesThePruneRecoveryCommand(t *testing.T) {
+	repo := committedRepository(t)
+	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "keep-me.md"), "committed\n")
+	git(t, repo, "add", ".software-standards")
+	git(t, repo, "commit", "-m", "adopt standards")
+	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "keep-me.md"), "dirty\n")
+
+	_, err := workspace.OpenForPrune(context.Background(), repo)
+	if err == nil ||
+		!strings.Contains(err.Error(), "rerun ssb prune inspect") ||
+		strings.Contains(err.Error(), "rerun ssb inspect") {
+		t.Fatalf("error = %v, want prune-specific recovery command", err)
+	}
+}
+
 func TestOpenForPruneRejectsUntrackedCanonicalConfiguration(t *testing.T) {
 	for name, relative := range map[string]string{
 		"skill entrypoint": ".agents/skills/untracked/SKILL.md",
@@ -128,6 +144,20 @@ func TestOpenForPruneRejectsUntrackedCanonicalConfiguration(t *testing.T) {
 				t.Fatalf("error = %v, want untracked configuration block", err)
 			}
 		})
+	}
+}
+
+func TestOpenForPruneRejectsIgnoredUntrackedConfiguration(t *testing.T) {
+	root := committedRepository(t)
+	writeFile(t, filepath.Join(root, ".software-standards", "rules", "keep.md"), "committed\n")
+	writeFile(t, filepath.Join(root, ".gitignore"), ".agents/skills/hidden/\n")
+	git(t, root, "add", ".software-standards", ".gitignore")
+	git(t, root, "commit", "-m", "adopt standards")
+	writeFile(t, filepath.Join(root, ".agents", "skills", "hidden", "SKILL.md"), "ignored\n")
+
+	_, err := workspace.OpenForPrune(context.Background(), root)
+	if err == nil || !strings.Contains(err.Error(), "untracked configuration") {
+		t.Fatalf("error = %v, want ignored configuration block", err)
 	}
 }
 
@@ -195,6 +225,47 @@ func TestOpenForInspectPreservesHostValidWhitespaceAndUnicodeInRepositoryRoot(t 
 	}
 	if got.Root() != want {
 		t.Fatalf("root = %q, want %q", got.Root(), want)
+	}
+}
+
+func TestAtCommitRejectsResolvableCommitOutsideCurrentHistory(t *testing.T) {
+	repo := committedRepository(t)
+	writeFile(t, filepath.Join(repo, "orphaned.txt"), "never adopted on current history\n")
+	git(t, repo, "add", "orphaned.txt")
+	git(t, repo, "commit", "-m", "orphaned evidence")
+	orphaned := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
+	git(t, repo, "reset", "--hard", "HEAD~1")
+
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved := strings.TrimSpace(git(t, repo, "rev-parse", "--verify", orphaned+"^{commit}")); resolved != orphaned {
+		t.Fatalf("orphaned commit did not remain resolvable: %q", resolved)
+	}
+	if _, err := ws.AtCommit(context.Background(), orphaned); err == nil ||
+		!strings.Contains(err.Error(), "not an ancestor") {
+		t.Fatalf("error = %v, want current-history ancestry block", err)
+	}
+}
+
+func TestAtCommitPreservesCanceledContextAsOperationalFailure(t *testing.T) {
+	repo := committedRepository(t)
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := ws.AtCommit(ctx, ws.Baseline()); err == nil {
+		t.Fatal("canceled ancestry lookup unexpectedly succeeded")
+	} else {
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error = %v, want context.Canceled", err)
+		}
+		if strings.Contains(err.Error(), "not an ancestor") {
+			t.Fatalf("operational failure was misclassified as trust rejection: %v", err)
+		}
 	}
 }
 

@@ -66,7 +66,10 @@ Introduce separately versioned schemas for:
 Keep rule schemas v1 and v2 unchanged. Treat a skill as `SKILL.md` plus every
 tracked, bounded-inventory-eligible file beneath its skill directory for
 application and recovery. Replacement skill candidates carry an explicit,
-complete entrypoint and supporting-file set.
+complete entrypoint and supporting-file set. Provenance follows the same
+boundary: every tracked bundle file needs an exact declaration before the
+skill can be classified as generated, user-authored, or mixed. Partial bundle
+provenance remains unknown.
 
 ## Compatibility and migration
 
@@ -82,7 +85,14 @@ Fail closed for incomplete inventory, invalid or missing capability evidence,
 unknown provenance, stale baseline, tracked worktree drift, changed source or
 candidate bytes, path collisions, incomplete decisions, dependency mismatch,
 invalid resulting rule-skill graphs, interrupted writes, malformed event
-history, and missing or mismatched verification receipts.
+history, retained-rule baselines outside current history, host-incompatible executable
+prestate, and missing or mismatched verification receipts.
+
+Inventory completeness includes ignored as well as ordinary untracked
+configuration paths. Portable path validation also rejects Windows-reserved
+components on every host so a review accepted on POSIX cannot acquire a
+different or invalid meaning on Windows. Review roots and durable input
+snapshots reject symlinked directory components before reads or writes.
 
 Use exclusive review creation, transition locks, atomic event-log replacement,
 a pre-mutation recovery journal, exact pre/post-state recovery checks, and
@@ -121,3 +131,23 @@ correctness and quality reviews before opening the draft PR.
 The draft implementation may proceed for architectural review. Merge,
 distribution, or material follow-on work requires explicit approval based on
 the evaluation evidence and a plan updated for the chosen public contract.
+
+## Audit-remediation amendment
+
+The approved deep audit of draft PR #11 requires the draft implementation to:
+
+- use one canonical application plan for dry run, mutation, event replay,
+  recovery, and verification;
+- bind receipts to the exact application event, plan, current governed
+  poststate, and any required rerender event;
+- require structured artifact-bound evidence gaps for
+  `unable-to-determine`;
+- derive a no-change outcome without writing application or verification
+  events;
+- reject non-portable and case-fold-colliding paths before filesystem access;
+  and
+- retain recovery evidence until lock release succeeds, while supporting
+  explicit journal-free stale-lock cleanup.
+
+These repairs remain part of the single draft PR because landing them
+separately would expose incomplete lifecycle and safety contracts.

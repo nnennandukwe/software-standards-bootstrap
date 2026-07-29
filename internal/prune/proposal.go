@@ -11,8 +11,28 @@ import (
 	"strings"
 )
 
+type readReviewFile func(string) ([]byte, os.FileInfo, error)
+
 // ValidateProposal validates semantic output without treating it as approval.
 func ValidateProposal(context Context, proposal Proposal, reviewRoot string) []Diagnostic {
+	return validateProposal(context, proposal, func(sourcePath string) ([]byte, os.FileInfo, error) {
+		candidatePath, err := resolvePortablePath(reviewRoot, sourcePath)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := requireRegularBundleFile(reviewRoot, candidatePath); err != nil {
+			return nil, nil, err
+		}
+		info, err := os.Lstat(candidatePath)
+		if err != nil {
+			return nil, nil, err
+		}
+		data, err := os.ReadFile(candidatePath)
+		return data, info, err
+	})
+}
+
+func validateProposal(context Context, proposal Proposal, readFile readReviewFile) []Diagnostic {
 	diagnostics := make([]Diagnostic, 0)
 	add := func(actionID, field, message, recovery string) {
 		itemPath := "proposal.yaml"
@@ -55,9 +75,13 @@ func ValidateProposal(context Context, proposal Proposal, reviewRoot string) []D
 	}
 	covered := make(map[string]string)
 	actionIDs := make(map[string]struct{})
-	targets := make(map[string]string)
+	type targetOwner struct {
+		actionID string
+		path     string
+	}
+	targets := make(map[string]targetOwner)
 	checks := make(map[string]string)
-	candidateBudgetOK := validateCandidateBudget(context, proposal, reviewRoot, add)
+	candidateBudgetOK := validateCandidateBudget(context, proposal, readFile, add)
 	for index, action := range proposal.Actions {
 		actionID := action.ID
 		if actionID == "" {
@@ -79,22 +103,27 @@ func ValidateProposal(context Context, proposal Proposal, reviewRoot string) []D
 			add(actionID, "confidence", "confidence must be low, medium, or high", "record an honest confidence band")
 		}
 
-		validateActionShape(action, reviewRoot, context.Inventory.Limits.MaxFileBytes, candidateBudgetOK, runtime.GOOS, add)
+		validateActionShape(action, readFile, context.Inventory.Limits.MaxFileBytes, candidateBudgetOK, runtime.GOOS, add)
 		if action.Target != nil {
 			for _, targetPath := range candidateTargetPaths(*action.Target) {
-				if prior, duplicate := targets[targetPath]; duplicate {
-					add(actionID, "target.target_path", "target path is also written by action "+prior, "choose one owning action for each target")
+				key := portablePathKey(targetPath)
+				if prior, duplicate := targets[key]; duplicate && prior.actionID != action.ID {
+					message := "target path is also written by action " + prior.actionID
+					if prior.path != targetPath {
+						message = "target paths alias on a case-insensitive filesystem with action " + prior.actionID
+					}
+					add(actionID, "target.target_path", message, "choose one portable owning action for each target")
 				} else {
-					targets[targetPath] = action.ID
+					targets[key] = targetOwner{actionID: action.ID, path: targetPath}
 				}
 			}
 			for _, artifact := range context.Artifacts {
-				if artifact.Path != action.Target.TargetPath {
+				if portablePathKey(artifact.Path) != portablePathKey(action.Target.TargetPath) {
 					continue
 				}
 				owned := false
 				for _, source := range action.Sources {
-					owned = owned || source.Path == artifact.Path
+					owned = owned || portablePathKey(source.Path) == portablePathKey(artifact.Path)
 				}
 				if !owned {
 					add(actionID, "target.target_path", "target would overwrite artifact "+artifact.ID+" owned by another action", "include the existing target as a source of this action")
@@ -121,9 +150,9 @@ func ValidateProposal(context Context, proposal Proposal, reviewRoot string) []D
 			if len(action.UnresolvedQuestions) == 0 {
 				add(actionID, "unresolved_questions", "unable-to-determine requires at least one unresolved question", "name the missing inventory, provenance, capability, or repository evidence")
 			}
-			continue
+			validateEvidenceGaps(action, add)
 		}
-		if len(action.RepositoryEvidence) == 0 {
+		if action.Disposition != DispositionUnableToDetermine && len(action.RepositoryEvidence) == 0 {
 			add(actionID, "repository_evidence", "every actionable disposition requires repository evidence", "cite exact current repository evidence")
 		}
 		for _, evidence := range action.RepositoryEvidence {
@@ -144,7 +173,7 @@ func ValidateProposal(context Context, proposal Proposal, reviewRoot string) []D
 				add(actionID, "repository_evidence", "repository evidence digest does not match the inventoried file "+evidence.Path, "use the exact sha256 from context.json")
 			}
 		}
-		if len(action.CapabilityRefs) == 0 {
+		if action.Disposition != DispositionUnableToDetermine && len(action.CapabilityRefs) == 0 {
 			add(actionID, "capability_refs", "every actionable disposition requires capability evidence", "reference a supported or unsupported observed capability")
 		}
 		for _, capabilityID := range action.CapabilityRefs {
@@ -153,9 +182,12 @@ func ValidateProposal(context Context, proposal Proposal, reviewRoot string) []D
 				add(actionID, "capability_refs", "unknown capability "+capabilityID, "reference a capability from the selected profile")
 				continue
 			}
-			if capability.Status == CapabilityUnknown {
+			if capability.Status == CapabilityUnknown && action.Disposition != DispositionUnableToDetermine {
 				add(actionID, "capability_refs", "capability "+capabilityID+" is unknown", "use unable-to-determine or collect conformance evidence")
 			}
+		}
+		if action.Disposition == DispositionUnableToDetermine {
+			continue
 		}
 		for _, check := range action.RequiredVerification {
 			if !stableIDPattern.MatchString(check.ID) || strings.TrimSpace(check.Command) == "" {
@@ -192,10 +224,55 @@ func ValidateProposal(context Context, proposal Proposal, reviewRoot string) []D
 	return diagnostics
 }
 
+func validateEvidenceGaps(
+	action Action,
+	add func(string, string, string, string),
+) {
+	if len(action.EvidenceGaps) == 0 {
+		add(
+			action.ID,
+			"evidence_gaps",
+			"unable-to-determine requires at least one structured evidence gap",
+			"identify the affected artifact and the exact missing inventory, provenance, capability, repository, or conflict evidence",
+		)
+		return
+	}
+	sources := make(map[string]struct{}, len(action.Sources))
+	for _, source := range action.Sources {
+		sources[source.Path] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(action.EvidenceGaps))
+	for index, gap := range action.EvidenceGaps {
+		field := fmt.Sprintf("evidence_gaps[%d]", index)
+		switch gap.Kind {
+		case EvidenceGapInventory,
+			EvidenceGapProvenance,
+			EvidenceGapCapability,
+			EvidenceGapRepository,
+			EvidenceGapConflict:
+		default:
+			add(action.ID, field+".kind", "evidence gap has unsupported kind "+gap.Kind, "use a governed evidence-gap kind")
+		}
+		if !safeRelativePath(gap.ArtifactPath) {
+			add(action.ID, field+".artifact_path", "evidence gap requires a portable artifact path", "reference an exact source artifact in this action")
+		} else if _, exists := sources[gap.ArtifactPath]; !exists {
+			add(action.ID, field+".artifact_path", "evidence gap artifact is not a source of this action", "reference an exact source artifact in this action")
+		}
+		if strings.TrimSpace(gap.Detail) == "" {
+			add(action.ID, field+".detail", "evidence gap requires the exact missing fact", "describe what evidence must be collected")
+		}
+		key := gap.Kind + "\x00" + gap.ArtifactPath
+		if _, duplicate := seen[key]; duplicate {
+			add(action.ID, field, "duplicate evidence gap for "+gap.ArtifactPath, "record each missing evidence category once per artifact")
+		}
+		seen[key] = struct{}{}
+	}
+}
+
 func validateCandidateBudget(
 	context Context,
 	proposal Proposal,
-	reviewRoot string,
+	readFile readReviewFile,
 	add func(string, string, string, string),
 ) bool {
 	count := 0
@@ -212,7 +289,7 @@ func validateCandidateBudget(
 			if !safeRelativePath(source) {
 				continue
 			}
-			info, err := os.Lstat(filepath.Join(reviewRoot, filepath.FromSlash(source)))
+			_, info, err := readFile(source)
 			if err != nil || !info.Mode().IsRegular() {
 				continue
 			}
@@ -254,7 +331,7 @@ func proposalLineRange(value string) (int, int, error) {
 
 func validateActionShape(
 	action Action,
-	reviewRoot string,
+	readFile readReviewFile,
 	maxFileBytes int64,
 	candidateBudgetOK bool,
 	goos string,
@@ -310,9 +387,11 @@ func validateActionShape(
 		return
 	}
 	if candidateBudgetOK {
-		validateCandidateFile(action.ID, "target", action.Target.SourcePath, action.Target.SHA256, reviewRoot, maxFileBytes, add)
+		validateCandidateFile(action.ID, "target", action.Target.SourcePath, action.Target.SHA256, readFile, maxFileBytes, add)
 	}
-	seenSupporting := make(map[string]struct{})
+	seenSupporting := map[string]string{
+		portablePathKey(action.Target.TargetPath): action.Target.TargetPath,
+	}
 	skillRoot := path.Dir(action.Target.TargetPath) + "/"
 	for index, supporting := range action.Target.SupportingFiles {
 		field := fmt.Sprintf("target.supporting_files[%d]", index)
@@ -322,10 +401,16 @@ func validateActionShape(
 			supporting.TargetPath == action.Target.TargetPath {
 			add(action.ID, field+".target_path", "supporting target must be a file beneath the replacement skill directory", "choose a safe path inside "+skillRoot)
 		}
-		if _, duplicate := seenSupporting[supporting.TargetPath]; duplicate {
-			add(action.ID, field+".target_path", "duplicate supporting target "+supporting.TargetPath, "write each replacement file exactly once")
+		targetKey := portablePathKey(supporting.TargetPath)
+		if prior, duplicate := seenSupporting[targetKey]; duplicate {
+			message := "duplicate supporting target " + supporting.TargetPath
+			if prior != supporting.TargetPath {
+				message = "target aliases " + prior + " on a case-insensitive filesystem"
+			}
+			add(action.ID, field+".target_path", message, "write each portable replacement path exactly once")
+		} else {
+			seenSupporting[targetKey] = supporting.TargetPath
 		}
-		seenSupporting[supporting.TargetPath] = struct{}{}
 		if err := validateCandidateMode(supporting.Mode, goos); err != nil {
 			add(action.ID, field+".mode", err.Error(), candidateModeRecovery(supporting.Mode, goos))
 		}
@@ -335,7 +420,7 @@ func validateActionShape(
 			continue
 		}
 		if candidateBudgetOK {
-			validateCandidateFile(action.ID, field, supporting.SourcePath, supporting.SHA256, reviewRoot, maxFileBytes, add)
+			validateCandidateFile(action.ID, field, supporting.SourcePath, supporting.SHA256, readFile, maxFileBytes, add)
 		}
 	}
 }
@@ -358,27 +443,18 @@ func candidateModeRecovery(mode, goos string) string {
 }
 
 func validateCandidateFile(
-	actionID, field, sourcePath, expectedDigest, reviewRoot string,
+	actionID, field, sourcePath, expectedDigest string,
+	readFile readReviewFile,
 	maxFileBytes int64,
 	add func(string, string, string, string),
 ) {
-	candidatePath := filepath.Join(reviewRoot, filepath.FromSlash(sourcePath))
-	if err := requireRegularBundleFile(reviewRoot, candidatePath); err != nil {
-		add(actionID, field+".source_path", "unsafe candidate: "+err.Error(), "use a regular file inside the review bundle without symlink components")
-		return
-	}
-	info, err := os.Stat(candidatePath)
+	content, info, err := readFile(sourcePath)
 	if err != nil {
-		add(actionID, field+".source_path", "inspect candidate: "+err.Error(), "create the complete replacement candidate")
+		add(actionID, field+".source_path", "unsafe candidate: "+err.Error(), "use a regular file inside the review bundle without symlink components")
 		return
 	}
 	if maxFileBytes <= 0 || info.Size() > maxFileBytes {
 		add(actionID, field+".source_path", "candidate exceeds the review max_file_bytes boundary", "reduce the candidate or create a new review with an evidence-backed limit")
-		return
-	}
-	content, err := os.ReadFile(candidatePath)
-	if err != nil {
-		add(actionID, field+".source_path", "read candidate: "+err.Error(), "create the complete replacement candidate")
 		return
 	}
 	if digestBytes(content) != expectedDigest {
@@ -394,8 +470,16 @@ func candidateTargetPaths(target CandidateRef) []string {
 	return result
 }
 
+func portablePathKey(value string) string {
+	return strings.ToLower(value)
+}
+
 func requireRegularBundleFile(root, candidate string) error {
-	relative, err := filepath.Rel(root, candidate)
+	absoluteRoot, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("resolve bundle root: %w", err)
+	}
+	relative, err := filepath.Rel(absoluteRoot, candidate)
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("path escapes the review bundle")
 	}

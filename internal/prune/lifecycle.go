@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -16,6 +17,24 @@ import (
 
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/workspace"
 	"go.yaml.in/yaml/v4"
+)
+
+var removeReviewTransitionLock = func(store *reviewStore) error {
+	return store.Remove(".transition.lock")
+}
+
+type durableExclusiveFile interface {
+	Write([]byte) (int, error)
+	Sync() error
+	Chmod(os.FileMode) error
+	Close() error
+}
+
+var (
+	openExclusiveFile = func(name string, flag int, perm os.FileMode) (durableExclusiveFile, error) {
+		return os.OpenFile(name, flag, perm)
+	}
+	removeIncompleteExclusiveFile = os.Remove
 )
 
 const (
@@ -26,7 +45,9 @@ const (
 	EventVerified = "verified"
 )
 
-var writeEventLogAtomically = atomicWrite
+var writeEventLogAtomically = func(store *reviewStore, data []byte, mode os.FileMode) error {
+	return store.AtomicWrite("events.jsonl", data, mode)
+}
 
 // CreateResult identifies the immutable context written for a new review.
 type CreateResult struct {
@@ -36,11 +57,13 @@ type CreateResult struct {
 
 // Review is a validated context/proposal pair and its exact proposal digest.
 type Review struct {
+	RepoRoot       string
 	Root           string
 	Context        Context
 	Proposal       Proposal
 	ProposalDigest string
 	Events         []Event
+	store          *reviewStore
 }
 
 // Event is one digest-chained review lifecycle transition.
@@ -78,6 +101,7 @@ type renderedEventPayload struct {
 	DryRun        bool   `json:"dry_run"`
 	SourceDigest  string `json:"source_digest"`
 	ContentDigest string `json:"content_digest"`
+	OutputDigest  string `json:"output_digest"`
 }
 
 type adrEventPayload struct {
@@ -103,28 +127,16 @@ func CreateReview(
 	if err := repo.VerifyPruneSnapshot(ctx); err != nil {
 		return CreateResult{}, err
 	}
-	root, err := reviewRoot(repo.Root(), options.ReviewID)
+	staging, target, err := createReviewStagingStore(repo.Root(), options.ReviewID)
 	if err != nil {
 		return CreateResult{}, err
-	}
-	if _, err := os.Lstat(root); err == nil {
-		return CreateResult{}, preconditionError("review %q already exists", options.ReviewID)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return CreateResult{}, fmt.Errorf("inspect review path: %w", err)
-	}
-	parent := filepath.Dir(root)
-	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return CreateResult{}, fmt.Errorf("create reviews directory: %w", err)
-	}
-	staging, err := os.MkdirTemp(parent, "."+options.ReviewID+"-")
-	if err != nil {
-		return CreateResult{}, fmt.Errorf("create review staging directory: %w", err)
 	}
 	complete := false
 	defer func() {
 		if !complete {
-			_ = os.RemoveAll(staging)
+			_ = staging.RemoveStaging()
 		}
+		_ = staging.Close()
 	}()
 	if err := snapshotReviewInputs(staging, options, reviewContext); err != nil {
 		return CreateResult{}, err
@@ -134,24 +146,24 @@ func CreateReview(
 		return CreateResult{}, fmt.Errorf("encode prune context: %w", err)
 	}
 	data = append(data, '\n')
-	contextFile := filepath.Join(staging, "context.json")
-	if err := writeExclusive(contextFile, data, 0o644); err != nil {
+	if err := staging.WriteExclusive("context.json", data, 0o644); err != nil {
 		return CreateResult{}, err
 	}
-	if err := os.Rename(staging, root); err != nil {
+	if err := staging.Publish(target); err != nil {
 		return CreateResult{}, fmt.Errorf("publish review bundle: %w", err)
 	}
 	complete = true
 	return CreateResult{
 		Context:     reviewContext,
-		ContextPath: filepath.ToSlash(mustRelative(repo.Root(), filepath.Join(root, "context.json"))),
+		ContextPath: filepath.ToSlash(filepath.Join(target, "context.json")),
 	}, nil
 }
 
-func snapshotReviewInputs(staging string, options ContextOptions, reviewContext Context) error {
+func snapshotReviewInputs(staging *reviewStore, options ContextOptions, reviewContext Context) error {
 	if err := snapshotFile(
 		options.Capabilities,
-		filepath.Join(staging, filepath.FromSlash(reviewContext.CapabilityProfilePath)),
+		staging,
+		reviewContext.CapabilityProfilePath,
 		reviewContext.CapabilityProfileDigest,
 	); err != nil {
 		return fmt.Errorf("snapshot capability profile: %w", err)
@@ -161,18 +173,20 @@ func snapshotReviewInputs(staging string, options ContextOptions, reviewContext 
 		if evidence.Path == filepath.Base(options.Capabilities) {
 			return fmt.Errorf("capability evidence path collides with the profile snapshot: %s", evidence.Path)
 		}
-		if err := snapshotFile(
-			filepath.Join(profileBase, filepath.FromSlash(evidence.Path)),
-			filepath.Join(staging, "inputs", "capability", filepath.FromSlash(evidence.Path)),
-			evidence.SHA256,
-		); err != nil {
+		source, err := resolvePortablePath(profileBase, evidence.Path)
+		if err != nil {
+			return fmt.Errorf("resolve capability evidence %s: %w", evidence.ID, err)
+		}
+		target := path.Join("inputs/capability", evidence.Path)
+		if err := snapshotFile(source, staging, target, evidence.SHA256); err != nil {
 			return fmt.Errorf("snapshot capability evidence %s: %w", evidence.ID, err)
 		}
 	}
 	if options.Provenance != "" {
 		if err := snapshotFile(
 			options.Provenance,
-			filepath.Join(staging, filepath.FromSlash(reviewContext.ProvenanceManifestPath)),
+			staging,
+			reviewContext.ProvenanceManifestPath,
 			reviewContext.ProvenanceManifestDigest,
 		); err != nil {
 			return fmt.Errorf("snapshot provenance manifest: %w", err)
@@ -181,7 +195,7 @@ func snapshotReviewInputs(staging string, options ContextOptions, reviewContext 
 	return nil
 }
 
-func snapshotFile(source, target, expectedDigest string) error {
+func snapshotFile(source string, staging *reviewStore, target, expectedDigest string) error {
 	data, err := os.ReadFile(source)
 	if err != nil {
 		return err
@@ -189,20 +203,29 @@ func snapshotFile(source, target, expectedDigest string) error {
 	if digestBytes(data) != expectedDigest {
 		return fmt.Errorf("source changed after context construction")
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := staging.MkdirAll(path.Dir(target), 0o755); err != nil {
 		return err
 	}
-	return writeExclusive(target, data, 0o644)
+	return staging.WriteExclusive(target, data, 0o644)
 }
 
 // LoadReview strictly loads and validates the immutable context and current
 // proposal. Diagnostics are returned separately from I/O/contract errors.
 func LoadReview(repoRoot, reviewID string) (Review, []Diagnostic, error) {
-	root, err := reviewRoot(repoRoot, reviewID)
+	store, err := openReviewStore(repoRoot, reviewID)
 	if err != nil {
 		return Review{}, nil, err
 	}
-	contextData, err := os.ReadFile(filepath.Join(root, "context.json"))
+	defer store.Close()
+	review, diagnostics, err := loadReviewFromStore(store)
+	review.store = nil
+	return review, diagnostics, err
+}
+
+func loadReviewFromStore(store *reviewStore) (Review, []Diagnostic, error) {
+	repoRoot := store.repoRoot
+	reviewID := store.reviewID
+	contextData, _, err := store.ReadRegular("context.json")
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Review{}, nil, preconditionError("review %s has no context.json", reviewID)
@@ -216,10 +239,10 @@ func LoadReview(repoRoot, reviewID string) (Review, []Diagnostic, error) {
 	if err := validateContext(reviewContext); err != nil {
 		return Review{}, nil, validationError("%v", err)
 	}
-	if err := validateReviewSnapshots(root, reviewContext); err != nil {
+	if err := validateReviewSnapshots(store, reviewContext); err != nil {
 		return Review{}, nil, validationError("%v", err)
 	}
-	proposalData, err := os.ReadFile(filepath.Join(root, "proposal.yaml"))
+	proposalData, _, err := store.ReadRegular("proposal.yaml")
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Review{}, nil, preconditionError("review %s has no proposal.yaml", reviewID)
@@ -230,21 +253,71 @@ func LoadReview(repoRoot, reviewID string) (Review, []Diagnostic, error) {
 	if err := yaml.Load(proposalData, &proposal, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
 		return Review{}, nil, validationError("parse review proposal: %v", err)
 	}
-	events, err := loadEvents(filepath.Join(root, "events.jsonl"))
-	if err != nil {
-		return Review{}, nil, validationError("%v", err)
+	events := []Event{}
+	eventData, _, eventErr := store.ReadRegular("events.jsonl")
+	if eventErr == nil {
+		events, err = loadEvents(bytes.NewReader(eventData))
+		if err != nil {
+			return Review{}, nil, validationError("%v", err)
+		}
+	} else if !errors.Is(eventErr, os.ErrNotExist) {
+		return Review{}, nil, validationError("read review events: %v", eventErr)
 	}
 	review := Review{
-		Root:           root,
+		RepoRoot:       repoRoot,
+		Root:           store.absolute,
 		Context:        reviewContext,
 		Proposal:       proposal,
 		ProposalDigest: digestBytes(proposalData),
 		Events:         events,
+		store:          store,
 	}
 	if err := validateReviewEvents(review); err != nil {
 		return Review{}, nil, validationError("%v", err)
 	}
-	return review, ValidateProposal(reviewContext, proposal, root), nil
+	return review, validateProposal(reviewContext, proposal, store.ReadRegular), nil
+}
+
+// ValidateReview extends structural loading with candidate contracts and the
+// resulting rule-skill graph without recording approval or mutating files.
+func ValidateReview(
+	ctx context.Context,
+	repo *workspace.Repository,
+	reviewID string,
+) (Review, []Diagnostic, error) {
+	review, diagnostics, err := LoadReview(repo.Root(), reviewID)
+	if err != nil || len(diagnostics) != 0 {
+		return review, diagnostics, err
+	}
+	approval := ApprovalPayload{}
+	for _, action := range review.Proposal.Actions {
+		if action.Disposition == DispositionUnableToDetermine {
+			approval.Rejected = append(approval.Rejected, action.ID)
+		} else {
+			approval.Approved = append(approval.Approved, action.ID)
+		}
+	}
+	sort.Strings(approval.Approved)
+	sort.Strings(approval.Rejected)
+	plan, err := buildApplicationPlan(review, approval, "")
+	if err == nil {
+		err = validateBuiltApplicationPlan(ctx, repo, review, plan, approval)
+	}
+	if err == nil {
+		return review, diagnostics, nil
+	}
+	if errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, workspace.ErrGitOperation) {
+		return Review{}, nil, err
+	}
+	diagnostics = append(diagnostics, Diagnostic{
+		Path:     "proposal.yaml",
+		Field:    "application_plan",
+		Message:  err.Error(),
+		Recovery: "correct the candidate or lifecycle actions, then rerun ssb prune validate",
+	})
+	return review, diagnostics, nil
 }
 
 func validateReviewEvents(review Review) error {
@@ -252,6 +325,9 @@ func validateReviewEvents(review Review) error {
 	applied := false
 	rendered := false
 	var approval ApprovalPayload
+	var appliedResult ApplyResult
+	applicationEventDigest := ""
+	renderEventDigest := ""
 	for index, event := range review.Events {
 		if event.ReviewID != review.Context.ReviewID ||
 			event.BaselineCommit != review.Context.BaselineCommit ||
@@ -286,27 +362,39 @@ func validateReviewEvents(review Review) error {
 				return fmt.Errorf("application event precedes approval")
 			}
 			var payload ApplyResult
-			if err := decodeStrictJSON(event.Payload, &payload); err != nil || payload.DryRun {
+			if err := decodeStrictJSON(event.Payload, &payload); err != nil ||
+				payload.DryRun || payload.NoChangesApproved || !validDigest(payload.PlanDigest) ||
+				len(payload.Changes) == 0 {
 				return fmt.Errorf("application payload is invalid")
 			}
-			expected := expectedRecordedChanges(review, approval)
+			expected, err := canonicalApplicationPlan(review, approval)
+			if err != nil {
+				return fmt.Errorf("derive application plan: %w", err)
+			}
 			actualDigest, _ := canonicalDigest(payload.Changes)
-			expectedDigest, _ := canonicalDigest(expected)
-			if actualDigest != expectedDigest {
+			expectedDigest, _ := canonicalDigest(expected.Changes)
+			if payload.PlanDigest != expected.PlanDigest || actualDigest != expectedDigest {
 				return fmt.Errorf("application payload does not match approved changes")
 			}
 			applied = true
+			appliedResult = payload
+			applicationEventDigest = event.EventDigest
 		case EventRendered:
 			if !applied {
 				return fmt.Errorf("rerender event precedes application")
 			}
+			if seen[EventVerified] {
+				return fmt.Errorf("rerender event follows verification")
+			}
 			var payload renderedEventPayload
 			if err := decodeStrictJSON(event.Payload, &payload); err != nil ||
 				payload.Path != "AGENTS.md" || payload.DryRun ||
-				!validDigest(payload.SourceDigest) || !validDigest(payload.ContentDigest) {
+				!validDigest(payload.SourceDigest) || !validDigest(payload.ContentDigest) ||
+				!validDigest(payload.OutputDigest) {
 				return fmt.Errorf("rerender payload is invalid")
 			}
 			rendered = true
+			renderEventDigest = event.EventDigest
 		case EventADR:
 			if !applied {
 				return fmt.Errorf("ADR event precedes application")
@@ -322,7 +410,11 @@ func validateReviewEvents(review Review) error {
 				return fmt.Errorf("verification event precedes application")
 			}
 			var payload VerificationResult
-			if err := decodeStrictJSON(event.Payload, &payload); err != nil || len(payload.Receipts) == 0 {
+			if err := decodeStrictJSON(event.Payload, &payload); err != nil ||
+				len(payload.Receipts) == 0 ||
+				payload.ApplicationEventDigest != applicationEventDigest ||
+				payload.PlanDigest != appliedResult.PlanDigest ||
+				payload.RenderEventDigest != renderEventDigest {
 				return fmt.Errorf("verification payload is invalid")
 			}
 			required := requiredRecordedChecks(review.Proposal, approval)
@@ -343,57 +435,6 @@ func validateReviewEvents(review Review) error {
 		seen[event.Kind] = true
 	}
 	return nil
-}
-
-func expectedRecordedChanges(review Review, approval ApprovalPayload) []Change {
-	approved := make(map[string]struct{}, len(approval.Approved))
-	for _, id := range approval.Approved {
-		approved[id] = struct{}{}
-	}
-	byPath := make(map[string]Change)
-	for _, action := range review.Proposal.Actions {
-		if _, ok := approved[action.ID]; !ok || action.Disposition == DispositionKeep {
-			continue
-		}
-		for _, source := range action.Sources {
-			byPath[source.Path] = Change{ActionID: action.ID, Path: source.Path, Kind: "remove"}
-			if actionRemovesSupportingFiles(action, source) {
-				for _, supporting := range supportingFilesFor(review, source.Path) {
-					byPath[supporting.Path] = Change{
-						ActionID: action.ID,
-						Path:     supporting.Path,
-						Kind:     "remove",
-					}
-				}
-			}
-		}
-		if action.Target != nil {
-			byPath[action.Target.TargetPath] = Change{
-				ActionID: action.ID,
-				Path:     action.Target.TargetPath,
-				Kind:     "write",
-				SHA256:   action.Target.SHA256,
-			}
-			for _, supporting := range action.Target.SupportingFiles {
-				byPath[supporting.TargetPath] = Change{
-					ActionID: action.ID,
-					Path:     supporting.TargetPath,
-					Kind:     "write",
-					SHA256:   supporting.SHA256,
-				}
-			}
-		}
-	}
-	paths := make([]string, 0, len(byPath))
-	for itemPath := range byPath {
-		paths = append(paths, itemPath)
-	}
-	sort.Strings(paths)
-	result := make([]Change, 0, len(paths))
-	for _, itemPath := range paths {
-		result = append(result, byPath[itemPath])
-	}
-	return result
 }
 
 func requiredRecordedChecks(proposal Proposal, approval ApprovalPayload) map[string]struct{} {
@@ -456,22 +497,27 @@ func validateRecordedApproval(proposal Proposal, payload ApprovalPayload) error 
 }
 
 // Approve records exactly one digest-bound human decision event.
-func Approve(ctx context.Context, repoPath string, options ApprovalOptions) (Event, error) {
+func Approve(ctx context.Context, repoPath string, options ApprovalOptions) (result Event, returnErr error) {
 	repo, err := workspace.Open(ctx, repoPath)
 	if err != nil {
 		return Event{}, err
 	}
-	unlock, err := acquireReviewLock(repo.Root(), options.ReviewID)
+	store, unlock, err := acquireReviewLock(repo.Root(), options.ReviewID)
 	if err != nil {
 		return Event{}, err
 	}
-	defer unlock()
-	review, diagnostics, err := LoadReview(repo.Root(), options.ReviewID)
+	defer func() {
+		returnErr = errors.Join(returnErr, unlock())
+	}()
+	review, diagnostics, err := loadReviewFromStore(store)
 	if err != nil {
 		return Event{}, err
 	}
 	if len(diagnostics) != 0 {
-		return Event{}, validationError("proposal has %d error(s); run ssb prune validate", len(diagnostics))
+		return Event{}, validationError(
+			"proposal is invalid: %s; run ssb prune validate",
+			diagnostics[0].Message,
+		)
 	}
 	if repo.Baseline() != review.Context.BaselineCommit {
 		return Event{}, preconditionError("review baseline is stale: expected %s, found %s", review.Context.BaselineCommit, repo.Baseline())
@@ -526,7 +572,26 @@ func Approve(ctx context.Context, repoPath string, options ApprovalOptions) (Eve
 	}
 	approvedIDs := sortedKeys(approved)
 	rejectedIDs := sortedKeys(rejected)
-	payload, err := json.Marshal(ApprovalPayload{Approved: approvedIDs, Rejected: rejectedIDs})
+	approval := ApprovalPayload{Approved: approvedIDs, Rejected: rejectedIDs}
+	plan, err := buildApplicationPlan(review, approval, "")
+	if err != nil {
+		return Event{}, preconditionError(
+			"approval cannot produce a safe application plan: %v",
+			err,
+		)
+	}
+	if err := validateBuiltApplicationPlan(ctx, repo, review, plan, approval); err != nil {
+		if errors.Is(err, context.Canceled) ||
+			errors.Is(err, context.DeadlineExceeded) ||
+			errors.Is(err, workspace.ErrGitOperation) {
+			return Event{}, err
+		}
+		return Event{}, validationError(
+			"approval candidate or resulting graph is invalid: %v",
+			err,
+		)
+	}
+	payload, err := json.Marshal(approval)
 	if err != nil {
 		return Event{}, fmt.Errorf("encode approval: %w", err)
 	}
@@ -541,25 +606,33 @@ func Approve(ctx context.Context, repoPath string, options ApprovalOptions) (Eve
 	return event, nil
 }
 
-func acquireReviewLock(repoRoot, reviewID string) (func(), error) {
-	root, err := reviewRoot(repoRoot, reviewID)
+func acquireReviewLock(repoRoot, reviewID string) (*reviewStore, func() error, error) {
+	store, err := openReviewStore(repoRoot, reviewID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	lockPath := filepath.Join(root, ".transition.lock")
-	file, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	lockPath := store.display(".transition.lock")
+	err = store.WriteExclusive(".transition.lock", []byte(reviewID+"\n"), 0o600)
 	if err != nil {
+		_ = store.Close()
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, preconditionError("review %s does not exist", reviewID)
+			return nil, nil, preconditionError("review %s does not exist", reviewID)
 		}
 		if errors.Is(err, os.ErrExist) {
-			return nil, preconditionError("another review transition is active; if it crashed, confirm no process is active and remove %s", lockPath)
+			return nil, nil, preconditionError("another review transition is active; if it crashed, confirm no process is active and remove %s", lockPath)
 		}
-		return nil, fmt.Errorf("create review transition lock: %w", err)
+		return nil, nil, fmt.Errorf("create review transition lock: %w", err)
 	}
-	return func() {
-		_ = file.Close()
-		_ = os.Remove(lockPath)
+	return store, func() error {
+		removeErr := removeReviewTransitionLock(store)
+		closeErr := store.Close()
+		if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return errors.Join(
+				fmt.Errorf("remove review transition lock %s: %w", lockPath, removeErr),
+				closeErr,
+			)
+		}
+		return closeErr
 	}, nil
 }
 
@@ -585,15 +658,40 @@ func validateContext(reviewContext Context) error {
 	if reviewContext.Inventory.Truncated {
 		return fmt.Errorf("%w: stored context is truncated", ErrIncompleteInventory)
 	}
+	if len(reviewContext.Artifacts) == 0 {
+		return fmt.Errorf("review context has no governed artifacts")
+	}
+	governedPaths := make([]string, 0, len(reviewContext.Artifacts))
 	for _, artifact := range reviewContext.Artifacts {
-		if artifact.Mode != "100644" && artifact.Mode != "100755" {
-			return fmt.Errorf("review context artifact %s has an invalid mode", artifact.Path)
+		kind, id, canonical := artifactIdentity(artifact.Path)
+		if !canonical || kind != artifact.Kind || id != artifact.ID ||
+			!validDigest(artifact.SHA256) ||
+			(artifact.Mode != "100644" && artifact.Mode != "100755") {
+			return fmt.Errorf("review context artifact %s is invalid", artifact.Path)
 		}
+		switch artifact.Origin {
+		case OriginGenerated, OriginUserAuthored, OriginMixed, OriginUnknown:
+		default:
+			return fmt.Errorf("review context artifact %s has invalid provenance", artifact.Path)
+		}
+		if artifact.Kind != ArtifactSkill && len(artifact.SupportingFiles) != 0 {
+			return fmt.Errorf("review context rule %s has supporting files", artifact.Path)
+		}
+		governedPaths = append(governedPaths, artifact.Path)
+		skillRoot := path.Dir(artifact.Path) + "/"
 		for _, supporting := range artifact.SupportingFiles {
-			if supporting.Mode != "100644" && supporting.Mode != "100755" {
-				return fmt.Errorf("review context supporting file %s has an invalid mode", supporting.Path)
+			if artifact.Kind != ArtifactSkill ||
+				!strings.HasPrefix(supporting.Path, skillRoot) ||
+				supporting.Path == artifact.Path ||
+				!validDigest(supporting.SHA256) ||
+				(supporting.Mode != "100644" && supporting.Mode != "100755") {
+				return fmt.Errorf("review context supporting file %s is invalid", supporting.Path)
 			}
+			governedPaths = append(governedPaths, supporting.Path)
 		}
+	}
+	if err := validateGovernedTreePaths(governedPaths); err != nil {
+		return fmt.Errorf("review context governed paths are invalid: %w", err)
 	}
 	if !validDigest(reviewContext.CapabilityProfileDigest) ||
 		!safeRelativePath(reviewContext.CapabilityProfilePath) ||
@@ -609,44 +707,33 @@ func validateContext(reviewContext Context) error {
 	return nil
 }
 
-func validateReviewSnapshots(root string, reviewContext Context) error {
-	profilePath := filepath.Join(root, filepath.FromSlash(reviewContext.CapabilityProfilePath))
-	if err := verifySnapshotFile(profilePath, reviewContext.CapabilityProfileDigest); err != nil {
+func validateReviewSnapshots(store *reviewStore, reviewContext Context) error {
+	profileData, _, err := store.ReadRegular(reviewContext.CapabilityProfilePath)
+	if err != nil {
 		return fmt.Errorf("capability profile snapshot: %w", err)
 	}
-	profileRoot := filepath.Dir(profilePath)
+	if digestBytes(profileData) != reviewContext.CapabilityProfileDigest {
+		return fmt.Errorf("capability profile snapshot: snapshot digest mismatch")
+	}
+	profileRoot := path.Dir(reviewContext.CapabilityProfilePath)
 	for _, evidence := range reviewContext.Capabilities.Evidence {
-		target := filepath.Join(profileRoot, filepath.FromSlash(evidence.Path))
-		if err := requireRegularBundleFile(root, target); err != nil {
+		target := path.Join(profileRoot, evidence.Path)
+		data, _, err := store.ReadRegular(target)
+		if err != nil {
 			return fmt.Errorf("capability evidence snapshot %s: %w", evidence.ID, err)
 		}
-		if err := verifySnapshotFile(target, evidence.SHA256); err != nil {
-			return fmt.Errorf("capability evidence snapshot %s: %w", evidence.ID, err)
+		if digestBytes(data) != evidence.SHA256 {
+			return fmt.Errorf("capability evidence snapshot %s: snapshot digest mismatch", evidence.ID)
 		}
 	}
 	if reviewContext.ProvenanceManifestDigest != "" {
-		target := filepath.Join(root, filepath.FromSlash(reviewContext.ProvenanceManifestPath))
-		if err := verifySnapshotFile(target, reviewContext.ProvenanceManifestDigest); err != nil {
+		data, _, err := store.ReadRegular(reviewContext.ProvenanceManifestPath)
+		if err != nil {
 			return fmt.Errorf("provenance snapshot: %w", err)
 		}
-	}
-	return nil
-}
-
-func verifySnapshotFile(filePath, expectedDigest string) error {
-	info, err := os.Lstat(filePath)
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("snapshot is not a regular file")
-	}
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return err
-	}
-	if digestBytes(data) != expectedDigest {
-		return fmt.Errorf("snapshot digest mismatch")
+		if digestBytes(data) != reviewContext.ProvenanceManifestDigest {
+			return fmt.Errorf("provenance snapshot: snapshot digest mismatch")
+		}
 	}
 	return nil
 }
@@ -655,21 +742,48 @@ func reviewRoot(repoRoot, reviewID string) (string, error) {
 	if !stableIDPattern.MatchString(reviewID) {
 		return "", fmt.Errorf("review id must be lower-case kebab-case")
 	}
-	return filepath.Join(repoRoot, ".software-standards", "reviews", reviewID), nil
+	root := filepath.Join(repoRoot, ".software-standards", "reviews", reviewID)
+	current := repoRoot
+	for _, component := range []string{".software-standards", "reviews", reviewID} {
+		current = filepath.Join(current, component)
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			return root, nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("inspect review path %s: %w", current, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("review path %s contains a symlink", current)
+		}
+		if !info.IsDir() {
+			return "", fmt.Errorf("review path %s is not a directory", current)
+		}
+	}
+	return root, nil
 }
 
-func writeExclusive(filePath string, data []byte, mode os.FileMode) error {
-	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+func writeExclusive(filePath string, data []byte, mode os.FileMode) (returnErr error) {
+	file, err := openExclusiveFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", filePath, err)
 	}
-	defer file.Close()
-	if written, err := file.Write(data); err != nil {
-		return fmt.Errorf("write %s: %w", filePath, err)
-	} else if written != len(data) {
-		return fmt.Errorf("write %s: %w", filePath, io.ErrShortWrite)
-	}
-	return file.Sync()
+	return writeDurableExclusive(filePath, file, data, mode)
+}
+
+func writeDurableExclusive(
+	filePath string,
+	file durableExclusiveFile,
+	data []byte,
+	mode os.FileMode,
+) (returnErr error) {
+	return writeDurableExclusiveWithCleanup(
+		filePath,
+		file,
+		data,
+		mode,
+		func() error { return removeIncompleteExclusiveFile(filePath) },
+	)
 }
 
 func decodeStrictJSON(data []byte, target any) error {
@@ -684,17 +798,9 @@ func decodeStrictJSON(data []byte, target any) error {
 	return nil
 }
 
-func loadEvents(filePath string) ([]Event, error) {
-	file, err := os.Open(filePath)
-	if errors.Is(err, os.ErrNotExist) {
-		return []Event{}, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read review events: %w", err)
-	}
-	defer file.Close()
+func loadEvents(reader io.Reader) ([]Event, error) {
 	events := make([]Event, 0)
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64<<10), 64<<20)
 	previous := ""
 	for scanner.Scan() {
@@ -743,13 +849,28 @@ func newEvent(review Review, kind string, payload []byte, recordedAt time.Time) 
 }
 
 func appendEvent(review Review, event Event) error {
+	store := review.store
+	owned := false
+	if store == nil {
+		var err error
+		store, err = openReviewStore(review.RepoRoot, review.Context.ReviewID)
+		if err != nil {
+			return fmt.Errorf("open anchored review event path: %w", err)
+		}
+		owned = true
+	}
+	if owned {
+		defer store.Close()
+	}
+	if store.absolute != review.Root {
+		return fmt.Errorf("review event path changed after loading")
+	}
 	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("encode review event: %w", err)
 	}
 	data = append(data, '\n')
-	eventPath := filepath.Join(review.Root, "events.jsonl")
-	existing, err := os.ReadFile(eventPath)
+	existing, _, err := store.ReadRegular("events.jsonl")
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("read review event log before append: %w", err)
 	}
@@ -759,7 +880,7 @@ func appendEvent(review Review, event Event) error {
 	next := make([]byte, 0, len(existing)+len(data))
 	next = append(next, existing...)
 	next = append(next, data...)
-	if err := writeEventLogAtomically(eventPath, next, 0o644); err != nil {
+	if err := writeEventLogAtomically(store, next, 0o644); err != nil {
 		return fmt.Errorf("atomically replace review event log: %w", err)
 	}
 	return nil
@@ -795,12 +916,4 @@ func sortedKeys(values map[string]struct{}) []string {
 	}
 	sort.Strings(result)
 	return result
-}
-
-func mustRelative(root, target string) string {
-	relative, err := filepath.Rel(root, target)
-	if err != nil || strings.HasPrefix(relative, "..") {
-		panic("review path escaped repository root")
-	}
-	return relative
 }

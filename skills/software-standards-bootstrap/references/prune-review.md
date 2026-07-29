@@ -18,6 +18,10 @@ Use only the exact `context.json` created by `ssb prune inspect`. Stop when:
 Never infer provenance. `unknown` means the only valid disposition is
 `unable-to-determine`.
 
+Skill provenance is bundle-wide. The manifest must bind `SKILL.md` and every
+tracked supporting file; partial coverage is unknown, while complete files
+with different declared origins are mixed.
+
 ## Evaluation passes
 
 First evaluate rules independently:
@@ -79,8 +83,27 @@ Allowed dispositions:
 - `update`: exactly one source and one complete target;
 - `consolidate`: at least two same-kind sources and one complete target;
 - `remove`: exactly one source, no target; and
-- `unable-to-determine`: exactly one source, no target, and one or more
-  `unresolved_questions`.
+- `unable-to-determine`: exactly one source, no target, one or more structured
+  `evidence_gaps`, and one or more `unresolved_questions`.
+
+An evidence gap binds the absent or inconclusive fact to an exact action
+source:
+
+```yaml
+evidence_gaps:
+  - kind: provenance
+    artifact_path: .software-standards/rules/example.md
+    detail: No provenance declaration matches the inventoried bytes.
+unresolved_questions:
+  - Who authored and adopted this rule?
+```
+
+Allowed gap kinds are `inventory`, `provenance`, `capability`, `repository`,
+and `conflict`.
+
+All proposal paths must be portable across supported hosts. Do not use
+backslashes, colons, Windows-reserved device names, invalid Windows filename
+characters, or components ending in a dot or space.
 
 For update and consolidation, write the complete replacement below
 `candidates/<action-id>/` and provide:
@@ -113,6 +136,9 @@ Modes are exact Git tree modes, not advisory metadata. On Windows, do not
 propose `100755`: the CLI fails validation rather than silently writing a
 non-executable file or changing the Git index. Use a POSIX host when the
 replacement bundle requires executable entrypoints or supporting scripts.
+Also use a POSIX host when an approved action removes or replaces an existing
+tracked `100755` file; Windows application planning rejects that prestate
+before presenting a writable dry run.
 
 Every actionable disposition requires non-empty rationale, an honest
 `low`/`medium`/`high` confidence band, at least one repository evidence
@@ -123,6 +149,12 @@ Every actionable proposal action must map at least one exact external check
 under `required_verification`; do not execute it or fabricate its later
 receipt.
 
+Use only forward-slash portable paths. Never emit backslashes, drive or UNC
+paths, dot segments, or two targets that differ only by case.
+
 Do not edit `context.json` or append `events.jsonl`. Do not approve a proposal,
 apply its files, rerender `AGENTS.md`, create an ADR, execute verification
 commands, fabricate receipts, or perform Git mutations.
+
+For a skill-only review, omit rerendering or complete it before verification.
+Never add rendered output after the verification event it would need to bind.

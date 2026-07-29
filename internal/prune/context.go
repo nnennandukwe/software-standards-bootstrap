@@ -116,6 +116,7 @@ func loadCapabilityProfile(filePath string) (CapabilityProfile, string, error) {
 
 	base := filepath.Dir(filePath)
 	evidenceByID := make(map[string]CapabilityEvidence)
+	evidencePaths := make(map[string]string)
 	conformance := make(map[string]bool)
 	for _, item := range profile.Evidence {
 		if !stableIDPattern.MatchString(item.ID) {
@@ -127,7 +128,22 @@ func loadCapabilityProfile(filePath string) (CapabilityProfile, string, error) {
 		if !safeRelativePath(item.Path) {
 			return CapabilityProfile{}, "", fmt.Errorf("unsafe capability evidence path %q", item.Path)
 		}
-		evidencePath := filepath.Join(base, filepath.FromSlash(item.Path))
+		pathKey := portablePathKey(item.Path)
+		if prior, duplicate := evidencePaths[pathKey]; duplicate {
+			return CapabilityProfile{}, "", fmt.Errorf(
+				"duplicate capability evidence path %q (already used as %q)",
+				item.Path,
+				prior,
+			)
+		}
+		evidencePaths[pathKey] = item.Path
+		evidencePath, err := resolvePortablePath(base, item.Path)
+		if err != nil {
+			return CapabilityProfile{}, "", fmt.Errorf("resolve capability evidence %s: %w", item.Path, err)
+		}
+		if err := requireRegularBundleFile(base, evidencePath); err != nil {
+			return CapabilityProfile{}, "", fmt.Errorf("unsafe capability evidence %s: %w", item.Path, err)
+		}
 		content, err := os.ReadFile(evidencePath)
 		if err != nil {
 			return CapabilityProfile{}, "", fmt.Errorf("read capability evidence %s: %w", item.Path, err)
@@ -245,6 +261,9 @@ func loadArtifacts(
 			treePaths = append(treePaths, string(record))
 		}
 	}
+	if err := validateGovernedTreePaths(treePaths); err != nil {
+		return nil, err
+	}
 	inventoryFiles := make(map[string]inventory.File, len(report.Files))
 	for _, file := range report.Files {
 		inventoryFiles[file.Path] = file
@@ -267,21 +286,13 @@ func loadArtifacts(
 			return nil, fmt.Errorf("configuration %s is not a tracked regular file", relative)
 		}
 		digest := inventoried.SHA256
-		origin := OriginUnknown
-		if declared, exists := provenanceByPath[relative]; exists {
-			if declared.SHA256 != digest {
-				return nil, fmt.Errorf("provenance digest mismatch for %s", relative)
-			}
-			origin = declared.Origin
-			delete(provenanceByPath, relative)
-		}
 		artifact := Artifact{
 			Kind:   kind,
 			ID:     id,
 			Path:   relative,
 			SHA256: digest,
 			Mode:   mainEntry.Mode,
-			Origin: origin,
+			Origin: OriginUnknown,
 		}
 		if kind == ArtifactSkill {
 			prefix := path.Dir(relative) + "/"
@@ -305,6 +316,11 @@ func loadArtifacts(
 				})
 			}
 		}
+		origin, err := consumeArtifactProvenance(artifact, provenanceByPath)
+		if err != nil {
+			return nil, err
+		}
+		artifact.Origin = origin
 		artifacts = append(artifacts, artifact)
 	}
 	sort.Slice(artifacts, func(i, j int) bool {
@@ -322,6 +338,42 @@ func loadArtifacts(
 		return nil, fmt.Errorf("adopted pack has no lifecycle candidate rules or repository skills")
 	}
 	return artifacts, nil
+}
+
+func consumeArtifactProvenance(
+	artifact Artifact,
+	provenanceByPath map[string]ProvenanceEntry,
+) (string, error) {
+	files := []ArtifactFile{{
+		Path: artifact.Path, SHA256: artifact.SHA256, Mode: artifact.Mode,
+	}}
+	files = append(files, artifact.SupportingFiles...)
+	complete := true
+	origins := make(map[string]struct{})
+	for _, file := range files {
+		declared, exists := provenanceByPath[file.Path]
+		if !exists {
+			complete = false
+			continue
+		}
+		delete(provenanceByPath, file.Path)
+		if declared.SHA256 != file.SHA256 {
+			return "", fmt.Errorf("provenance digest mismatch for %s", file.Path)
+		}
+		origins[declared.Origin] = struct{}{}
+	}
+	if !complete {
+		return OriginUnknown, nil
+	}
+	if _, unknown := origins[OriginUnknown]; unknown {
+		return OriginUnknown, nil
+	}
+	if len(origins) == 1 {
+		for origin := range origins {
+			return origin, nil
+		}
+	}
+	return OriginMixed, nil
 }
 
 func artifactIdentity(relative string) (string, string, bool) {
@@ -361,9 +413,4 @@ func validDigest(value string) bool {
 	}
 	_, err := hex.DecodeString(strings.TrimPrefix(value, "sha256:"))
 	return err == nil && value == strings.ToLower(value)
-}
-
-func safeRelativePath(value string) bool {
-	return value != "" && !path.IsAbs(value) && path.Clean(value) == value &&
-		value != "." && value != ".." && !strings.HasPrefix(value, "../")
 }
