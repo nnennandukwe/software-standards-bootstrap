@@ -57,7 +57,7 @@ const (
 
   --repo PATH              target Git repository (default ".")
   --review ID              record rerendering for an applied prune review
-  --dry-run                print the complete proposed AGENTS.md without writing
+  --dry-run                preview the proposed AGENTS.md or report that no write applies
 `
 	adrHelp = `Usage: ssb adr [--repo PATH] [--review ID] [--adr-dir PATH] [--dry-run]
 
@@ -345,6 +345,14 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return 3
 	}
 	if *dryRun {
+		if !result.Changed {
+			fmt.Fprintf(
+				stdout,
+				"%s would not be changed: the pack has no active semantic rule, verification recipe, or Agent Skill to project.\n",
+				result.Path,
+			)
+			return 0
+		}
 		fmt.Fprintf(stdout, "Dry run — proposed %s:\n\n", result.Path)
 		_, _ = stdout.Write(result.Content)
 		if len(result.Content) == 0 || result.Content[len(result.Content)-1] != '\n' {

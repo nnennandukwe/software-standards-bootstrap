@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -942,6 +943,41 @@ func TestRenderDryRunAndValidationFailureHaveNoFilesystemEffects(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(repo, "AGENTS.md")); !os.IsNotExist(err) {
 		t.Fatalf("invalid render created AGENTS.md: %v", err)
+	}
+}
+
+func TestRenderDryRunReportsNoWriteForZeroArtifactPack(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidPack(t, repo, baseline)
+	reportPath := filepath.Join(repo, ".software-standards", "report.md")
+	report, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifactsStart := strings.Index(string(report), "artifacts:\n")
+	bodyStart := strings.Index(string(report), "---\n# Software standards report")
+	if artifactsStart < 0 || bodyStart < 0 || bodyStart <= artifactsStart {
+		t.Fatalf("unexpected report fixture:\n%s", report)
+	}
+	emptyReport := string(report[:artifactsStart]) + "artifacts: []\n" + string(report[bodyStart:])
+	writeFile(t, reportPath, emptyReport)
+	if err := os.Remove(filepath.Join(repo, ".software-standards", "rules", "verify-before-merge.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{"render", "--repo", repo, "--dry-run"}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("zero-artifact dry run failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "AGENTS.md would not be changed") ||
+		!strings.Contains(stdout.String(), "no active semantic rule, verification recipe, or Agent Skill") ||
+		strings.Contains(stdout.String(), "proposed AGENTS.md") {
+		t.Fatalf("zero-artifact dry run response is unclear:\n%s", stdout.String())
+	}
+	if _, err := os.Lstat(filepath.Join(repo, "AGENTS.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("zero-artifact dry run created AGENTS.md: %v", err)
 	}
 }
 

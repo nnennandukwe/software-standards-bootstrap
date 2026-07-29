@@ -395,6 +395,45 @@ Keep public API changes backward compatible.
 			t.Fatalf("unexpected diagnostics: %#v", diagnostics)
 		}
 	})
+
+	t.Run("symlinked artifact directory", func(t *testing.T) {
+		repo, baseline := evidenceRepository(t)
+		writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), actionableReport(baseline, validRuleManifestEntry()))
+		outside := t.TempDir()
+		writeFile(t, filepath.Join(outside, "keep-public-api-compatible.md"), fmt.Sprintf(`---
+schema: ssb.dev/rule/v2
+id: keep-public-api-compatible
+title: Keep public APIs compatible
+category: compatibility
+lenses:
+  - kind: base
+directive: always
+scopes: ["**/*.go"]
+derivation: extracted
+evidence:
+  - role: declares
+    path: main.go
+    lines: 1-1
+    excerpt_sha256: %s
+---
+Keep public API changes backward compatible.
+`, excerptHash("package main\n")))
+		if err := os.Symlink(outside, filepath.Join(repo, ".software-standards", "rules")); err != nil {
+			t.Fatal(err)
+		}
+
+		ws, err := workspace.Open(context.Background(), repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+		if err != nil {
+			t.Fatalf("symlinked artifact path returned internal error: %v", err)
+		}
+		if !diagnosticsContain(diagnostics, "contains a symlink component") {
+			t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+		}
+	})
 }
 
 func TestValidateRejectsInventoryThatDoesNotMatchBaseline(t *testing.T) {
@@ -417,6 +456,29 @@ func TestValidateRejectsInventoryThatDoesNotMatchBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !diagnosticsContain(diagnostics, "does not exactly match") {
+		t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+	}
+}
+
+func TestValidateRejectsNoncanonicalInventoryFileLimit(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	report := strings.Replace(
+		actionableReport(baseline, "  []"),
+		"max_file_bytes: 1048576",
+		"max_file_bytes: 1",
+		1,
+	)
+	writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), report)
+
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !diagnosticsContain(diagnostics, "max_file_bytes must remain 1048576") {
 		t.Fatalf("unexpected diagnostics: %#v", diagnostics)
 	}
 }

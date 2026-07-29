@@ -120,7 +120,7 @@ func deriveReviewStatus(
 				Path:     "events.jsonl",
 				Field:    "application_plan",
 				Message:  "approved decisions cannot produce a safe application plan: " + planErr.Error(),
-				Recovery: "create a new review whose approved decisions retain or replace at least one rule",
+				Recovery: "create a new review whose approved decisions preserve the actionable report contract",
 			})
 			return status, diagnostics, nil
 		}
@@ -461,13 +461,20 @@ func verifyPlanPoststate(repoRoot string, plan applicationPlan) error {
 	if err != nil {
 		return err
 	}
+	expectedGoverned := make(map[string]plannedFile, len(expected))
+	for itemPath, file := range expected {
+		if itemPath == actionableReportPath {
+			continue
+		}
+		expectedGoverned[itemPath] = file
+	}
 	for itemPath := range current {
-		if _, exists := expected[itemPath]; !exists {
+		if _, exists := expectedGoverned[itemPath]; !exists {
 			return fmt.Errorf("unapproved governed path %s appeared", itemPath)
 		}
 	}
-	if len(current) != len(expected) {
-		return fmt.Errorf("governed path count is %d, expected %d", len(current), len(expected))
+	if len(current) != len(expectedGoverned) {
+		return fmt.Errorf("governed path count is %d, expected %d", len(current), len(expectedGoverned))
 	}
 	return nil
 }

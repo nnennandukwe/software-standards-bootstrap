@@ -513,10 +513,24 @@ func buildCandidateOperations(
 	approval ApprovalPayload,
 ) (map[string]operation, error) {
 	candidates := candidateInputsForApproval(review, approval)
+	_, reportContent, err := actionableReportChange(review, approval)
+	if err != nil {
+		return nil, err
+	}
 	operations := make(map[string]operation, len(plan.Changes))
 	for _, change := range plan.Changes {
 		item := operation{Change: change}
 		if change.Poststate.Exists {
+			if change.Path == actionableReportPath {
+				if len(reportContent) == 0 ||
+					digestBytes(reportContent) != change.Poststate.SHA256 {
+					return nil, fmt.Errorf("application plan report manifest content does not match its poststate")
+				}
+				item.Content = reportContent
+				item.Mode = candidateMode(change.Poststate.Mode)
+				operations[change.Path] = item
+				continue
+			}
 			candidate, exists := candidates[change.Path]
 			if !exists {
 				return nil, fmt.Errorf("application plan lacks candidate input for %s", change.Path)
@@ -1501,7 +1515,7 @@ func planOperationPoststates(plan applicationPlan) map[string]string {
 
 func safeApplicationTarget(repoRoot, relative string) error {
 	if !validApplicationPath(relative) {
-		return fmt.Errorf("application target %s is not a canonical rule or skill path", relative)
+		return fmt.Errorf("application target %s is not a canonical actionable artifact or report path", relative)
 	}
 	target, err := resolvePortablePath(repoRoot, relative)
 	if err != nil {
@@ -1533,6 +1547,9 @@ func safeApplicationTarget(repoRoot, relative string) error {
 }
 
 func validApplicationPath(relative string) bool {
+	if relative == actionableReportPath {
+		return true
+	}
 	if _, _, ok := artifactIdentity(relative); ok {
 		return true
 	}

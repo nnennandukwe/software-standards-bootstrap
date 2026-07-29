@@ -120,6 +120,61 @@ type Report struct {
 	Body           string             `yaml:"-" json:"body"`
 }
 
+// RemoveManifestArtifacts removes accepted artifacts and relationships to
+// them while preserving the report inventory and narrative. Lifecycle
+// mutation uses this to keep report.md in the same atomic write set as the
+// governed artifacts it removes.
+func RemoveManifestArtifacts(data []byte, removedIDs map[string]struct{}) ([]byte, error) {
+	if len(removedIDs) == 0 {
+		return data, nil
+	}
+	frontmatter, body, err := splitFrontmatter(data)
+	if err != nil {
+		return nil, err
+	}
+	var report Report
+	if err := yaml.Load(frontmatter, &report, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+		return nil, fmt.Errorf("parse report frontmatter: %w", err)
+	}
+	found := make(map[string]struct{}, len(removedIDs))
+	artifacts := make([]ManifestArtifact, 0, len(report.Artifacts))
+	for _, artifact := range report.Artifacts {
+		if _, removed := removedIDs[artifact.ID]; removed {
+			found[artifact.ID] = struct{}{}
+			continue
+		}
+		relationships := artifact.RelatedArtifactIDs[:0]
+		for _, relatedID := range artifact.RelatedArtifactIDs {
+			if _, removed := removedIDs[relatedID]; !removed {
+				relationships = append(relationships, relatedID)
+			}
+		}
+		artifact.RelatedArtifactIDs = relationships
+		artifacts = append(artifacts, artifact)
+	}
+	if len(found) != len(removedIDs) {
+		missing := make([]string, 0, len(removedIDs)-len(found))
+		for id := range removedIDs {
+			if _, exists := found[id]; !exists {
+				missing = append(missing, id)
+			}
+		}
+		sort.Strings(missing)
+		return nil, fmt.Errorf("report does not list artifact %s", missing[0])
+	}
+	report.Artifacts = artifacts
+	encoded, err := yaml.Marshal(report)
+	if err != nil {
+		return nil, fmt.Errorf("encode report frontmatter: %w", err)
+	}
+	result := make([]byte, 0, len(encoded)+len(body)+10)
+	result = append(result, "---\n"...)
+	result = append(result, encoded...)
+	result = append(result, "---\n"...)
+	result = append(result, body...)
+	return result, nil
+}
+
 // Lens identifies one context dimension used to select a rule. Values within
 // one kind are alternatives; represented kinds are matched together.
 type Lens struct {
@@ -478,10 +533,11 @@ func validateActionablePack(
 		}
 	}
 
-	unlisted, scanErr := unlistedNativeArtifacts(repo.Root(), entriesByPath)
+	unlisted, scanDiagnostics, scanErr := unlistedNativeArtifacts(repo.Root(), entriesByPath)
 	if scanErr != nil {
 		return Pack{}, nil, scanErr
 	}
+	diagnostics = append(diagnostics, scanDiagnostics...)
 	for _, relative := range unlisted {
 		diagnostics = append(diagnostics, diagnostic(
 			relative,
@@ -515,33 +571,40 @@ func validateReport(repo *workspace.Repository, report Report, retained bool) []
 			"reinspect the new commit and refresh the report and every evidence hash",
 		)
 	}
-	inventory := report.Inventory
-	if inventory.SchemaVersion != 2 || inventory.InventoryVersion != "ssb-inventory-v2" {
+	reportInventory := report.Inventory
+	if reportInventory.SchemaVersion != 2 || reportInventory.InventoryVersion != "ssb-inventory-v2" {
 		add("inventory", "inventory must preserve schema 2 ssb-inventory-v2 accounting", "copy the complete successful ssb inspect inventory")
 	}
-	if inventory.BaselineCommit != report.BaselineCommit {
+	if reportInventory.BaselineCommit != report.BaselineCommit {
 		add("inventory.baseline_commit", "inventory baseline_commit must match the report baseline_commit", "copy one complete inventory for the report baseline")
 	}
-	if inventory.Truncated {
+	if reportInventory.Truncated {
 		add("inventory.truncated", "report inventory coverage must be complete", "rerun inspection with sufficient limits before producing artifacts")
 	}
-	if inventory.Limits.MaxCandidateFiles <= 0 ||
-		inventory.Limits.MaxCandidateBytes <= 0 ||
-		inventory.Limits.MaxFileBytes <= 0 {
+	if reportInventory.Limits.MaxCandidateFiles <= 0 ||
+		reportInventory.Limits.MaxCandidateBytes <= 0 ||
+		reportInventory.Limits.MaxFileBytes <= 0 {
 		add("inventory.limits", "inventory limits must be positive", "copy the exact limits from ssb inspect")
 	}
-	if inventory.CandidateFiles != inventory.ScannedFiles+inventory.RemainingCandidateFiles ||
-		inventory.CandidateBytes != inventory.ScannedBytes+inventory.RemainingCandidateBytes {
+	if reportInventory.Limits.MaxFileBytes != inventory.DefaultLimits().MaxFileBytes {
+		add(
+			"inventory.limits.max_file_bytes",
+			fmt.Sprintf("max_file_bytes must remain %d", inventory.DefaultLimits().MaxFileBytes),
+			"copy the fixed per-file limit from ssb inspect",
+		)
+	}
+	if reportInventory.CandidateFiles != reportInventory.ScannedFiles+reportInventory.RemainingCandidateFiles ||
+		reportInventory.CandidateBytes != reportInventory.ScannedBytes+reportInventory.RemainingCandidateBytes {
 		add("inventory", "candidate, scanned, and remaining inventory accounting is inconsistent", "copy the complete inventory without editing its counts")
 	}
-	if inventory.IndexedFiles != len(inventory.Files) {
+	if reportInventory.IndexedFiles != len(reportInventory.Files) {
 		add("inventory.indexed_files", "indexed_files must equal the number of inventory file records", "copy every indexed file record from ssb inspect")
 	}
 	var indexedBytes int64
-	for _, file := range inventory.Files {
+	for _, file := range reportInventory.Files {
 		indexedBytes += file.Bytes
 	}
-	if inventory.IndexedBytes != indexedBytes {
+	if reportInventory.IndexedBytes != indexedBytes {
 		add("inventory.indexed_bytes", "indexed_bytes must equal the sum of inventory file bytes", "copy the complete inventory without editing its byte counts")
 	}
 	return diagnostics
@@ -685,10 +748,7 @@ func loadActionableRule(
 	root string,
 	manifest ManifestArtifact,
 ) (Rule, []Diagnostic, error) {
-	data, diagnostics, err := readRequiredRegularFile(
-		filepath.Join(root, filepath.FromSlash(manifest.Path)),
-		manifest.Path,
-	)
+	data, diagnostics, err := readManifestArtifact(root, manifest)
 	if err != nil || len(data) == 0 {
 		if len(data) == 0 && len(diagnostics) != 0 {
 			for index := range diagnostics {
@@ -1102,6 +1162,16 @@ func readManifestArtifact(
 	root string,
 	manifest ManifestArtifact,
 ) ([]byte, []Diagnostic, error) {
+	if component, found, err := findSymlinkComponent(root, manifest.Path); err != nil {
+		return nil, nil, err
+	} else if found {
+		return nil, []Diagnostic{diagnostic(
+			manifest.Path,
+			"file",
+			manifest.Path+" contains a symlink component "+component,
+			"place the accepted artifact inside the repository",
+		)}, nil
+	}
 	data, diagnostics, err := readRequiredRegularFile(
 		filepath.Join(root, filepath.FromSlash(manifest.Path)),
 		manifest.Path,
@@ -1112,6 +1182,24 @@ func readManifestArtifact(
 		}
 	}
 	return data, diagnostics, err
+}
+
+func findSymlinkComponent(root, relative string) (string, bool, error) {
+	current := root
+	for _, component := range strings.Split(filepath.FromSlash(relative), string(filepath.Separator)) {
+		current = filepath.Join(current, component)
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		if err != nil {
+			return "", false, fmt.Errorf("inspect %s: %w", relative, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return filepath.ToSlash(current), true, nil
+		}
+	}
+	return "", false, nil
 }
 
 func yamlDiagnostic(sourcePath string, err error, recovery string) Diagnostic {
@@ -1129,7 +1217,10 @@ func yamlDiagnostic(sourcePath string, err error, recovery string) Diagnostic {
 	}
 }
 
-func unlistedNativeArtifacts(root string, listed map[string]ManifestArtifact) ([]string, error) {
+func unlistedNativeArtifacts(
+	root string,
+	listed map[string]ManifestArtifact,
+) ([]string, []Diagnostic, error) {
 	directories := []struct {
 		relative string
 		suffix   string
@@ -1139,6 +1230,7 @@ func unlistedNativeArtifacts(root string, listed map[string]ManifestArtifact) ([
 		{relative: ".software-standards/automation", suffix: ".yaml"},
 	}
 	unlisted := make([]string, 0)
+	diagnostics := make([]Diagnostic, 0)
 	for _, directory := range directories {
 		absolute := filepath.Join(root, filepath.FromSlash(directory.relative))
 		info, err := os.Lstat(absolute)
@@ -1146,14 +1238,20 @@ func unlistedNativeArtifacts(root string, listed map[string]ManifestArtifact) ([
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("inspect artifact directory %s: %w", directory.relative, err)
+			return nil, nil, fmt.Errorf("inspect artifact directory %s: %w", directory.relative, err)
 		}
 		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-			return nil, fmt.Errorf("artifact directory %s must be a real directory", directory.relative)
+			diagnostics = append(diagnostics, diagnostic(
+				directory.relative,
+				"file",
+				"artifact directory "+directory.relative+" must be a real directory, not a symlink",
+				"replace it with a directory inside the repository",
+			))
+			continue
 		}
 		entries, err := os.ReadDir(absolute)
 		if err != nil {
-			return nil, fmt.Errorf("read artifact directory %s: %w", directory.relative, err)
+			return nil, nil, fmt.Errorf("read artifact directory %s: %w", directory.relative, err)
 		}
 		for _, entry := range entries {
 			if entry.IsDir() || !strings.HasSuffix(entry.Name(), directory.suffix) {
@@ -1166,7 +1264,7 @@ func unlistedNativeArtifacts(root string, listed map[string]ManifestArtifact) ([
 		}
 	}
 	sort.Strings(unlisted)
-	return unlisted, nil
+	return unlisted, diagnostics, nil
 }
 
 func parseActionableRuleBytes(relative string, data []byte) (Rule, *Diagnostic) {

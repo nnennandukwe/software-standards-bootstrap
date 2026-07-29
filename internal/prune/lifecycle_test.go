@@ -15,6 +15,7 @@ import (
 
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/inventory"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/prune"
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/rulepack"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/workspace"
 	"go.yaml.in/yaml/v4"
 )
@@ -274,7 +275,7 @@ func TestApproveNeverApprovesUnableToDetermine(t *testing.T) {
 	}
 }
 
-func TestApproveRejectsPlanThatWouldRemoveEveryRuleWithoutRecordingEvent(t *testing.T) {
+func TestApproveAllowsZeroRulePoststateWithAtomicReportUpdate(t *testing.T) {
 	root := lifecycleRepository(t)
 	createReviewWithProposal(t, root, false)
 	review, _, err := prune.LoadReview(root, "review-one")
@@ -294,16 +295,15 @@ func TestApproveRejectsPlanThatWouldRemoveEveryRuleWithoutRecordingEvent(t *test
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule"},
 		Rejected: []string{"orphan-skill"},
-	}); err == nil || !errors.Is(err, prune.ErrPrecondition) ||
-		!strings.Contains(err.Error(), "remove every rule") {
-		t.Fatalf("error = %v, want plan precondition", err)
+	}); err != nil {
+		t.Fatalf("approve zero-rule poststate: %v", err)
 	}
-	if _, err := os.Lstat(filepath.Join(review.Root, "events.jsonl")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("approval event was recorded: %v", err)
+	if _, err := os.Lstat(filepath.Join(review.Root, "events.jsonl")); err != nil {
+		t.Fatalf("approval event was not recorded: %v", err)
 	}
 }
 
-func TestReviewStatusReportsLegacyUnsafeApprovalAsDiagnostic(t *testing.T) {
+func TestReviewStatusAcceptsApprovedZeroRulePoststate(t *testing.T) {
 	root := lifecycleRepository(t)
 	createReviewWithProposal(t, root, false)
 	review, _, err := prune.LoadReview(root, "review-one")
@@ -357,9 +357,8 @@ func TestReviewStatusReportsLegacyUnsafeApprovalAsDiagnostic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status failed on a well-formed legacy bundle: %v", err)
 	}
-	if !status.Approved || len(diagnostics) == 0 ||
-		!strings.Contains(diagnostics[len(diagnostics)-1].Message, "remove every rule") {
-		t.Fatalf("status=%#v diagnostics=%#v, want unsafe-plan diagnostic", status, diagnostics)
+	if !status.Approved || len(diagnostics) != 0 {
+		t.Fatalf("status=%#v diagnostics=%#v, want valid zero-rule approval", status, diagnostics)
 	}
 }
 
@@ -416,8 +415,12 @@ func TestApplyDefaultsToDryRunThenAppliesApprovedRemoval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !dryRun.DryRun || len(dryRun.Changes) != 1 {
+	if !dryRun.DryRun || len(dryRun.Changes) != 2 {
 		t.Fatalf("unexpected dry run: %#v", dryRun)
+	}
+	if dryRun.Changes[0].Path != ".agents/skills/orphan-skill/SKILL.md" ||
+		dryRun.Changes[1].Path != ".software-standards/report.md" {
+		t.Fatalf("dry run did not bind the artifact and report atomically: %#v", dryRun.Changes)
 	}
 	dryRunJSON, err := json.Marshal(dryRun)
 	if err != nil {
@@ -438,9 +441,11 @@ func TestApplyDefaultsToDryRunThenAppliesApprovedRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(dryRunPayload.PlanDigest, "sha256:") ||
-		len(dryRunPayload.Changes) != 1 ||
+		len(dryRunPayload.Changes) != 2 ||
 		!dryRunPayload.Changes[0].Prestate.Exists ||
-		dryRunPayload.Changes[0].Poststate.Exists {
+		dryRunPayload.Changes[0].Poststate.Exists ||
+		!dryRunPayload.Changes[1].Prestate.Exists ||
+		!dryRunPayload.Changes[1].Poststate.Exists {
 		t.Fatalf("dry run lacks canonical plan identity and states: %s", dryRunJSON)
 	}
 	for _, lockPath := range []string{
@@ -462,7 +467,7 @@ func TestApplyDefaultsToDryRunThenAppliesApprovedRemoval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if applied.DryRun || len(applied.Changes) != 1 {
+	if applied.DryRun || len(applied.Changes) != 2 {
 		t.Fatalf("unexpected application: %#v", applied)
 	}
 	appliedJSON, err := json.Marshal(applied)
@@ -480,6 +485,22 @@ func TestApplyDefaultsToDryRunThenAppliesApprovedRemoval(t *testing.T) {
 	}
 	if _, err := os.Stat(skillPath); !os.IsNotExist(err) {
 		t.Fatalf("removed skill still exists: %v", err)
+	}
+	report, err := os.ReadFile(filepath.Join(root, ".software-standards", "report.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(report), "id: orphan-skill") {
+		t.Fatalf("report retained removed skill entry:\n%s", report)
+	}
+	repo, err := workspace.Open(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, diagnostics, err := rulepack.ValidateRetainedPack(context.Background(), repo); err != nil {
+		t.Fatal(err)
+	} else if len(diagnostics) != 0 {
+		t.Fatalf("atomically updated pack is invalid: %#v", diagnostics)
 	}
 }
 
@@ -520,8 +541,8 @@ func TestApplyRemovesTheCompleteTrackedSkillBundle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(dryRun.Changes); got != 1+len(supportingPaths) {
-		t.Fatalf("dry-run change count = %d, want %d: %#v", got, 1+len(supportingPaths), dryRun)
+	if got := len(dryRun.Changes); got != 2+len(supportingPaths) {
+		t.Fatalf("dry-run change count = %d, want %d: %#v", got, 2+len(supportingPaths), dryRun)
 	}
 	if _, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
 		ReviewID: "review-one",
@@ -734,8 +755,8 @@ func TestValidateAndApprovalRejectMalformedCandidateBeforeEventOrWrite(t *testin
 	review.Proposal.Actions[0].Disposition = prune.DispositionUpdate
 	review.Proposal.Actions[0].Target = &prune.CandidateRef{
 		Kind:       prune.ArtifactRule,
-		ID:         "replacement",
-		TargetPath: ".software-standards/rules/replacement.md",
+		ID:         "keep-rule",
+		TargetPath: ".software-standards/rules/keep-rule.md",
 		SourcePath: candidateRelative,
 		SHA256:     fileDigest(t, candidatePath),
 		Mode:       "100644",
@@ -767,8 +788,12 @@ func TestValidateAndApprovalRejectMalformedCandidateBeforeEventOrWrite(t *testin
 	if _, err := os.Lstat(filepath.Join(review.Root, "events.jsonl")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("malformed candidate recorded an event: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".software-standards", "rules", "replacement.md")); !os.IsNotExist(err) {
-		t.Fatalf("invalid candidate was written: %v", err)
+	originalRule, err := os.ReadFile(filepath.Join(root, ".software-standards", "rules", "keep-rule.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(originalRule) == "---\nid: replacement\n---\ninvalid\n" {
+		t.Fatal("invalid candidate was written")
 	}
 }
 
@@ -1148,6 +1173,11 @@ func TestRecoverRestoresJournaledBytesWithoutInferringApplication(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	reportPath := filepath.Join(root, ".software-standards", "report.md")
+	originalReport, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Remove(skillPath); err != nil {
 		t.Fatal(err)
 	}
@@ -1162,6 +1192,11 @@ func TestRecoverRestoresJournaledBytesWithoutInferringApplication(t *testing.T) 
     "existed": true,
     "mode": 420,
     "content": "`+base64.StdEncoding.EncodeToString(original)+`"
+  }, {
+    "path": ".software-standards/report.md",
+    "existed": true,
+    "mode": 420,
+    "content": "`+base64.StdEncoding.EncodeToString(originalReport)+`"
   }]
 }
 `)
@@ -1277,6 +1312,11 @@ func TestRecoverRejectsAndPreservesPostCrashHumanEdit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	reportPath := filepath.Join(root, ".software-standards", "report.md")
+	originalReport, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	humanEdit := "human edit after crash\n"
 	writeFile(t, skillPath, humanEdit)
 	journalPath := filepath.Join(review.Root, "application-journal.json")
@@ -1290,6 +1330,11 @@ func TestRecoverRejectsAndPreservesPostCrashHumanEdit(t *testing.T) {
     "existed": true,
     "mode": 420,
     "content": "`+base64.StdEncoding.EncodeToString(original)+`"
+  }, {
+    "path": ".software-standards/report.md",
+    "existed": true,
+    "mode": 420,
+    "content": "`+base64.StdEncoding.EncodeToString(originalReport)+`"
   }]
 }
 `)

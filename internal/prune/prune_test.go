@@ -523,6 +523,7 @@ inventory:
       blob_oid: "%s"
       bytes: 8
       lines: 1
+      language: Markdown
       sha256: %s
   excluded:
     binary: 0

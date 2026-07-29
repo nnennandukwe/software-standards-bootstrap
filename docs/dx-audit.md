@@ -56,9 +56,10 @@ No findings.
   operational failures remain distinguishable from ancestry rejection.
 - Relative capability-profile and receipt paths now resolve from the process
   working directory instead of being misreported as bundle escapes.
-- Approval refuses an unsafe plan before recording an event, so a decision set
-  that would remove every rule cannot wedge status or require manual bundle
-  deletion.
+- Artifact removal previews the paired `report.md` index update in the same
+  dry-run plan. Zero-rule results are valid; canonical ID/path replacement is
+  blocked with guidance to create a new actionable pack because lifecycle
+  review cannot invent fresh manifest provenance, confidence, or utility.
 - Review publication, event replacement, transition and mutation locks, and
   application journals now use repository-root-anchored filesystem operations;
   swap tests prove that neither an external symlink, an in-repository sibling

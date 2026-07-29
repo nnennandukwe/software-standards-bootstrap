@@ -87,6 +87,11 @@ proposal files are immutable inputs once approved. Candidate replacements are
 complete files. Events form a digest chain binding the context, proposal,
 baseline, decision, and results.
 
+An approved removal binds the artifact bytes and the corresponding
+`.software-standards/report.md` index update into one application plan,
+journal, and rollback boundary. This preserves valid zero-rule and
+zero-artifact packs without leaving a dangling accepted-artifact entry.
+
 Proposal validation parses replacement rule and skill contracts and evaluates
 the proposed resulting rule-skill graph. Approval repeats that preflight for
 the exact accepted decision set and records no event when it fails.

@@ -293,6 +293,8 @@ The `ssb` CLI:
 - pins prune capability evidence and preserves unknown provenance as unknown;
 - keeps prune application dry-run by default and journals approved writes for
   recovery;
+- binds artifact removals and their `report.md` index updates into one
+  recoverable plan;
 - rejects portable-path escapes and case-fold collisions before mutation; and
 - binds verification to the exact application, governed poststate, rerender,
   and external check receipts.
