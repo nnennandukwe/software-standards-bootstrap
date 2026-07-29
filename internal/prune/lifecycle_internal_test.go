@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -476,6 +477,247 @@ func TestApplicationRollbackRemovesCreatedDirectories(t *testing.T) {
 	}
 }
 
+func TestWriteNewExclusiveDoesNotExposePartialTargetAfterProcessCrash(t *testing.T) {
+	if target := os.Getenv("SSB_PRUNE_CRASH_WRITE_TARGET"); target != "" {
+		if os.Getenv("SSB_PRUNE_CRASH_WRITE_EXISTED") == "1" {
+			if _, err := claimExpectedFile(
+				target,
+				digestBytes([]byte("approved prestate\n")),
+				prestateClaim,
+			); err != nil {
+				os.Exit(96)
+			}
+		}
+		openExclusiveFile = func(
+			name string,
+			flag int,
+			perm os.FileMode,
+		) (durableExclusiveFile, error) {
+			file, err := os.OpenFile(name, flag, perm)
+			if err != nil {
+				return nil, err
+			}
+			return &crashDuringWriteFile{File: file}, nil
+		}
+		_ = writeNewExclusive(target, []byte("complete governed content\n"), 0o644)
+		os.Exit(98)
+	}
+
+	for _, testCase := range []struct {
+		name    string
+		existed bool
+	}{
+		{name: "new target"},
+		{name: "existing target", existed: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			target := filepath.Join(t.TempDir(), "governed.md")
+			prestate := []byte("approved prestate\n")
+			poststate := []byte("complete governed content\n")
+			if testCase.existed {
+				if err := os.WriteFile(target, prestate, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			command := exec.Command(
+				os.Args[0],
+				"-test.run=^TestWriteNewExclusiveDoesNotExposePartialTargetAfterProcessCrash$",
+			)
+			command.Env = append(
+				os.Environ(),
+				"SSB_PRUNE_CRASH_WRITE_TARGET="+target,
+			)
+			if testCase.existed {
+				command.Env = append(command.Env, "SSB_PRUNE_CRASH_WRITE_EXISTED=1")
+			}
+			err := command.Run()
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) || exitErr.ExitCode() != 97 {
+				t.Fatalf("helper exit = %v, want injected process crash", err)
+			}
+			if data, err := os.ReadFile(target); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("partial governed target became visible: %q, %v", data, err)
+			}
+			entry := journalEntry{
+				Path:    "governed.md",
+				Existed: testCase.existed,
+				Mode:    0o644,
+				Content: prestate,
+			}
+			if err := restoreJournalEntry(target, entry, digestBytes(poststate)); err != nil {
+				t.Fatalf("recover after process crash: %v", err)
+			}
+			if testCase.existed {
+				got, err := os.ReadFile(target)
+				if err != nil || string(got) != string(prestate) {
+					t.Fatalf("recovered content = %q, %v", got, err)
+				}
+			} else if _, err := os.Lstat(target); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("new target remains after recovery: %v", err)
+			}
+			if _, err := os.Lstat(
+				claimPathForTarget(target, publicationClaim),
+			); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("publication claim remains after recovery: %v", err)
+			}
+		})
+	}
+}
+
+func TestInterruptedApplicationPublicationKeepsPrestateClaimRecoverable(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "governed.md")
+	prestate := []byte("approved prestate\n")
+	poststate := []byte("approved poststate\n")
+	if err := os.WriteFile(target, prestate, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := claimExpectedFile(target, digestBytes(prestate), prestateClaim); err != nil {
+		t.Fatal(err)
+	}
+
+	originalPublish := publishApplicationFile
+	publishApplicationFile = func(string, string) error {
+		return errors.New("injected interruption before publication")
+	}
+	t.Cleanup(func() { publishApplicationFile = originalPublish })
+
+	if err := writeNewExclusive(target, poststate, 0o644); err == nil ||
+		!strings.Contains(err.Error(), "injected interruption") {
+		t.Fatalf("error = %v, want interrupted publication", err)
+	}
+	if _, err := os.Lstat(target); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target exists before recovery: %v", err)
+	}
+	entry := journalEntry{
+		Path: "governed.md", Existed: true, Mode: 0o644, Content: prestate,
+	}
+	if err := restoreJournalEntry(target, entry, digestBytes(poststate)); err != nil {
+		t.Fatalf("recover prestate claim: %v", err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || string(got) != string(prestate) {
+		t.Fatalf("recovered content = %q, %v", got, err)
+	}
+}
+
+func TestWriteNewExclusiveNeverOverwritesExistingTarget(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "governed.md")
+	existing := []byte("concurrent content\n")
+	if err := os.WriteFile(target, existing, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := writeNewExclusive(target, []byte("approved content\n"), 0o644)
+	if err == nil {
+		t.Fatal("exclusive publication overwrote an existing target")
+	}
+	got, readErr := os.ReadFile(target)
+	if readErr != nil || string(got) != string(existing) {
+		t.Fatalf("existing target = %q, %v, want unchanged bytes", got, readErr)
+	}
+	if _, claimErr := os.Lstat(
+		claimPathForTarget(target, publicationClaim),
+	); !errors.Is(claimErr, os.ErrNotExist) {
+		t.Fatalf("publication claim remains after collision: %v", claimErr)
+	}
+}
+
+func TestRecoveryReconcilesCompleteApplicationPublicationClaims(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		existed   bool
+		published bool
+	}{
+		{name: "new target before publication"},
+		{name: "new target after publication", published: true},
+		{name: "existing target before publication", existed: true},
+		{name: "existing target after publication", existed: true, published: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			root := t.TempDir()
+			target := filepath.Join(root, "governed.md")
+			prestate := []byte("approved prestate\n")
+			poststate := []byte("approved poststate\n")
+			if testCase.existed {
+				if err := os.WriteFile(target, prestate, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := claimExpectedFile(
+					target,
+					digestBytes(prestate),
+					prestateClaim,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+			publication := claimPathForTarget(target, publicationClaim)
+			if err := os.WriteFile(publication, poststate, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if testCase.published {
+				if err := os.Link(publication, target); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			entry := journalEntry{
+				Path:    "governed.md",
+				Existed: testCase.existed,
+				Mode:    0o644,
+				Content: prestate,
+			}
+			if err := restoreJournalEntry(target, entry, digestBytes(poststate)); err != nil {
+				t.Fatal(err)
+			}
+			if testCase.existed {
+				got, err := os.ReadFile(target)
+				if err != nil || string(got) != string(prestate) {
+					t.Fatalf("recovered content = %q, %v", got, err)
+				}
+			} else if _, err := os.Lstat(target); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("new target remains after recovery: %v", err)
+			}
+			for _, claim := range []string{
+				publication,
+				claimPathForTarget(target, prestateClaim),
+				claimPathForTarget(target, poststateClaim),
+			} {
+				if _, err := os.Lstat(claim); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("claim remains after recovery: %s: %v", claim, err)
+				}
+			}
+		})
+	}
+}
+
+func TestRecoveryFailsClosedWhenIncompletePublicationClaimMeetsHumanEdit(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "governed.md")
+	publication := claimPathForTarget(target, publicationClaim)
+	if err := os.WriteFile(publication, []byte("partial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	humanEdit := []byte("post-crash human edit\n")
+	if err := os.WriteFile(target, humanEdit, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entry := journalEntry{
+		Path: "governed.md", Existed: true, Content: []byte("approved prestate\n"),
+	}
+	err := restoreJournalEntry(target, entry, digestBytes([]byte("approved poststate\n")))
+	if err == nil ||
+		!strings.Contains(err.Error(), "publication claim") ||
+		!strings.Contains(err.Error(), "unapproved bytes") {
+		t.Fatalf("error = %v, want human-edit recovery block", err)
+	}
+	if got, readErr := os.ReadFile(publication); readErr != nil || string(got) != "partial" {
+		t.Fatalf("incomplete publication claim changed: %q, %v", got, readErr)
+	}
+	if got, readErr := os.ReadFile(target); readErr != nil || string(got) != string(humanEdit) {
+		t.Fatalf("human-edited target changed: %q, %v", got, readErr)
+	}
+}
+
 func TestClaimedMutationPreservesConcurrentReplacement(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "target.md")
@@ -708,6 +950,9 @@ func TestTransitionCompleteReportsCommittedEventWhenLockCleanupFails(t *testing.
 		!strings.Contains(err.Error(), "recover --review review-one --clear-stale-lock") {
 		t.Fatalf("event = %#v, error = %v, want committed event and exact recovery", event, err)
 	}
+	if !errors.Is(err, ErrPrecondition) {
+		t.Fatalf("error = %v, want recoverable precondition classification", err)
+	}
 	data, readErr := os.ReadFile(filepath.Join(root, "events.jsonl"))
 	if readErr != nil || !strings.Contains(string(data), event.EventDigest) {
 		t.Fatalf("event log = %q, %v, want committed transition", data, readErr)
@@ -782,6 +1027,19 @@ type shortWriteExclusiveFile struct {
 
 func (file *shortWriteExclusiveFile) Write(data []byte) (int, error) {
 	return file.File.Write(data[:1])
+}
+
+type crashDuringWriteFile struct {
+	*os.File
+}
+
+func (file *crashDuringWriteFile) Write(data []byte) (int, error) {
+	if len(data) > 0 {
+		_, _ = file.File.Write(data[:1])
+		_ = file.File.Sync()
+	}
+	os.Exit(97)
+	return 0, nil
 }
 
 func TestCaptureJournalRejectsDisappearedApprovedPrestate(t *testing.T) {

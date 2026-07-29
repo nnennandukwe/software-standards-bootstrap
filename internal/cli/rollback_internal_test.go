@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,5 +54,29 @@ func TestCommittedTransitionNeverRollsBackItsArtifact(t *testing.T) {
 	}
 	if rolledBack {
 		t.Fatal("committed transition rolled back its artifact")
+	}
+}
+
+func TestCommittedTransitionCleanupUsesRecoverableExitCode(t *testing.T) {
+	completionErr := fmt.Errorf(
+		"%w: transition event was recorded; run ssb prune recover --review review-one --clear-stale-lock",
+		prune.ErrPrecondition,
+	)
+	err := reconcileTransitionCompletion(
+		prune.Event{EventDigest: "sha256:committed"},
+		completionErr,
+		"render",
+		"AGENTS.md was restored",
+		func() error {
+			t.Fatal("committed transition attempted rollback")
+			return nil
+		},
+	)
+	var stderr bytes.Buffer
+	if exitCode := writePruneError(&stderr, err); exitCode != 2 {
+		t.Fatalf("exit code = %d, want recoverable exit code 2", exitCode)
+	}
+	if output := stderr.String(); !strings.Contains(output, "--clear-stale-lock") {
+		t.Fatalf("stderr = %q, want exact recovery guidance", output)
 	}
 }

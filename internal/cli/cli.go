@@ -255,8 +255,7 @@ func runADR(args []string, stdout, stderr io.Writer) (exitCode int) {
 			},
 		)
 		if transitionErr != nil {
-			fmt.Fprintf(stderr, "error: %s\n", transitionErr)
-			return 3
+			return writePruneError(stderr, transitionErr)
 		}
 	}
 	fmt.Fprintf(stdout, "Created %s with Proposed status.\n", result.Path)
@@ -361,8 +360,7 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 			},
 		)
 		if transitionErr != nil {
-			fmt.Fprintf(stderr, "error: %s\n", transitionErr)
-			return 3
+			return writePruneError(stderr, transitionErr)
 		}
 	}
 	if result.Changed {

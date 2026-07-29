@@ -209,7 +209,8 @@ func (transition *Transition) Complete(payload any) (Event, error) {
 	transition.done = true
 	if err := transition.unlock(); err != nil {
 		return event, fmt.Errorf(
-			"transition event was recorded but lock cleanup failed: %w; run ssb prune recover --review %s --clear-stale-lock",
+			"%w: transition event was recorded but lock cleanup failed: %w; run ssb prune recover --review %s --clear-stale-lock",
+			ErrPrecondition,
 			err,
 			transition.review.Context.ReviewID,
 		)

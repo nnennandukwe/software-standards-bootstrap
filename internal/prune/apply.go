@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -31,11 +30,14 @@ var (
 		defer pack.Close()
 		return pack.Remove(".prune-mutation.lock")
 	}
+	publishApplicationFile           = publishApplicationFileDurably
+	removeApplicationPublicationFile = removeApplicationPublicationFileDurably
 )
 
 const (
-	prestateClaim  = "pre"
-	poststateClaim = "post"
+	prestateClaim    = "pre"
+	poststateClaim   = "post"
+	publicationClaim = "publication"
 )
 
 // ApplyOptions selects a review and requires Write for mutation.
@@ -858,6 +860,9 @@ func restoreJournalPaths(
 }
 
 func restoreJournalEntry(target string, entry journalEntry, expectedPoststate string) error {
+	if err := reconcilePublicationClaim(target, entry, expectedPoststate); err != nil {
+		return err
+	}
 	preClaim := claimPathForTarget(target, prestateClaim)
 	postClaim := claimPathForTarget(target, poststateClaim)
 	preExists, err := regularFileExists(preClaim)
@@ -955,6 +960,51 @@ func restoreJournalEntry(target string, entry journalEntry, expectedPoststate st
 		return err
 	}
 	return finishPoststateClaim(target, claim, entry)
+}
+
+func reconcilePublicationClaim(
+	target string,
+	entry journalEntry,
+	expectedPoststate string,
+) error {
+	claim := claimPathForTarget(target, publicationClaim)
+	exists, err := regularFileExists(claim)
+	if err != nil || !exists {
+		return err
+	}
+	claimDigest, err := fileDigest(claim)
+	if err != nil {
+		return err
+	}
+	prestateDigest := ""
+	if entry.Existed {
+		prestateDigest = digestBytes(entry.Content)
+	}
+	isPrestate := entry.Existed && claimDigest == prestateDigest
+	isPoststate := expectedPoststate != "" && claimDigest == expectedPoststate
+	targetDigest, absent, err := currentFileDigest(target)
+	if err != nil {
+		return err
+	}
+	if !isPrestate && !isPoststate {
+		targetIsApproved := !absent &&
+			((entry.Existed && targetDigest == prestateDigest) ||
+				(expectedPoststate != "" && targetDigest == expectedPoststate))
+		if absent || targetIsApproved {
+			return os.Remove(claim)
+		}
+		return fmt.Errorf("publication claim for %s is incomplete while the recovery target has unapproved bytes", entry.Path)
+	}
+	switch {
+	case absent && isPrestate:
+		return restoreClaimedFile(claim, target)
+	case absent:
+		return os.Remove(claim)
+	case targetDigest == claimDigest:
+		return os.Remove(claim)
+	default:
+		return fmt.Errorf("recovery target %s changed while a publication claim was present", entry.Path)
+	}
 }
 
 func regularFileExists(filePath string) (bool, error) {
@@ -1071,46 +1121,45 @@ func operationPoststates(operations []operation) map[string]string {
 	return result
 }
 
-func writeNewExclusive(target string, content []byte, mode os.FileMode) error {
+func writeNewExclusive(
+	target string,
+	content []byte,
+	mode os.FileMode,
+) (returnErr error) {
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
-	file, err := openExclusiveFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	publication := claimPathForTarget(target, publicationClaim)
+	file, err := openExclusiveFile(
+		publication,
+		os.O_WRONLY|os.O_CREATE|os.O_EXCL,
+		mode,
+	)
 	if err != nil {
+		return fmt.Errorf("create application publication claim: %w", err)
+	}
+	defer func() {
+		if err := removeApplicationPublicationFile(publication); err != nil &&
+			!errors.Is(err, os.ErrNotExist) {
+			returnErr = errors.Join(
+				returnErr,
+				fmt.Errorf("remove application publication claim %s: %w", publication, err),
+			)
+		}
+	}()
+	if err := writeDurableExclusiveWithCleanup(
+		publication,
+		file,
+		content,
+		mode,
+		func() error { return removeIncompleteExclusiveFile(publication) },
+	); err != nil {
 		return err
 	}
-	return writeDurableExclusive(target, file, content, mode)
-}
-
-func atomicWrite(target string, content []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
+	if err := publishApplicationFile(publication, target); err != nil {
+		return fmt.Errorf("publish application file without overwrite: %w", err)
 	}
-	temp, err := os.CreateTemp(filepath.Dir(target), ".ssb-prune-*")
-	if err != nil {
-		return err
-	}
-	tempName := temp.Name()
-	defer os.Remove(tempName)
-	if err := temp.Chmod(mode); err != nil {
-		temp.Close()
-		return err
-	}
-	if written, err := temp.Write(content); err != nil {
-		temp.Close()
-		return err
-	} else if written != len(content) {
-		temp.Close()
-		return fmt.Errorf("write temporary application file: %w", io.ErrShortWrite)
-	}
-	if err := temp.Sync(); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tempName, target)
+	return nil
 }
 
 // Recover restores an interrupted application journal, or finalizes journal
