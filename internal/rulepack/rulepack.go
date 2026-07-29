@@ -494,13 +494,48 @@ func validateActionablePack(
 			if rule.ID != "" {
 				pack.Rules = append(pack.Rules, rule)
 			}
-		case "verification", "skill", "automation":
-			diagnostics = append(diagnostics, diagnostic(
-				reportPath,
-				"artifacts",
-				fmt.Sprintf("artifact kind %q is not supported by this validation slice", artifact.Kind),
-				"complete the corresponding actionable artifact contract before validation",
-			))
+		case "verification":
+			recipe, artifactDiagnostics, loadErr := loadVerificationRecipe(
+				ctx,
+				evidenceRepo,
+				repo.Root(),
+				artifact,
+			)
+			if loadErr != nil {
+				return Pack{}, nil, loadErr
+			}
+			diagnostics = append(diagnostics, artifactDiagnostics...)
+			if recipe.ID != "" {
+				pack.Recipes = append(pack.Recipes, recipe)
+			}
+		case "skill":
+			skill, artifactDiagnostics, loadErr := loadActionableSkill(
+				ctx,
+				evidenceRepo,
+				repo.Root(),
+				artifact,
+			)
+			if loadErr != nil {
+				return Pack{}, nil, loadErr
+			}
+			diagnostics = append(diagnostics, artifactDiagnostics...)
+			if skill.ID != "" {
+				pack.Skills = append(pack.Skills, skill)
+			}
+		case "automation":
+			automation, artifactDiagnostics, loadErr := loadAutomationProposal(
+				ctx,
+				evidenceRepo,
+				repo.Root(),
+				artifact,
+			)
+			if loadErr != nil {
+				return Pack{}, nil, loadErr
+			}
+			diagnostics = append(diagnostics, artifactDiagnostics...)
+			if automation.ID != "" {
+				pack.Automations = append(pack.Automations, automation)
+			}
 		}
 	}
 
@@ -548,6 +583,9 @@ func validateActionablePack(
 		))
 	}
 	sort.Slice(pack.Rules, func(i, j int) bool { return pack.Rules[i].ID < pack.Rules[j].ID })
+	sort.Slice(pack.Recipes, func(i, j int) bool { return pack.Recipes[i].ID < pack.Recipes[j].ID })
+	sort.Slice(pack.Skills, func(i, j int) bool { return pack.Skills[i].ID < pack.Skills[j].ID })
+	sort.Slice(pack.Automations, func(i, j int) bool { return pack.Automations[i].ID < pack.Automations[j].ID })
 	return pack, diagnostics, nil
 }
 
@@ -642,6 +680,13 @@ func validateManifestArtifact(sourcePath, field string, artifact ManifestArtifac
 			len(artifact.Scopes) != 0 || artifact.Derivation != "" ||
 			len(artifact.Evidence) != 0) {
 		add("", "native artifact provenance belongs in its source file", "remove category, lenses, scopes, derivation, and evidence from this manifest entry")
+	}
+	if artifact.Kind == "skill" {
+		if _, supported := supportedTopics[artifact.Category]; artifact.Category == "" || !supported {
+			add(".category", fmt.Sprintf("category %q is not supported", artifact.Category), strings.ReplaceAll(topicRecovery, "topic", "category"))
+		}
+		diagnostics = append(diagnostics, validateActionableLenses(sourcePath, field+".lenses", artifact.Lenses)...)
+		diagnostics = append(diagnostics, validateScopes(sourcePath, artifact.Scopes)...)
 	}
 	return diagnostics
 }
@@ -769,9 +814,56 @@ func validateActionableRule(
 	if strings.TrimSpace(rule.Body) == "" {
 		add("body", "rule body is required", "write the actionable semantic obligation")
 	}
-	diagnostics = append(diagnostics, validateRuleV2Activation(rule)...)
+	diagnostics = append(diagnostics, validateActionableLenses(rule.SourcePath, "lenses", rule.Lenses)...)
+	if _, supported := supportedDirectives[rule.Directive]; !supported {
+		add("directive", fmt.Sprintf("directive %q is not supported", rule.Directive), "use always, ask-first, never, or prefer")
+	}
 	diagnostics = append(diagnostics, validateScopes(rule.SourcePath, rule.Scopes)...)
 	diagnostics = append(diagnostics, validateDerivationEvidence(ctx, repo, rule.SourcePath, rule.Derivation, rule.Evidence)...)
+	return diagnostics
+}
+
+func validateActionableLenses(sourcePath, field string, lenses []Lens) []Diagnostic {
+	diagnostics := make([]Diagnostic, 0)
+	add := func(suffix, message, recovery string) {
+		diagnostics = append(diagnostics, diagnostic(sourcePath, field+suffix, message, recovery))
+	}
+	if len(lenses) == 0 {
+		add("", "at least one activation lens is required", "add one base lens or one or more language, framework, and task lenses")
+		return diagnostics
+	}
+	baseCount := 0
+	seen := make(map[string]struct{}, len(lenses))
+	for index, lens := range lenses {
+		suffix := fmt.Sprintf("[%d]", index)
+		switch lens.Kind {
+		case "base":
+			baseCount++
+			if lens.Value != "" {
+				add(suffix+".value", "base lens must not have a value", "remove the value from the base lens")
+			}
+		case "language", "framework":
+			if !stableIDPattern.MatchString(lens.Value) {
+				add(suffix+".value", lens.Kind+" lens requires a lower-case kebab-case value", "add a value such as go, python, cobra, or django")
+			}
+		case "task":
+			switch lens.Value {
+			case "planning", "implementation", "verification":
+			default:
+				add(suffix+".value", fmt.Sprintf("task lens value %q is not supported", lens.Value), "use planning, implementation, or verification")
+			}
+		default:
+			add(suffix+".kind", fmt.Sprintf("lens kind %q is not supported", lens.Kind), "use base, language, framework, or task")
+		}
+		key := lens.Kind + ":" + lens.Value
+		if _, duplicate := seen[key]; duplicate {
+			add("", "duplicate activation lens "+key, "list each lens once")
+		}
+		seen[key] = struct{}{}
+	}
+	if baseCount != 0 && len(lenses) != 1 {
+		add("", "base must be the sole activation lens", "remove contextual lenses or remove the base lens")
+	}
 	return diagnostics
 }
 
@@ -839,6 +931,245 @@ func validateDerivationEvidence(
 		add("evidence", "inferred artifacts require three demonstrates citations across at least two files", "add consistent implementation occurrences or remove the candidate")
 	}
 	return diagnostics
+}
+
+func loadVerificationRecipe(
+	ctx context.Context,
+	evidenceRepo *workspace.Repository,
+	root string,
+	manifest ManifestArtifact,
+) (VerificationRecipe, []Diagnostic, error) {
+	data, diagnostics, err := readManifestArtifact(root, manifest)
+	if err != nil || len(data) == 0 {
+		return VerificationRecipe{}, diagnostics, err
+	}
+	var recipe VerificationRecipe
+	if err := yaml.Load(data, &recipe, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+		return VerificationRecipe{}, append(diagnostics, yamlDiagnostic(
+			manifest.Path,
+			err,
+			"use only fields from the ssb.dev/verification/v1 schema",
+		)), nil
+	}
+	recipe.SourcePath = manifest.Path
+	diagnostics = append(diagnostics, validateVerificationRecipe(ctx, evidenceRepo, recipe, manifest)...)
+	return recipe, diagnostics, nil
+}
+
+func validateVerificationRecipe(
+	ctx context.Context,
+	repo *workspace.Repository,
+	recipe VerificationRecipe,
+	manifest ManifestArtifact,
+) []Diagnostic {
+	diagnostics := make([]Diagnostic, 0)
+	add := func(field, message, recovery string) {
+		diagnostics = append(diagnostics, diagnostic(recipe.SourcePath, field, message, recovery))
+	}
+	if recipe.Schema != VerificationSchema {
+		add("schema", "schema must be "+VerificationSchema, "update the verification recipe schema value")
+	}
+	if recipe.ID != manifest.ID {
+		add("id", fmt.Sprintf("recipe id %q must match manifest id %q", recipe.ID, manifest.ID), "align the recipe id, filename, and report entry")
+	}
+	if strings.TrimSpace(recipe.Title) == "" {
+		add("title", "title is required", "add a concise developer-facing title")
+	}
+	if _, supported := supportedTopics[recipe.Category]; recipe.Category == "" || !supported {
+		add("category", fmt.Sprintf("category %q is not supported", recipe.Category), strings.ReplaceAll(topicRecovery, "topic", "category"))
+	}
+	diagnostics = append(diagnostics, validateActionableLenses(recipe.SourcePath, "lenses", recipe.Lenses)...)
+	diagnostics = append(diagnostics, validateScopes(recipe.SourcePath, recipe.Scopes)...)
+	diagnostics = append(diagnostics, validateDerivationEvidence(ctx, repo, recipe.SourcePath, recipe.Derivation, recipe.Evidence)...)
+	if strings.TrimSpace(recipe.When) == "" {
+		add("when", "when is required", "state the exact handoff context in which the recipe applies")
+	}
+	enforcesByRef := make(map[string]struct{})
+	seenRefs := make(map[string]struct{})
+	for index, evidence := range recipe.Evidence {
+		field := fmt.Sprintf("evidence[%d].ref", index)
+		if !stableIDPattern.MatchString(evidence.Ref) {
+			add(field, "recipe evidence ref must be lower-case kebab-case", "give every evidence citation a stable ref")
+		}
+		if _, duplicate := seenRefs[evidence.Ref]; duplicate {
+			add(field, fmt.Sprintf("duplicate evidence ref %q", evidence.Ref), "give every recipe evidence citation a unique ref")
+		}
+		seenRefs[evidence.Ref] = struct{}{}
+		if evidence.Role == "enforces" {
+			enforcesByRef[evidence.Ref] = struct{}{}
+		}
+	}
+	if len(recipe.Steps) == 0 {
+		add("steps", "verification recipe requires at least one ordered command", "record an existing deliberately invoked command")
+	}
+	for index, step := range recipe.Steps {
+		field := fmt.Sprintf("steps[%d]", index)
+		if strings.TrimSpace(step.Run) == "" {
+			add(field+".run", "run is required", "record the exact existing repository command")
+		}
+		if _, exists := enforcesByRef[step.SourceEvidence]; !exists {
+			add(
+				field+".source_evidence",
+				fmt.Sprintf("step references missing enforces evidence %q", step.SourceEvidence),
+				"reference an evidence ref whose role is enforces",
+			)
+		}
+		if strings.TrimSpace(step.ExpectedResult) == "" {
+			add(field+".expected_result", "expected_result is required", "state the observable successful result")
+		}
+	}
+	return diagnostics
+}
+
+func loadActionableSkill(
+	ctx context.Context,
+	evidenceRepo *workspace.Repository,
+	root string,
+	manifest ManifestArtifact,
+) (Skill, []Diagnostic, error) {
+	data, diagnostics, err := readManifestArtifact(root, manifest)
+	if err != nil || len(data) == 0 {
+		return Skill{}, diagnostics, err
+	}
+	frontmatter, body, splitErr := splitFrontmatter(data)
+	if splitErr != nil {
+		return Skill{}, append(diagnostics, diagnostic(
+			manifest.Path,
+			"frontmatter",
+			splitErr.Error(),
+			"add portable Agent Skill YAML frontmatter",
+		)), nil
+	}
+	var metadata skillFrontmatter
+	if err := yaml.Load(frontmatter, &metadata, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+		return Skill{}, append(diagnostics, yamlDiagnostic(
+			manifest.Path,
+			err,
+			"use only Agent Skills core specification fields",
+		)), nil
+	}
+	skill := Skill{
+		ID:          manifest.ID,
+		Description: metadata.Description,
+		Category:    metadata.Metadata["category"],
+		SourcePath:  manifest.Path,
+		Body:        string(body),
+	}
+	if metadata.Name != manifest.ID {
+		diagnostics = append(diagnostics, diagnostic(
+			manifest.Path,
+			"name",
+			fmt.Sprintf("skill name %q must match manifest id %q", metadata.Name, manifest.ID),
+			"align the skill name, directory, and report entry",
+		))
+	}
+	if len(metadata.Name) > 64 {
+		diagnostics = append(diagnostics, diagnostic(manifest.Path, "name", "skill name must be at most 64 characters", "shorten the portable skill name"))
+	}
+	if strings.TrimSpace(metadata.Description) == "" || len(metadata.Description) > 1024 {
+		diagnostics = append(diagnostics, diagnostic(manifest.Path, "description", "skill description must contain 1-1024 characters", "describe what the skill does and when to use it"))
+	}
+	if skill.Category != manifest.Category {
+		diagnostics = append(diagnostics, diagnostic(
+			manifest.Path,
+			"metadata.category",
+			fmt.Sprintf("skill metadata.category %q must match manifest category %q", skill.Category, manifest.Category),
+			"align the portable metadata and report manifest",
+		))
+	}
+	if strings.TrimSpace(skill.Body) == "" {
+		diagnostics = append(diagnostics, diagnostic(manifest.Path, "body", "skill body is required", "document the procedural workflow"))
+	}
+	diagnostics = append(diagnostics, validateDerivationEvidence(
+		ctx,
+		evidenceRepo,
+		manifest.Path,
+		manifest.Derivation,
+		manifest.Evidence,
+	)...)
+	return skill, diagnostics, nil
+}
+
+func loadAutomationProposal(
+	ctx context.Context,
+	evidenceRepo *workspace.Repository,
+	root string,
+	manifest ManifestArtifact,
+) (AutomationProposal, []Diagnostic, error) {
+	data, diagnostics, err := readManifestArtifact(root, manifest)
+	if err != nil || len(data) == 0 {
+		return AutomationProposal{}, diagnostics, err
+	}
+	var proposal AutomationProposal
+	if err := yaml.Load(data, &proposal, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+		return AutomationProposal{}, append(diagnostics, yamlDiagnostic(
+			manifest.Path,
+			err,
+			"use only fields from the ssb.dev/automation/v1 schema",
+		)), nil
+	}
+	proposal.SourcePath = manifest.Path
+	diagnostics = append(diagnostics, validateAutomationProposal(ctx, evidenceRepo, proposal, manifest)...)
+	return proposal, diagnostics, nil
+}
+
+func validateAutomationProposal(
+	ctx context.Context,
+	repo *workspace.Repository,
+	proposal AutomationProposal,
+	manifest ManifestArtifact,
+) []Diagnostic {
+	diagnostics := make([]Diagnostic, 0)
+	add := func(field, message, recovery string) {
+		diagnostics = append(diagnostics, diagnostic(proposal.SourcePath, field, message, recovery))
+	}
+	if proposal.Schema != AutomationSchema {
+		add("schema", "schema must be "+AutomationSchema, "update the automation proposal schema value")
+	}
+	if proposal.ID != manifest.ID {
+		add("id", fmt.Sprintf("automation id %q must match manifest id %q", proposal.ID, manifest.ID), "align the automation id, filename, and report entry")
+	}
+	if strings.TrimSpace(proposal.Title) == "" {
+		add("title", "title is required", "add a concise developer-facing title")
+	}
+	if _, supported := supportedTopics[proposal.Category]; proposal.Category == "" || !supported {
+		add("category", fmt.Sprintf("category %q is not supported", proposal.Category), strings.ReplaceAll(topicRecovery, "topic", "category"))
+	}
+	diagnostics = append(diagnostics, validateActionableLenses(proposal.SourcePath, "lenses", proposal.Lenses)...)
+	diagnostics = append(diagnostics, validateScopes(proposal.SourcePath, proposal.Scopes)...)
+	diagnostics = append(diagnostics, validateDerivationEvidence(ctx, repo, proposal.SourcePath, proposal.Derivation, proposal.Evidence)...)
+	required := []struct {
+		field string
+		value string
+	}{
+		{"condition", proposal.Condition},
+		{"suggested_check", proposal.SuggestedCheck},
+		{"trigger", proposal.Trigger},
+		{"expected_success", proposal.ExpectedSuccess},
+		{"expected_failure", proposal.ExpectedFailure},
+	}
+	for _, item := range required {
+		if strings.TrimSpace(item.value) == "" {
+			add(item.field, item.field+" is required", "complete the reviewable automation design")
+		}
+	}
+	return diagnostics
+}
+
+func readManifestArtifact(
+	root string,
+	manifest ManifestArtifact,
+) ([]byte, []Diagnostic, error) {
+	data, diagnostics, err := readRequiredRegularFile(
+		filepath.Join(root, filepath.FromSlash(manifest.Path)),
+		manifest.Path,
+	)
+	if len(data) == 0 && len(diagnostics) != 0 {
+		for index := range diagnostics {
+			diagnostics[index].Recovery = "remove its manifest entry or restore the artifact at the canonical path"
+		}
+	}
+	return data, diagnostics, err
 }
 
 func yamlDiagnostic(sourcePath string, err error, recovery string) Diagnostic {
