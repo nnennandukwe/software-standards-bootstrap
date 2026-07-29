@@ -1,60 +1,192 @@
 # Software Standards Bootstrap
 
-Software Standards Bootstrap (ssb) is a CLI tool and agent skill for developing repo rules, agent skills, and AGENTS.md inside greenfield repos to make your repos more agent friendly.
-Agentifying your repos in this manner helps developers get even better use out of AI tools that can extract well documented patterns in your code quality and conventions per repo, formatted into markdown files that AI agents can easily ingest and interpret.
+Software Standards Bootstrap (`ssb`) generates three kinds of AI-facing guidance for an existing Git repository:
 
-When you run this tool from inside your coding agent, it will get instructions to perform semantic analysis of your repo. `ssb` is solely meant to provide deterministic safety, inventory, validation, rendering, and ADR contracts for the results of the repo analysis. Your coding agent will analyze your repo and extract conventions your code follows based on programming language, frameworks, and your code quality practices. From there, it'll propose candidates for official coding rules, AGENTS.md content, and agent skills to be added to your repo.
+1. **Coding-convention rules** that explain how code should be structured, implemented, tested, reviewed, and maintained.
+2. **Agent Skills** that give AI coding tools step-by-step instructions for repository-specific engineering workflows.
+3. **An optimized root `AGENTS.md`** that routes AI coding tools to the rules and skills relevant to their current files and task.
 
-As a developer, you then have the ability to approve, edit, or reject the creation of the agent-native artifacts it generates. And finally, you'll have the option to create an official ADR (architecture decision record) for the addition of these artifacts into your repo.
+Together, these files give future AI-assisted work repository-specific context for planning changes, generating code, testing, maintenance, code review, and release work.
 
-(`ssb` never calls a model, sends telemetry, makes network requests, executes repository code, or performs Git mutations. We leave that to your coding agent.)
+Run `ssb` in a repository that already contains engineering conventions but does not yet document them clearly for AI coding tools. A compatible coding agent analyzes the committed repository and proposes rules, skills, and `AGENTS.md` guidance. Developers review, edit, delete, or approve those files before they become part of the repository.
 
-## Scaffolding that `ssb` generates
+The coding agent performs the semantic analysis. The `ssb` CLI pins the input commit, builds a safe inventory, validates the generated evidence, renders `AGENTS.md`, and creates an optional Proposed ADR.
+
+## What it generates
+
+### Coding-convention rules
+
+Each proposed rule is stored at:
 
 ```text
-.software-standards/
-├── assessment.md
-└── rules/
-    └── <rule-id>.md
+.software-standards/rules/<rule-id>.md
+```
+
+Rules tell future AI tools what to `always`, `never`, or `prefer`, and when to ask a developer before proceeding. They can cover code structure, architectural boundaries, implementation patterns, testing, review, security, documentation, and release work.
+
+Every rule records where it applies, the exact repository evidence supporting it, the commit that was analyzed, and whether an existing repository check verifies all or part of it.
+
+For example:
+
+> Always use the service interface when code under `internal/api/` accesses persistence. Do not call the database package directly.
+
+The generated rule would cite the repository files and line ranges that establish that boundary.
+
+`ssb` does not turn generic best practices into repository rules. A rule needs an authoritative repository source or a consistent pattern repeated across the repository. Findings without enough evidence remain in the assessment.
+
+Before proposing rules, the agent performs a structural-pattern review of dependency boundaries, parallel implementations, platform seams, compatibility surfaces, and source/test/documentation symmetry. Every retained rule also names one primary topic, such as architecture, correctness, maintainability, security, or testability, so reviewers can see the engineering concern it protects.
+
+### Agent Skills
+
+Multi-step procedures are generated as reusable Agent Skills:
+
+```text
 .agents/skills/<skill-name>/SKILL.md
-AGENTS.md
+```
+
+A skill can tell an AI coding tool how to plan a cross-boundary change, update generated code, modify a schema and its dependents, or follow an existing review or release workflow.
+
+Rules define constraints. Skills define procedures.
+
+### Optimized `AGENTS.md`
+
+`ssb` renders the proposed guidance into a managed section in the repository's root `AGENTS.md`.
+
+Base rules become standing orders. Contextual rules are routed by affected path, language, framework, and task. Rules link to procedural skills when needed. This gives an AI tool the relevant repository guidance without loading every rule for every task.
+
+The rule and skill files are the editable sources. `AGENTS.md` is generated from them.
+
+### Assessment and ADR
+
+The initial workflow also creates:
+
+```text
+.software-standards/assessment.md
+```
+
+The assessment records what was analyzed, what became a rule or skill, and which findings remained assessment-only.
+
+After developer review, `ssb` can create an optional ADR:
+
+```text
 docs/adr/NNNN-agentic-rules.md
 ```
 
-The rule files and skills are editable proposals for updates to your codebase.
-`AGENTS.md` is a managed router file that links generated coding
-rules by language, framework, and coding task. An ADR is generated only after a
-developer has reviewed, edited, or deleted the proposed files, and it remains
-`Proposed` until the developer-created pull request is merged.
+The ADR remains `Proposed` until the developer-created pull request is merged.
 
-## Requirements
+## How future AI work uses the output
+
+Once approved and committed, compatible AI coding tools can use the generated files throughout the software development lifecycle.
+
+| AI-assisted activity | Repository context supplied |
+|---|---|
+| Planning | Architectural boundaries, affected components, required workflows, approval points, and constraints |
+| Code generation | Coding conventions, preferred patterns, prohibited patterns, file scopes, and implementation guidance |
+| Testing | Repository-specific testing expectations and existing verification commands |
+| Code review | The repository's correctness, maintainability, security, compatibility, and review requirements |
+| Maintenance | Established patterns for changing code without breaking repository structure or conventions |
+| Release work | Relevant release rules, procedures, checks, and ask-first boundaries |
+
+The goal is to give AI tools the same repository-specific context a responsible developer would need before making or reviewing a change.
+
+## Human review and deterministic guardrails
+
+Generation creates an uncommitted proposal. Developers decide which rules and skills become part of the repository through normal Git review.
+
+A rule is **guidance** when repository evidence supports the instruction but no existing command fully enforces it.
+
+A rule is **deterministic** only when the repository already contains a command that fully checks it. `ssb` records where the command is defined and what it proves when it passes.
+
+`ssb` does not generate a checker, run the mapped command, or claim that it passed. Partial checks are recorded as partial coverage rather than complete enforcement.
+
+## Who it is for
+
+`ssb` is for repositories that:
+
+- use or plan to use AI tools for software development;
+- contain coding or SDLC conventions that AI tools need to follow;
+- need documented rules, reusable Agent Skills, or a clearer root `AGENTS.md`;
+- want generated guidance backed by inspectable repository evidence; and
+- require developer approval before that guidance is adopted.
+
+It is designed for teams making their SDLC more AI-integrated while preserving engineering judgment, repository conventions, and review responsibility.
+
+It does not provide a generic rules catalog, invent standards without repository evidence, or replace developer review.
+
+## Quick start
+
+### Requirements
 
 - Git 2.39 or newer
-- A commit-backed, attached `HEAD`
-- Go 1.26.5 **only when building from source**
+- A repository with at least one commit on an attached branch
+- No tracked or staged working-tree changes
+- Go 1.26.5 when building `ssb` from source
+- A compatible coding agent that can use the bundled Agent Skill
 
-`ssb inspect` requires no tracked or staged changes. Untracked-only files are allowed. The other commands operate on the uncommitted proposal files created by the Agent Skill.
+Untracked files are allowed during inspection.
 
-## Install
-
-### Verified release archive
-
-After a release is published, download the archive for your operating system and the accompanying `checksums.txt` file from GitHub Releases. Verify both the checksum and GitHub artifact attestation before installing:
+### 1. Install the CLI
 
 ```bash
-shasum -a 256 --check checksums.txt
-gh attestation verify <archive> --repo nnennandukwe/software-standards-bootstrap
+git clone https://github.com/nnennandukwe/software-standards-bootstrap.git
+cd software-standards-bootstrap
+go install ./cmd/ssb
+ssb --help
 ```
 
-Windows users can verify SHA-256 with `Get-FileHash` and compare it with `checksums.txt`. Release archives cover macOS, Linux, and Windows on amd64 and arm64 where Go supports the target.
+### 2. Expose the bootstrap skill
 
-### Build from source
+From this checkout, copy the bundled skill into the target repository.
+
+For Codex:
 
 ```bash
-go install github.com/nnennandukwe/software-standards-bootstrap/cmd/ssb@v0.1.0
+mkdir -p /path/to/repository/.agents/skills
+cp -R skills/software-standards-bootstrap /path/to/repository/.agents/skills/
 ```
 
-## CLI
+For Claude Code:
+
+```bash
+mkdir -p /path/to/repository/.claude/skills
+cp -R skills/software-standards-bootstrap /path/to/repository/.claude/skills/
+```
+
+### 3. Generate the proposal
+
+From the clean target repository, ask the coding agent:
+
+```text
+Use the software-standards-bootstrap skill to analyze this repository
+and generate evidence-backed coding rules, Agent Skills, and AGENTS.md guidance.
+```
+
+The agent runs the inventory, analyzes repository evidence, writes the proposal, validates it, renders `AGENTS.md`, and reports every changed or untracked path.
+
+### 4. Review and rerender
+
+Review the assessment, every proposed rule and skill, and the generated `AGENTS.md` section. Edit or delete anything you do not want to adopt.
+
+```bash
+ssb validate --repo .
+ssb render --repo . --dry-run
+ssb render --repo .
+```
+
+Review the complete uncommitted diff before creating a pull request.
+
+### 5. Create an optional ADR
+
+Only after reviewing the retained proposal:
+
+```bash
+ssb adr --repo . --dry-run
+ssb adr --repo .
+```
+
+The developer-created pull request and its merge are the adoption decision.
+
+## CLI commands
 
 ```text
 ssb inspect  [--repo PATH] [--format text|json] [resource limits]
@@ -63,117 +195,37 @@ ssb render   [--repo PATH] [--dry-run]
 ssb adr      [--repo PATH] [--adr-dir PATH] [--dry-run]
 ```
 
-`inspect` accepts `--max-candidate-files N` and
-`--max-candidate-bytes N`. The defaults are 40,000 candidate files and
-128 MiB of candidate content. `--allow-partial` changes incomplete coverage
-from a blocked result into an explicitly diagnostic success; it does not make
-the inventory complete and must not be used to generate a proposal.
+- `inspect` creates a safe inventory of one committed repository snapshot.
+- `validate` checks proposed rules, evidence, scopes, proof mappings, and related skills.
+- `render` updates only the managed Software Standards Bootstrap section of root `AGENTS.md`.
+- `adr` creates one new Proposed ADR from the rules and skills that survived review.
 
-Exit codes:
+`inspect` supports `--max-candidate-files` and `--max-candidate-bytes`. `--allow-partial` permits diagnostic output from an incomplete inventory, but that output cannot be used to generate a proposal. Exit code `4`: inventory coverage incomplete.
 
-- `0`: success
-- `1`: rule-pack validation failure
-- `2`: usage or repository precondition failure
-- `3`: unexpected internal failure
-- `4`: inventory coverage incomplete
+Run `ssb <command> --help` for complete command options.
 
-`inspect` and `validate` are read-only. Valid JSON from `validate` includes the
-normalized pack as a local interchange envelope; invalid output omits the pack
-and reports diagnostics. `render` may change only the bounded Software
-Standards Bootstrap section in root `AGENTS.md`. `adr` exclusively creates one
-new record and refuses overwrite or path escape.
+## Safety
 
-## Agent Skill workflow
+The `ssb` CLI:
 
-Install or expose [the portable skill](skills/software-standards-bootstrap/SKILL.md) to a compatible host, then ask:
+- does not call an AI model;
+- does not make network requests or send telemetry;
+- does not execute repository code, tests, hooks, or mapped verification commands;
+- does not stage, commit, branch, push, or open pull requests;
+- reads inspection input from the committed Git tree rather than worktree files;
+- stops proposal generation when inventory coverage is incomplete; and
+- leaves generated files local and uncommitted for developer review.
 
-```text
-Use the software-standards-bootstrap skill to analyze this repository
-and generate an evidence-backed rules pack.
-```
+The coding agent performs the semantic analysis and writes the proposal. The CLI provides the inventory, validation, rendering, and ADR safety boundaries.
 
-When no pack exists, the skill:
+## Detailed documentation
 
-1. runs `ssb inspect`;
-2. performs targeted authority, risk, and structural-pattern review without executing repository code;
-3. writes an assessment, dynamically ranked and topically classified rule files, and genuinely procedural skills;
-4. runs `ssb validate` and `ssb render`;
-5. lists every changed and untracked path; and
-6. waits for the developer to edit or delete proposal sources before an ADR is requested.
-
-When a pack already exists, the skill does not reinspect, validate, render, or
-rewrite it. It reconciles the managed router against every canonical rule's
-selection frontmatter, selects base rules whose scopes match the affected
-paths plus contextual rules matching scope and each represented language,
-framework, and task dimension, reports the active rule IDs, and treats
-uncertain context conservatively by loading potentially relevant rules.
-
-That prohibition applies to rule consumption, not the documented review
-continuation. An explicit request to validate or rerender developer-edited
-sources uses a bounded maintenance mode, and an explicit post-review ADR
-request previews and creates only the `Proposed` record. Neither mode
-reinspects or rewrites canonical sources.
-
-The workflow has no fixed candidate count. Candidates below 25 remain assessment-only. A rule requires one authoritative source or three consistent occurrences across two files.
-
-The structural-pattern review explicitly covers package and dependency
-boundaries, parallel implementation families, platform and configuration seams,
-public compatibility surfaces, and source/test/documentation symmetry. The
-assessment records a disposition for each plausible candidate instead of
-silently dropping patterns that lack a prose policy or repository-wide scope.
-
-Codex discovers repository skills under `.agents/skills`. Claude Code uses a different documented project discovery path, so the same portable skill content must be exposed through `.claude/skills` for its behavioral smoke test. Other consumers are format-compatible only until tested.
-
-## Evidence and proof boundary
-
-Every rule records:
-
-- schema and stable ID;
-- exactly one primary topic from the controlled software-engineering taxonomy;
-- one base lens or contextual language, framework, and task lenses;
-- an `always`, `ask-first`, `never`, or `prefer` directive;
-- repository-relative scopes;
-- `guidance` or `deterministic` classification;
-- `ssb-score-v1` factors, total, and importance band;
-- confidence and baseline commit;
-- exact evidence line ranges and SHA-256 excerpt hashes;
-- an existing verification command with its repository source, coverage, and
-  bounded proved property, or an explicit proof gap; and
-- related Agent Skill IDs when the standard is procedural.
-
-Referenced skills carry the same required primary-topic metadata, based on the workflow's intended engineering outcome. Generated `AGENTS.md` guidance and the Proposed ADR expose these topics so reviewers can see whether the retained standards primarily concern correctness, compatibility, maintainability, performance, security, or another supported concern. Prefer a narrow topic; `quality` is the fallback only when no narrower topic fits.
-
-New proposals use `ssb.dev/rule/v2`; existing v1 packs remain valid and
-renderable. A v2 rule is `deterministic` only when a cited repository check
-fully covers the rule and the source records the exact bounded property proved
-when that command passes. Guidance may map partial proof or record a proof gap.
-`ssb` records that mapping but does not run the command or claim it passed.
-
-The v2 metadata is suitable for later catalog ingestion, but stable rule IDs
-remain repository-local. A separate catalog must assign its own namespace,
-version, import review, and lifecycle.
-
-See [the rule format](docs/rule-format.md), [topic taxonomy](skills/software-standards-bootstrap/references/topics.md), [architecture](docs/architecture.md), and [primary-source research](docs/research/competitive-and-format-research.md).
-
-## Safety model
-
-- Inventory reads the pinned Git tree and blob objects, not worktree files.
-- Only tracked regular files are considered.
-- Binaries, oversized files, secret-like paths, generated/vendor trees, symlinks, and submodules are excluded.
-- Paths are passed directly to Git without a shell and are NUL-delimited where applicable.
-- `HEAD` and tracked state are rechecked before an inventory is returned.
-- Candidate file and byte budgets are applied before blob reads.
-- Incomplete coverage is disclosed in text and JSON output and returns exit
-  `4` unless the caller explicitly requests diagnostic partial output.
-- Existing packs, malformed markers, projection drift, target collisions, symlink escapes, submodule targets, and ADR ambiguity fail closed.
-- Writes are bounded, staged locally, and left uncommitted.
-
-## Non-goals
-
-`ssb` does not provide a generic rules catalog, catalog import, configuration
-synchronization, tool-specific rule projections, checker generation, hosted
-services, direct model APIs, telemetry, hooks, automatic refresh, or downstream
-product activation.
+- [Rule format](docs/rule-format.md)
+- [Topic taxonomy](skills/software-standards-bootstrap/references/topics.md)
+- [Architecture and trust boundaries](docs/architecture.md)
+- [Agent workflow tests](docs/agent-smoke-tests.md)
+- [Verification record](docs/verification.md)
+- [Contributing](CONTRIBUTING.md)
 
 ## Development
 
@@ -185,4 +237,4 @@ go build ./cmd/ssb
 go tool govulncheck ./...
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution and behavior-test expectations.
+Licensed under Apache-2.0.
