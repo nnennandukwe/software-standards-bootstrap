@@ -1,5 +1,5 @@
-// Package render projects validated rule sources into one bounded AGENTS.md
-// managed section while preserving all surrounding bytes.
+// Package render projects validated actionable artifacts into one bounded
+// AGENTS.md managed section while preserving all surrounding bytes.
 package render
 
 import (
@@ -48,6 +48,15 @@ func Apply(repo *workspace.Repository, pack rulepack.Pack, dryRun bool) (Result,
 	if err != nil {
 		return Result{}, err
 	}
+	if len(pack.Rules) == 0 && len(pack.Recipes) == 0 && len(pack.Skills) == 0 {
+		return Result{
+			Path:         "AGENTS.md",
+			Changed:      false,
+			DryRun:       dryRun,
+			OutputDigest: digest(existing),
+			Content:      existing,
+		}, nil
+	}
 
 	section, sourceDigest, contentDigest, err := buildSection(pack)
 	if err != nil {
@@ -77,22 +86,34 @@ func Apply(repo *workspace.Repository, pack rulepack.Pack, dryRun bool) (Result,
 
 func buildSection(pack rulepack.Pack) ([]byte, string, string, error) {
 	rules := append([]rulepack.Rule(nil), pack.Rules...)
+	recipes := append([]rulepack.VerificationRecipe(nil), pack.Recipes...)
+	skills := append([]rulepack.Skill(nil), pack.Skills...)
 	sort.Slice(rules, func(i, j int) bool {
-		if rules[i].ID == rules[j].ID {
-			return rules[i].SourcePath < rules[j].SourcePath
-		}
 		return rules[i].ID < rules[j].ID
 	})
+	sort.Slice(recipes, func(i, j int) bool { return recipes[i].ID < recipes[j].ID })
+	sort.Slice(skills, func(i, j int) bool { return skills[i].ID < skills[j].ID })
+
+	manifest := make(map[string]rulepack.ManifestArtifact, len(pack.Report.Artifacts))
+	for _, artifact := range pack.Report.Artifacts {
+		manifest[artifact.ID] = artifact
+	}
 	sourceState := struct {
-		Baseline string          `json:"baseline"`
-		Rules    []rulepack.Rule `json:"rules"`
+		Baseline string                        `json:"baseline"`
+		Manifest []rulepack.ManifestArtifact   `json:"manifest"`
+		Rules    []rulepack.Rule               `json:"rules"`
+		Recipes  []rulepack.VerificationRecipe `json:"recipes"`
+		Skills   []rulepack.Skill              `json:"skills"`
 	}{
 		Baseline: pack.BaselineCommit,
+		Manifest: renderableManifest(pack.Report.Artifacts),
 		Rules:    rules,
+		Recipes:  recipes,
+		Skills:   skills,
 	}
 	canonical, err := json.Marshal(sourceState)
 	if err != nil {
-		return nil, "", "", fmt.Errorf("encode rule source digest: %w", err)
+		return nil, "", "", fmt.Errorf("encode projection source digest: %w", err)
 	}
 	sourceDigest := digest(canonical)
 
@@ -103,34 +124,34 @@ func buildSection(pack rulepack.Pack) ([]byte, string, string, error) {
 	}
 	orderedRules := append([]rulepack.Rule(nil), rules...)
 	sort.SliceStable(orderedRules, func(i, j int) bool {
-		leftDirective := directiveRank(effectiveDirective(orderedRules[i]))
-		rightDirective := directiveRank(effectiveDirective(orderedRules[j]))
+		leftDirective := directiveRank(orderedRules[i].Directive)
+		rightDirective := directiveRank(orderedRules[j].Directive)
 		if leftDirective != rightDirective {
 			return leftDirective < rightDirective
 		}
-		leftImportance := importanceRank(orderedRules[i].Importance)
-		rightImportance := importanceRank(orderedRules[j].Importance)
-		if leftImportance != rightImportance {
-			return leftImportance < rightImportance
+		leftUtility := manifest[orderedRules[i].ID].Utility.Total
+		rightUtility := manifest[orderedRules[j].ID].Utility.Total
+		if leftUtility != rightUtility {
+			return leftUtility > rightUtility
 		}
 		return orderedRules[i].ID < orderedRules[j].ID
 	})
 
 	var body strings.Builder
 	body.WriteString("## Software Standards Bootstrap\n\n")
-	body.WriteString("Generated from `.software-standards/rules/*.md` by `ssb render`. Edit or delete source files, then rerun the command.\n\n")
+	body.WriteString("Generated from `.software-standards/report.md` and its accepted artifacts by `ssb render`. Edit canonical sources and the manifest together, then rerun the command.\n\n")
 	fmt.Fprintf(&body, "Baseline: `%s`\n\n", pack.BaselineCommit)
 	body.WriteString("### How to apply these standards\n\n")
-	body.WriteString("- A rule is active only when its affected path scope matches. For contextual rules, every represented lens dimension must also match; values within one dimension are alternatives.\n")
-	body.WriteString("- If the language, framework, task, or affected path is uncertain, load the potentially relevant rule instead of excluding it.\n")
+	body.WriteString("- A semantic rule is active only when its affected path scope matches. For contextual artifacts, every represented lens dimension must also match; values within one dimension are alternatives.\n")
+	body.WriteString("- If the language, framework, task, or affected path is uncertain, load the potentially relevant rule, recipe, or skill instead of excluding it.\n")
 	body.WriteString("- Directives mean: `never` is prohibited, `ask-first` requires developer authorization, `always` is required, and `prefer` is the default when no documented exception or explicit user direction applies.\n")
-	body.WriteString("- Legacy v1 rules record no directive; apply their canonical bodies as written without inferring one.\n")
-	body.WriteString("- Linked rule files are canonical. This projection is a concise router, not a replacement for their complete guidance.\n")
-	body.WriteString("- A mapped command is existing repository evidence only. `ssb` did not execute it, and its presence is not a passing result.\n")
+	body.WriteString("- Linked artifact files are canonical. This projection is a concise router, not a replacement for their complete content.\n")
+	body.WriteString("- Verification recipes record existing commands for deliberate use. `ssb` did not execute them.\n")
 
-	writeStandingOrders(&body, orderedRules)
-	writeMappedCommands(&body, orderedRules)
-	writeContextualIndex(&body, orderedRules)
+	writeStandingOrders(&body, orderedRules, manifest)
+	writeContextualRules(&body, orderedRules, manifest)
+	writeVerificationRecipes(&body, recipes, manifest)
+	writeSkills(&body, skills, manifest)
 
 	bodyBytes := []byte(body.String())
 	if bytes.Contains(bodyBytes, []byte(StartMarker)) || bytes.Contains(bodyBytes, []byte(EndMarker)) {
@@ -150,26 +171,28 @@ func buildSection(pack rulepack.Pack) ([]byte, string, string, error) {
 	return []byte(section.String()), sourceDigest, contentDigest, nil
 }
 
-func writeStandingOrders(body *strings.Builder, rules []rulepack.Rule) {
+func renderableManifest(artifacts []rulepack.ManifestArtifact) []rulepack.ManifestArtifact {
+	result := make([]rulepack.ManifestArtifact, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		if artifact.Kind != "automation" {
+			result = append(result, artifact)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result
+}
+
+func writeStandingOrders(
+	body *strings.Builder,
+	rules []rulepack.Rule,
+	manifest map[string]rulepack.ManifestArtifact,
+) {
 	body.WriteString("\n### Standing orders\n")
 	wroteAny := false
-	legacy := make([]rulepack.Rule, 0)
-	for _, rule := range rules {
-		if rule.Schema == rulepack.SchemaVersionV1 {
-			legacy = append(legacy, rule)
-		}
-	}
-	if len(legacy) != 0 {
-		wroteAny = true
-		body.WriteString("\n#### Legacy v1 rules (directive not recorded)\n")
-		for _, rule := range legacy {
-			writeStandingOrder(body, rule)
-		}
-	}
 	for _, directive := range []string{"never", "ask-first", "always", "prefer"} {
 		group := make([]rulepack.Rule, 0)
 		for _, rule := range rules {
-			if isBaseRule(rule) && effectiveDirective(rule) == directive {
+			if isBaseRule(rule) && rule.Directive == directive {
 				group = append(group, rule)
 			}
 		}
@@ -179,7 +202,7 @@ func writeStandingOrders(body *strings.Builder, rules []rulepack.Rule) {
 		wroteAny = true
 		fmt.Fprintf(body, "\n#### %s\n", directiveHeading(directive))
 		for _, rule := range group {
-			writeStandingOrder(body, rule)
+			writeStandingOrder(body, rule, manifest)
 		}
 	}
 	if !wroteAny {
@@ -187,18 +210,17 @@ func writeStandingOrders(body *strings.Builder, rules []rulepack.Rule) {
 	}
 }
 
-func writeStandingOrder(body *strings.Builder, rule rulepack.Rule) {
+func writeStandingOrder(
+	body *strings.Builder,
+	rule rulepack.Rule,
+	manifest map[string]rulepack.ManifestArtifact,
+) {
 	fmt.Fprintf(body, "\n##### %s (`%s`)\n\n", rule.Title, rule.ID)
 	fmt.Fprintf(body, "- Source: [%s](%s)\n", rule.SourcePath, rule.SourcePath)
 	fmt.Fprintf(body, "- Scope: %s\n", codeList(rule.Scopes))
-	fmt.Fprintf(body, "- Primary topic: `%s`\n", rule.Topic)
-	fmt.Fprintf(body, "- Classification: `%s`\n", rule.Classification)
-	fmt.Fprintf(body, "- Importance: `%s` (%d/100, `%s`)\n", rule.Importance, rule.Score.Total, rule.Score.Method)
-	fmt.Fprintf(body, "- Confidence: `%s`\n", rule.Confidence)
-	writeRuleProof(body, rule)
-	if len(rule.RelatedSkillIDs) != 0 {
-		fmt.Fprintf(body, "- Related skills: %s\n", codeList(rule.RelatedSkillIDs))
-	}
+	fmt.Fprintf(body, "- Category: `%s`\n", rule.Category)
+	fmt.Fprintf(body, "- Evidence: %s\n", evidenceSourceList(rule.Evidence, false))
+	writeRelationships(body, manifest[rule.ID], manifest, "")
 	body.WriteString("\n")
 	body.WriteString(rule.Body)
 	if !strings.HasSuffix(rule.Body, "\n") {
@@ -206,155 +228,165 @@ func writeStandingOrder(body *strings.Builder, rule rulepack.Rule) {
 	}
 }
 
-func writeMappedCommands(body *strings.Builder, rules []rulepack.Rule) {
-	type commandRule struct {
-		ID       string
-		Coverage string
-		Proves   string
-		Legacy   bool
-	}
-	commands := make(map[string][]commandRule)
+func writeContextualRules(
+	body *strings.Builder,
+	rules []rulepack.Rule,
+	manifest map[string]rulepack.ManifestArtifact,
+) {
+	contextual := make([]rulepack.Rule, 0)
 	for _, rule := range rules {
-		proof := mappedProof(rule)
-		if proof.Command == "" {
-			continue
+		if !isBaseRule(rule) {
+			contextual = append(contextual, rule)
 		}
-		commands[proof.Command] = append(commands[proof.Command], commandRule{
-			ID:       rule.ID,
-			Coverage: proof.Coverage,
-			Proves:   proof.Proves,
-			Legacy:   proof.Legacy,
-		})
 	}
-	if len(commands) == 0 {
+	if len(contextual) == 0 {
 		return
 	}
-	body.WriteString("\n### Mapped verification commands\n")
-	commandNames := make([]string, 0, len(commands))
-	for command := range commands {
-		commandNames = append(commandNames, command)
-	}
-	sort.Strings(commandNames)
-	for _, command := range commandNames {
-		entries := commands[command]
-		fmt.Fprintf(body, "\n- `%s` — mapped, not executed by ssb\n", command)
-		for _, entry := range entries {
-			if entry.Legacy {
-				fmt.Fprintf(body, "  - `%s` (rule v1): coverage and bounded proved property were not recorded by the v1 schema.\n", entry.ID)
-				continue
-			}
-			fmt.Fprintf(body, "  - `%s`: `%s` — %s\n", entry.ID, entry.Coverage, entry.Proves)
-		}
+	body.WriteString("\n### Contextual semantic rules\n")
+	for _, rule := range contextual {
+		fmt.Fprintf(
+			body,
+			"\n- [%s](%s) (`%s`) — `%s`; category: `%s`; lenses: %s; scope: %s\n",
+			rule.Title,
+			rule.SourcePath,
+			rule.ID,
+			rule.Directive,
+			rule.Category,
+			lensCodeList(rule.Lenses),
+			codeList(rule.Scopes),
+		)
+		fmt.Fprintf(body, "  - Evidence: %s\n", evidenceSourceList(rule.Evidence, false))
+		writeRelationships(body, manifest[rule.ID], manifest, "  ")
 	}
 }
 
-func writeContextualIndex(body *strings.Builder, rules []rulepack.Rule) {
-	groups := map[string]map[string][]rulepack.Rule{
-		"language":  {},
-		"framework": {},
-		"task":      {},
-	}
-	for _, rule := range rules {
-		if isBaseRule(rule) {
-			continue
-		}
-		for _, lens := range rule.Lenses {
-			if _, supported := groups[lens.Kind]; !supported {
-				continue
-			}
-			groups[lens.Kind][lens.Value] = append(groups[lens.Kind][lens.Value], rule)
-		}
-	}
-	hasContextual := false
-	for _, values := range groups {
-		if len(values) != 0 {
-			hasContextual = true
-			break
-		}
-	}
-	if !hasContextual {
+func writeVerificationRecipes(
+	body *strings.Builder,
+	recipes []rulepack.VerificationRecipe,
+	manifest map[string]rulepack.ManifestArtifact,
+) {
+	if len(recipes) == 0 {
 		return
 	}
-	body.WriteString("\n### Contextual rule index\n")
-	for _, kind := range []string{"language", "framework", "task"} {
-		values := make([]string, 0, len(groups[kind]))
-		for value := range groups[kind] {
-			values = append(values, value)
+	body.WriteString("\n### Verification recipes\n")
+	for _, recipe := range recipes {
+		fmt.Fprintf(
+			body,
+			"\n- [%s](%s) (`%s`) — category: `%s`; lenses: %s; scope: %s\n",
+			recipe.Title,
+			recipe.SourcePath,
+			recipe.ID,
+			recipe.Category,
+			lensCodeList(recipe.Lenses),
+			codeList(recipe.Scopes),
+		)
+		fmt.Fprintf(body, "  - When: %s\n", strings.TrimSpace(recipe.When))
+		fmt.Fprintf(body, "  - Evidence: %s\n", evidenceSourceList(recipe.Evidence, false))
+		writeRelationships(body, manifest[recipe.ID], manifest, "  ")
+	}
+}
+
+func writeSkills(
+	body *strings.Builder,
+	skills []rulepack.Skill,
+	manifest map[string]rulepack.ManifestArtifact,
+) {
+	if len(skills) == 0 {
+		return
+	}
+	body.WriteString("\n### Agent Skills\n")
+	for _, skill := range skills {
+		metadata, exists := manifest[skill.ID]
+		if !exists {
+			continue
 		}
-		sort.Strings(values)
-		for _, value := range values {
-			fmt.Fprintf(body, "\n#### %s: `%s`\n", strings.ToUpper(kind[:1])+kind[1:], value)
-			for _, rule := range groups[kind][value] {
-				fmt.Fprintf(
-					body,
-					"\n- [%s](%s) (`%s`) — `%s`; lenses: %s; scope: %s; topic: `%s`; importance: `%s`; classification: `%s`\n",
-					rule.Title,
-					rule.SourcePath,
-					rule.ID,
-					effectiveDirective(rule),
-					lensCodeList(rule.Lenses),
-					codeList(rule.Scopes),
-					rule.Topic,
-					rule.Importance,
-					rule.Classification,
-				)
-				writeRuleProofIndented(body, rule)
-				if len(rule.RelatedSkillIDs) != 0 {
-					fmt.Fprintf(body, "  - Related skills: %s\n", codeList(rule.RelatedSkillIDs))
-				}
-			}
+		fmt.Fprintf(
+			body,
+			"\n- [%s](%s) — description: %s; category: `%s`; lenses: %s; scope: %s\n",
+			skillTitle(skill.ID),
+			skill.SourcePath,
+			strings.TrimSpace(skill.Description),
+			skill.Category,
+			lensCodeList(metadata.Lenses),
+			codeList(metadata.Scopes),
+		)
+		fmt.Fprintf(body, "  - Evidence: %s\n", evidenceSourceList(metadata.Evidence, false))
+		writeRelationships(body, metadata, manifest, "  ")
+	}
+}
+
+func writeRelationships(
+	body *strings.Builder,
+	artifact rulepack.ManifestArtifact,
+	manifest map[string]rulepack.ManifestArtifact,
+	indent string,
+) {
+	for _, relatedID := range artifact.RelatedArtifactIDs {
+		related, exists := manifest[relatedID]
+		if !exists {
+			continue
+		}
+		switch related.Kind {
+		case "verification":
+			fmt.Fprintf(
+				body,
+				"%s- Related recipe: [%s](%s)\n",
+				indent,
+				manifestTitle(related),
+				related.Path,
+			)
+		case "skill":
+			fmt.Fprintf(
+				body,
+				"%s- Related skill: [%s](%s)\n",
+				indent,
+				skillTitle(related.ID),
+				related.Path,
+			)
 		}
 	}
 }
 
-func writeRuleProof(body *strings.Builder, rule rulepack.Rule) {
-	proof := mappedProof(rule)
-	if proof.Command != "" && proof.Legacy {
-		fmt.Fprintf(body, "- Verification: `%s` (mapped, not executed by ssb; rule v1 did not record coverage or a bounded proved property)\n", proof.Command)
-	} else if proof.Command != "" {
-		fmt.Fprintf(body, "- Verification: `%s`; `%s`: %s (mapped, not executed by ssb)\n", proof.Command, proof.Coverage, proof.Proves)
-	} else if strings.TrimSpace(rule.Verification.ProofGap) != "" {
-		fmt.Fprintf(body, "- Proof gap: %s\n", strings.TrimSpace(rule.Verification.ProofGap))
+func manifestTitle(artifact rulepack.ManifestArtifact) string {
+	switch artifact.Kind {
+	case "verification":
+		return titleFromID(artifact.ID)
+	default:
+		return titleFromID(artifact.ID)
 	}
 }
 
-func writeRuleProofIndented(body *strings.Builder, rule rulepack.Rule) {
-	proof := mappedProof(rule)
-	if proof.Command != "" {
-		fmt.Fprintf(body, "  - Proof: `%s`: %s; command `%s` is mapped, not executed by ssb.\n", proof.Coverage, proof.Proves, proof.Command)
-	} else if strings.TrimSpace(rule.Verification.ProofGap) != "" {
-		fmt.Fprintf(body, "  - Proof gap: %s\n", strings.TrimSpace(rule.Verification.ProofGap))
-	}
+func skillTitle(id string) string {
+	return titleFromID(id)
 }
 
-type proofMapping struct {
-	Command  string
-	Coverage string
-	Proves   string
-	Legacy   bool
+func titleFromID(id string) string {
+	title := strings.ReplaceAll(id, "-", " ")
+	if title != "" {
+		title = strings.ToUpper(title[:1]) + title[1:]
+	}
+	return title
 }
 
-func mappedProof(rule rulepack.Rule) proofMapping {
-	return proofMapping{
-		Command:  strings.TrimSpace(rule.Verification.Command),
-		Coverage: strings.TrimSpace(rule.Verification.Coverage),
-		Proves:   strings.TrimSpace(rule.Verification.Proves),
-		Legacy:   rule.Schema != rulepack.SchemaVersionV2,
+func evidenceSourceList(evidence []rulepack.Evidence, includeRole bool) string {
+	values := make([]string, 0, len(evidence))
+	seen := make(map[string]struct{}, len(evidence))
+	for _, item := range evidence {
+		value := item.Path + ":" + item.Lines
+		if includeRole {
+			value += " (" + item.Role + ")"
+		}
+		if _, duplicate := seen[value]; duplicate {
+			continue
+		}
+		seen[value] = struct{}{}
+		values = append(values, "`"+value+"`")
 	}
+	return strings.Join(values, ", ")
 }
 
 func isBaseRule(rule rulepack.Rule) bool {
-	if rule.Schema != rulepack.SchemaVersionV2 {
-		return true
-	}
 	return len(rule.Lenses) == 1 && rule.Lenses[0].Kind == "base"
-}
-
-func effectiveDirective(rule rulepack.Rule) string {
-	if rule.Schema == rulepack.SchemaVersionV2 {
-		return rule.Directive
-	}
-	return ""
 }
 
 func lensCodeList(lenses []rulepack.Lens) string {
@@ -385,19 +417,6 @@ func directiveRank(directive string) int {
 	case "ask-first":
 		return 1
 	case "always":
-		return 2
-	default:
-		return 3
-	}
-}
-
-func importanceRank(importance string) int {
-	switch importance {
-	case "very-high":
-		return 0
-	case "high":
-		return 1
-	case "medium":
 		return 2
 	default:
 		return 3
@@ -471,7 +490,7 @@ func verifyExistingSection(section []byte) error {
 	body := bodyWithEnd[:len(bodyWithEnd)-len(EndMarker)]
 	actual := digest(append([]byte("<!-- source-digest: "+sourceDigest+" -->\n"), body...))
 	if recorded != actual {
-		return fmt.Errorf("%w: edit or delete rule source files instead of editing the generated section", ErrDrift)
+		return fmt.Errorf("%w: edit canonical artifact sources and report.md instead of editing the generated section", ErrDrift)
 	}
 	return nil
 }

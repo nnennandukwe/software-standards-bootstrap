@@ -613,7 +613,6 @@ func validateResultingGraph(
 		}
 		final[itemPath] = finalArtifact{kind: kind, content: operation.Content}
 	}
-	skills := make(map[string]struct{})
 	for itemPath, artifact := range final {
 		if artifact.kind != ArtifactSkill {
 			continue
@@ -622,7 +621,6 @@ func validateResultingGraph(
 		if _, diagnostics := rulepack.ValidateCandidateSkill(itemPath, id, artifact.content); len(diagnostics) != 0 {
 			return fmt.Errorf("resulting skill %s violates the Agent Skill contract: %s", itemPath, diagnostics[0].Message)
 		}
-		skills[id] = struct{}{}
 	}
 	for itemPath, artifact := range final {
 		if artifact.kind != ArtifactRule {
@@ -638,11 +636,6 @@ func validateResultingGraph(
 		_, pathID, _ := artifactIdentity(itemPath)
 		if rule.ID != pathID {
 			return fmt.Errorf("resulting rule %s declares id %s", itemPath, rule.ID)
-		}
-		for _, skillID := range rule.RelatedSkillIDs {
-			if _, exists := skills[skillID]; !exists {
-				return fmt.Errorf("resulting rule %s references missing skill %s", itemPath, skillID)
-			}
 		}
 	}
 	return nil

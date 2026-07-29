@@ -15,202 +15,74 @@ import (
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/workspace"
 )
 
-func TestCreateDefaultsToConciseProposedADRWithOnlySurvivingArtifacts(t *testing.T) {
+func TestCreatePreservesConventionAndNeverOverwrites(t *testing.T) {
 	repo := committedRepository(t)
+	writeFile(t, filepath.Join(repo, "docs", "adrs", "0007-existing.md"), "# Existing\n")
 	ws, err := workspace.Open(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack := testPack(ws.Baseline(), "keep-rule", "Keep this exact body.", "keep-skill")
+	pack := testPack(ws.Baseline())
 
 	dryRun, err := adr.Create(context.Background(), ws, pack, adr.Options{DryRun: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dryRun.Path != "docs/adr/0001-agentic-rules.md" ||
-		!strings.Contains(string(dryRun.Content), "Status: Proposed") ||
-		!strings.Contains(string(dryRun.Content), "Keep this exact body.") ||
-		!strings.Contains(string(dryRun.Content), "- Primary topic: `correctness`") ||
-		!strings.Contains(string(dryRun.Content), "  - Primary topic: `compatibility`") ||
-		!strings.Contains(string(dryRun.Content), "keep-skill") ||
-		strings.Contains(string(dryRun.Content), "deleted-rule") {
-		t.Fatalf("unexpected ADR:\n%s", dryRun.Content)
+	if dryRun.Path != "docs/adrs/0008-agentic-rules.md" {
+		t.Fatalf("dry-run path = %q", dryRun.Path)
 	}
-	if _, err := os.Lstat(filepath.Join(repo, "docs")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("dry-run created directories: %v", err)
+	if _, err := os.Lstat(filepath.Join(repo, dryRun.Path)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("dry-run wrote an ADR: %v", err)
 	}
 
-	created, err := adr.Create(context.Background(), ws, pack, adr.Options{})
+	first, err := adr.Create(context.Background(), ws, pack, adr.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !created.Created {
-		t.Fatal("expected ADR creation")
-	}
-	firstPath := filepath.Join(repo, filepath.FromSlash(created.Path))
-	first, err := os.ReadFile(firstPath)
+	firstPath := filepath.Join(repo, filepath.FromSlash(first.Path))
+	firstBytes, err := os.ReadFile(firstPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	second, err := adr.Create(context.Background(), ws, pack, adr.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Path != "docs/adr/0002-agentic-rules.md" {
-		t.Fatalf("second ADR path = %q", second.Path)
+	if second.Path != "docs/adrs/0009-agentic-rules.md" {
+		t.Fatalf("second path = %q", second.Path)
 	}
 	after, err := os.ReadFile(firstPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(after) != string(first) {
-		t.Fatal("second ADR creation overwrote the existing ADR")
+	if string(after) != string(firstBytes) {
+		t.Fatal("second ADR creation overwrote the first")
 	}
 }
 
-func TestCreateRecordsRuleV2ActivationDirectiveAndProofCoverage(t *testing.T) {
+func TestCreateRequiresDirectoryChoiceWhenAmbiguous(t *testing.T) {
 	repo := committedRepository(t)
+	if err := os.MkdirAll(filepath.Join(repo, "docs", "adr"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "docs", "adrs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	ws, err := workspace.Open(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack := rulepack.Pack{
-		BaselineCommit: ws.Baseline(),
-		AssessmentPath: ".software-standards/assessment.md",
-		Rules: []rulepack.Rule{{
-			Schema:         rulepack.SchemaVersionV2,
-			ID:             "review-cobra-command",
-			Title:          "Review Cobra commands",
-			Topic:          "maintainability",
-			Lenses:         []rulepack.Lens{{Kind: "language", Value: "go"}, {Kind: "framework", Value: "cobra"}, {Kind: "task", Value: "review"}},
-			Directive:      "prefer",
-			Scopes:         []string{"cmd/**"},
-			Classification: "guidance",
-			Importance:     "medium",
-			Score:          rulepack.Score{Method: rulepack.ScoreMethod, Total: 50},
-			Confidence:     "medium",
-			SourcePath:     ".software-standards/rules/review-cobra-command.md",
-			Body:           "Review the command family together.\n",
-			Verification: rulepack.Verification{
-				Command:  "go test ./...",
-				Coverage: "partial",
-				Proves:   "The retained command assertions when the command passes.",
-			},
-		}},
+	_, err = adr.Create(context.Background(), ws, testPack(ws.Baseline()), adr.Options{})
+	if !errors.Is(err, adr.ErrAmbiguousDirectory) {
+		t.Fatalf("expected ambiguity error, got %v", err)
 	}
-
-	result, err := adr.Create(context.Background(), ws, pack, adr.Options{DryRun: true})
-	if err != nil {
-		t.Fatal(err)
+	matches, globErr := filepath.Glob(filepath.Join(repo, "docs", "*", "*-agentic-rules.md"))
+	if globErr != nil {
+		t.Fatal(globErr)
 	}
-	content := string(result.Content)
-	for _, required := range []string{
-		"- Lenses: `language:go`, `framework:cobra`, `task:review`",
-		"- Directive: `prefer`",
-		"- Verification coverage: `partial`",
-		"- Proves when the mapped command passes: The retained command assertions when the command passes.",
-		"- Existing verification: `go test ./...` (mapped, not executed)",
-	} {
-		if !strings.Contains(content, required) {
-			t.Errorf("ADR missing %q:\n%s", required, content)
-		}
+	if len(matches) != 0 {
+		t.Fatalf("ambiguous ADR selection wrote files: %#v", matches)
 	}
-}
-
-func TestCreatePreservesRuleV1MappedProofSemantics(t *testing.T) {
-	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pack := testPack(ws.Baseline(), "verify-before-merge", "Run the retained verification command.", "")
-	pack.Rules[0].Classification = "deterministic"
-	pack.Rules[0].Verification = rulepack.Verification{Command: "go test ./..."}
-
-	result, err := adr.Create(context.Background(), ws, pack, adr.Options{DryRun: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	content := string(result.Content)
-	if !strings.Contains(content, "- Existing verification: `go test ./...` (mapped, not executed)") ||
-		strings.Contains(content, "- Lenses:") ||
-		strings.Contains(content, "- Directive:") ||
-		strings.Contains(content, "- Verification coverage:") ||
-		strings.Contains(content, "- Proves when the mapped command passes:") {
-		t.Fatalf("v1 ADR changed legacy proof semantics:\n%s", content)
-	}
-}
-
-func TestCreateTreatsWhitespaceVerificationCommandAsAbsent(t *testing.T) {
-	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pack := testPack(ws.Baseline(), "review-change", "Review the change semantically.", "")
-	pack.Rules[0].Schema = rulepack.SchemaVersionV2
-	pack.Rules[0].Lenses = []rulepack.Lens{{Kind: "task", Value: "review"}}
-	pack.Rules[0].Directive = "prefer"
-	pack.Rules[0].Verification = rulepack.Verification{
-		Command:  " \t ",
-		ProofGap: "No repository check proves semantic review quality.",
-	}
-
-	result, err := adr.Create(context.Background(), ws, pack, adr.Options{DryRun: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	content := string(result.Content)
-	if !strings.Contains(content, "- Proof gap: No repository check proves semantic review quality.") ||
-		strings.Contains(content, "- Existing verification:") ||
-		strings.Contains(content, "- Verification coverage:") ||
-		strings.Contains(content, "- Proves when the mapped command passes:") {
-		t.Fatalf("ADR treated whitespace-only command as mapped proof:\n%s", content)
-	}
-}
-
-func TestCreatePreservesExistingConventionAndRequiresChoiceWhenAmbiguous(t *testing.T) {
-	t.Run("existing convention", func(t *testing.T) {
-		repo := committedRepository(t)
-		writeFile(t, filepath.Join(repo, "docs", "adrs", "0007-existing.md"), "# Existing\n")
-		ws, err := workspace.Open(context.Background(), repo)
-		if err != nil {
-			t.Fatal(err)
-		}
-		result, err := adr.Create(context.Background(), ws, testPack(ws.Baseline(), "rule", "Body.", ""), adr.Options{DryRun: true})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if result.Path != "docs/adrs/0008-agentic-rules.md" {
-			t.Fatalf("path = %q", result.Path)
-		}
-	})
-
-	t.Run("ambiguous", func(t *testing.T) {
-		repo := committedRepository(t)
-		if err := os.MkdirAll(filepath.Join(repo, "docs", "adr"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.MkdirAll(filepath.Join(repo, "docs", "adrs"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		ws, err := workspace.Open(context.Background(), repo)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, err = adr.Create(context.Background(), ws, testPack(ws.Baseline(), "rule", "Body.", ""), adr.Options{})
-		if !errors.Is(err, adr.ErrAmbiguousDirectory) {
-			t.Fatalf("expected ambiguity error, got %v", err)
-		}
-		matches, globErr := filepath.Glob(filepath.Join(repo, "docs", "*", "*-agentic-rules.md"))
-		if globErr != nil {
-			t.Fatal(globErr)
-		}
-		if len(matches) != 0 {
-			t.Fatalf("ambiguous ADR selection wrote files: %#v", matches)
-		}
-	})
 }
 
 func TestCreateRejectsTraversalAndSymlinkEscapes(t *testing.T) {
@@ -219,7 +91,7 @@ func TestCreateRejectsTraversalAndSymlinkEscapes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack := testPack(ws.Baseline(), "rule", "Body.", "")
+	pack := testPack(ws.Baseline())
 
 	_, err = adr.Create(context.Background(), ws, pack, adr.Options{Directory: "../outside"})
 	if !errors.Is(err, adr.ErrUnsafeTarget) {
@@ -257,7 +129,7 @@ func TestCreateRejectsADRDirectoryInsideSubmodule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = adr.Create(context.Background(), ws, testPack(ws.Baseline(), "rule", "Body.", ""), adr.Options{Directory: "docs/adr"})
+	_, err = adr.Create(context.Background(), ws, testPack(ws.Baseline()), adr.Options{Directory: "docs/adr"})
 	if !errors.Is(err, adr.ErrUnsafeTarget) || !strings.Contains(err.Error(), "submodule") {
 		t.Fatalf("expected submodule target rejection, got %v", err)
 	}
@@ -285,7 +157,7 @@ func TestCreateWriteFailureLeavesNoPartialADR(t *testing.T) {
 		}
 	}()
 
-	_, err = adr.Create(context.Background(), ws, testPack(ws.Baseline(), "rule", "Body.", ""), adr.Options{})
+	_, err = adr.Create(context.Background(), ws, testPack(ws.Baseline()), adr.Options{})
 	if err == nil {
 		t.Fatal("expected ADR write failure")
 	}
@@ -298,47 +170,36 @@ func TestCreateWriteFailureLeavesNoPartialADR(t *testing.T) {
 	}
 }
 
-func testPack(baseline, ruleID, body, skillID string) rulepack.Pack {
-	rule := rulepack.Rule{
-		Schema:         rulepack.SchemaVersionV1,
-		ID:             ruleID,
-		Title:          "Retained rule",
-		Topic:          "correctness",
-		Scopes:         []string{"src/**"},
-		Classification: "guidance",
-		Importance:     "high",
-		Score: rulepack.Score{
-			Method: "ssb-score-v1",
-			Total:  70,
+func testPack(baseline string) rulepack.Pack {
+	const id = "keep-rule"
+	const sourcePath = ".software-standards/rules/keep-rule.md"
+	return rulepack.Pack{
+		BaselineCommit: baseline,
+		ReportPath:     ".software-standards/report.md",
+		Report: rulepack.Report{
+			Schema:         rulepack.ReportSchema,
+			BaselineCommit: baseline,
+			Artifacts: []rulepack.ManifestArtifact{{
+				ID: id, Kind: "rule", Path: sourcePath, Confidence: "high",
+				Utility: rulepack.Utility{Method: rulepack.UtilityMethod, Total: 70},
+			}},
 		},
-		Confidence:     "high",
-		BaselineCommit: baseline,
-		SourcePath:     ".software-standards/rules/" + ruleID + ".md",
-		Body:           body + "\n",
-		Evidence: []rulepack.Evidence{{
-			Path:          "README.md",
-			Lines:         "1-1",
-			ExcerptSHA256: "sha256:" + strings.Repeat("0", 64),
+		Rules: []rulepack.Rule{{
+			Schema:     rulepack.RuleSchema,
+			ID:         id,
+			Title:      "Keep rule",
+			Category:   "correctness",
+			Lenses:     []rulepack.Lens{{Kind: "base"}},
+			Directive:  "always",
+			Scopes:     []string{"src/**"},
+			Derivation: "extracted",
+			Evidence: []rulepack.Evidence{{
+				Role: "declares", Path: "README.md", Lines: "1-1",
+			}},
+			SourcePath: sourcePath,
+			Body:       "Keep this exact body.\n",
 		}},
-		Verification: rulepack.Verification{ProofGap: "No existing checker."},
 	}
-	pack := rulepack.Pack{
-		BaselineCommit: baseline,
-		AssessmentPath: ".software-standards/assessment.md",
-		Assessment:     "# Assessment\n",
-		Rules:          []rulepack.Rule{rule},
-	}
-	if skillID != "" {
-		pack.Rules[0].RelatedSkillIDs = []string{skillID}
-		pack.Skills = []rulepack.Skill{{
-			ID:          skillID,
-			Description: "A retained procedural workflow.",
-			Topic:       "compatibility",
-			SourcePath:  ".agents/skills/" + skillID + "/SKILL.md",
-			Body:        "# Skill\n",
-		}}
-	}
-	return pack
 }
 
 func committedRepository(t *testing.T) string {

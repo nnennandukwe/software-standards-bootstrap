@@ -2,7 +2,12 @@ package rulepack_test
 
 import (
 	"context"
+	"crypto/sha1"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -128,6 +133,25 @@ func TestValidateRejectsOldRuleContractsAndRejectedCandidateMetadata(t *testing.
 				return report, strings.Replace(rule, "derivation: extracted", "classification: guidance\nderivation: extracted", 1)
 			},
 			want: "field classification not found",
+		},
+		{
+			name: "stale evidence hash",
+			mutate: func(report, rule string) (string, string) {
+				return report, strings.Replace(
+					rule,
+					excerptHash("package main\n"),
+					"sha256:"+strings.Repeat("0", 64),
+					1,
+				)
+			},
+			want: "excerpt hash does not match",
+		},
+		{
+			name: "invalid evidence role",
+			mutate: func(report, rule string) (string, string) {
+				return report, strings.Replace(rule, "role: declares", "role: proves", 1)
+			},
+			want: "evidence role \"proves\" is not supported",
 		},
 		{
 			name: "low confidence",
@@ -311,6 +335,90 @@ Do the thing.
 			t.Fatalf("unexpected diagnostics: %#v", diagnostics)
 		}
 	})
+
+	t.Run("unsafe noncanonical path", func(t *testing.T) {
+		repo, baseline := evidenceRepository(t)
+		entry := strings.Replace(
+			validRuleManifestEntry(),
+			".software-standards/rules/keep-public-api-compatible.md",
+			"../../outside.md",
+			1,
+		)
+		writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), actionableReport(baseline, entry))
+
+		ws, err := workspace.Open(context.Background(), repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !diagnosticsContain(diagnostics, "artifact path must be .software-standards/rules/keep-public-api-compatible.md") {
+			t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+		}
+	})
+
+	t.Run("duplicate global id and path", func(t *testing.T) {
+		repo, baseline := evidenceRepository(t)
+		entries := validRuleManifestEntry() + "\n" + validRuleManifestEntry()
+		writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), actionableReport(baseline, entries))
+		writeFile(t, filepath.Join(repo, ".software-standards", "rules", "keep-public-api-compatible.md"), fmt.Sprintf(`---
+schema: ssb.dev/rule/v2
+id: keep-public-api-compatible
+title: Keep public APIs compatible
+category: compatibility
+lenses:
+  - kind: base
+directive: always
+scopes: ["**/*.go"]
+derivation: extracted
+evidence:
+  - role: declares
+    path: main.go
+    lines: 1-1
+    excerpt_sha256: %s
+---
+Keep public API changes backward compatible.
+`, excerptHash("package main\n")))
+
+		ws, err := workspace.Open(context.Background(), repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !diagnosticsContain(diagnostics, "duplicate artifact id") ||
+			!diagnosticsContain(diagnostics, "duplicate artifact path") {
+			t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+		}
+	})
+}
+
+func TestValidateRejectsInventoryThatDoesNotMatchBaseline(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	report := actionableReport(baseline, "  []")
+	report = strings.Replace(
+		report,
+		gitBlobOID("package main\n\nfunc main() {}\n"),
+		strings.Repeat("0", 40),
+		1,
+	)
+	writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), report)
+
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !diagnosticsContain(diagnostics, "does not exactly match") {
+		t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+	}
 }
 
 func TestValidateNormalizesAllFourActionableArtifactKinds(t *testing.T) {
@@ -703,16 +811,15 @@ inventory:
   indexed_bytes: 52
   files:
     - path: Makefile
-      blob_oid: "0000000000000000000000000000000000000000"
+      blob_oid: "%s"
       bytes: 23
       lines: 2
-      language: make
       sha256: %s
     - path: main.go
-      blob_oid: "0000000000000000000000000000000000000000"
+      blob_oid: "%s"
       bytes: 29
       lines: 3
-      language: go
+      language: Go
       sha256: %s
   excluded:
     binary: 0
@@ -732,7 +839,15 @@ artifacts:
 # Software standards report
 
 Inventory coverage was complete. Accepted outputs are listed in the manifest.
-`, baseline, baseline, excerptHash("verify:\n\tgo test ./...\n"), excerptHash("package main\n\nfunc main() {}\n"), artifactEntries)
+`,
+		baseline,
+		baseline,
+		gitBlobOID("verify:\n\tgo test ./...\n"),
+		excerptHash("verify:\n\tgo test ./...\n"),
+		gitBlobOID("package main\n\nfunc main() {}\n"),
+		excerptHash("package main\n\nfunc main() {}\n"),
+		artifactEntries,
+	)
 }
 
 func validRuleManifestEntry() string {
@@ -749,4 +864,56 @@ func validRuleManifestEntry() string {
         actionability: 15
         applicability: 10
         earlier_feedback: 10`
+}
+
+func evidenceRepository(t *testing.T) (string, string) {
+	t.Helper()
+	repo := t.TempDir()
+	git(t, repo, "init", "-b", "main")
+	writeFile(t, filepath.Join(repo, "main.go"), "package main\n\nfunc main() {}\n")
+	writeFile(t, filepath.Join(repo, "Makefile"), "verify:\n\tgo test ./...\n")
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "baseline")
+	return repo, strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
+}
+
+func excerptHash(excerpt string) string {
+	sum := sha256.Sum256([]byte(excerpt))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func gitBlobOID(content string) string {
+	payload := []byte(fmt.Sprintf("blob %d\x00%s", len(content), content))
+	sum := sha1.Sum(payload)
+	return hex.EncodeToString(sum[:])
+}
+
+func diagnosticsContain(diagnostics []rulepack.Diagnostic, want string) bool {
+	for _, diagnostic := range diagnostics {
+		if strings.Contains(diagnostic.Message, want) || strings.Contains(diagnostic.Recovery, want) {
+			return true
+		}
+	}
+	return false
+}
+
+func git(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	command := append([]string{"-c", "user.name=SSB Test", "-c", "user.email=ssb@example.invalid", "-C", dir}, args...)
+	cmd := exec.Command("git", command...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
+}
+
+func writeFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }

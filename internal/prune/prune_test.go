@@ -499,45 +499,110 @@ func lifecycleRepository(t *testing.T) string {
 	git(t, repo, "add", "README.md")
 	git(t, repo, "commit", "-m", "baseline")
 	baseline := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
-	writeFile(t, filepath.Join(repo, ".software-standards", "assessment.md"), "assessment\n")
+	evidenceDigest := fileDigest(t, filepath.Join(repo, "README.md"))
+	evidenceOID := strings.TrimSpace(git(t, repo, "rev-parse", baseline+":README.md"))
+	writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), fmt.Sprintf(`---
+schema: ssb.dev/report/v1
+baseline_commit: %s
+inventory:
+  schema_version: 2
+  inventory_version: ssb-inventory-v2
+  baseline_commit: %s
+  limits:
+    max_candidate_files: 40000
+    max_candidate_bytes: 134217728
+    max_file_bytes: 1048576
+  candidate_files: 1
+  candidate_bytes: 8
+  scanned_files: 1
+  scanned_bytes: 8
+  indexed_files: 1
+  indexed_bytes: 8
+  files:
+    - path: README.md
+      blob_oid: "%s"
+      bytes: 8
+      lines: 1
+      sha256: %s
+  excluded:
+    binary: 0
+    generated: 0
+    oversized: 0
+    secret_like: 0
+    symlink: 0
+    submodule: 0
+    vendor_or_generated_tree: 0
+    non_regular: 0
+  truncated: false
+  remaining_candidate_files: 0
+  remaining_candidate_bytes: 0
+artifacts:
+  - id: keep-rule
+    kind: rule
+    path: .software-standards/rules/keep-rule.md
+    confidence: high
+    utility:
+      method: ssb-utility-v1
+      total: 70
+      factors:
+        marginal_value: 20
+        risk_reduction: 15
+        actionability: 15
+        applicability: 10
+        earlier_feedback: 10
+  - id: orphan-skill
+    kind: skill
+    path: .agents/skills/orphan-skill/SKILL.md
+    confidence: medium
+    utility:
+      method: ssb-utility-v1
+      total: 50
+      factors:
+        marginal_value: 15
+        risk_reduction: 10
+        actionability: 10
+        applicability: 10
+        earlier_feedback: 5
+    category: maintainability
+    lenses:
+      - kind: base
+    scopes:
+      - "**"
+    derivation: extracted
+    evidence:
+      - role: declares
+        path: README.md
+        lines: 1-1
+        excerpt_sha256: %s
+---
+# Software standards report
+
+The accepted rule and procedural skill were derived from complete baseline inventory.
+`, baseline, baseline, evidenceOID, evidenceDigest, evidenceDigest))
 	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "keep-rule.md"), fmt.Sprintf(`---
 schema: ssb.dev/rule/v2
 id: keep-rule
 title: Keep the rule
-topic: maintainability
+category: maintainability
 lenses:
   - kind: base
 directive: prefer
 scopes:
   - "**"
-classification: guidance
-importance: high
-score:
-  method: ssb-score-v1
-  total: 70
-  factors:
-    prevalence: 15
-    consistency: 15
-    authority: 15
-    risk: 15
-    applicability: 10
-confidence: high
-baseline_commit: %s
+derivation: extracted
 evidence:
-  - path: README.md
+  - role: declares
+    path: README.md
     lines: 1-1
     excerpt_sha256: %s
-    authoritative: true
-verification:
-  proof_gap: No deterministic repository check covers this guidance.
 ---
 Keep the rule.
-`, baseline, fileDigest(t, filepath.Join(repo, "README.md"))))
+`, evidenceDigest))
 	writeFile(t, filepath.Join(repo, ".agents", "skills", "orphan-skill", "SKILL.md"), `---
 name: orphan-skill
 description: A repository-authored skill that is not referenced by a rule.
 metadata:
-  topic: maintainability
+  category: maintainability
 ---
 Follow the workflow.
 `)

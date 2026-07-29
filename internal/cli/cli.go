@@ -33,7 +33,7 @@ Usage:
 
 Exit codes:
   0  success
-  1  rule-pack or prune-proposal validation failure
+  1  actionable-pack or prune-proposal validation failure
   2  usage or repository precondition failure
   3  unexpected internal failure
   4  inventory coverage incomplete
@@ -225,6 +225,10 @@ func runADR(args []string, stdout, stderr io.Writer) (exitCode int) {
 	result, err := adr.Create(ctx, repo, pack, adr.Options{Directory: *adrDir, DryRun: *dryRun})
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %s\n", err)
+		if errors.Is(err, adr.ErrNoAdoptableArtifacts) {
+			fmt.Fprintln(stderr, "next: retain a semantic rule, verification recipe, or Agent Skill before creating an ADR.")
+			return 2
+		}
 		if errors.Is(err, adr.ErrAmbiguousDirectory) || errors.Is(err, adr.ErrUnsafeTarget) || errors.Is(err, adr.ErrCollision) {
 			fmt.Fprintln(stderr, "next: choose a safe repository ADR directory with --adr-dir PATH and rerun.")
 			return 2
@@ -335,7 +339,7 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %s\n", err)
 		if errors.Is(err, render.ErrDrift) || errors.Is(err, render.ErrMarkers) || errors.Is(err, render.ErrUnsafeTarget) {
-			fmt.Fprintln(stderr, "next: fix AGENTS.md or its rule sources, then rerun ssb render --repo PATH.")
+			fmt.Fprintln(stderr, "next: fix AGENTS.md or its canonical artifact sources, then rerun ssb render --repo PATH.")
 			return 2
 		}
 		return 3
@@ -364,11 +368,18 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 		}
 	}
 	if result.Changed {
-		fmt.Fprintf(stdout, "Rendered %s from %d validated rule(s).\n", result.Path, len(pack.Rules))
+		fmt.Fprintf(
+			stdout,
+			"Rendered %s from %d semantic rule(s), %d verification recipe(s), and %d Agent Skill(s).\n",
+			result.Path,
+			len(pack.Rules),
+			len(pack.Recipes),
+			len(pack.Skills),
+		)
 	} else {
-		fmt.Fprintf(stdout, "%s is already byte-stable for the current rule sources.\n", result.Path)
+		fmt.Fprintf(stdout, "%s requires no write for the current actionable artifacts.\n", result.Path)
 	}
-	fmt.Fprintln(stdout, "Next: review the uncommitted diff; edit or delete rule source files and rerun as needed.")
+	fmt.Fprintln(stdout, "Next: review the uncommitted diff; edit canonical artifact sources and the report manifest together.")
 	return 0
 }
 
@@ -401,13 +412,16 @@ func reconcileTransitionCompletion(
 }
 
 type validationResponse struct {
-	SchemaVersion  int                   `json:"schema_version"`
-	Valid          bool                  `json:"valid"`
-	BaselineCommit string                `json:"baseline_commit,omitempty"`
-	RuleCount      int                   `json:"rule_count"`
-	SkillCount     int                   `json:"skill_count"`
-	Diagnostics    []rulepack.Diagnostic `json:"diagnostics"`
-	Pack           *rulepack.Pack        `json:"pack,omitempty"`
+	SchemaVersion   int                   `json:"schema_version"`
+	Valid           bool                  `json:"valid"`
+	BaselineCommit  string                `json:"baseline_commit,omitempty"`
+	ArtifactCount   int                   `json:"artifact_count"`
+	RuleCount       int                   `json:"rule_count"`
+	RecipeCount     int                   `json:"verification_recipe_count"`
+	SkillCount      int                   `json:"skill_count"`
+	AutomationCount int                   `json:"automation_proposal_count"`
+	Diagnostics     []rulepack.Diagnostic `json:"diagnostics"`
+	Pack            *rulepack.Pack        `json:"pack,omitempty"`
 }
 
 func runValidate(args []string, stdout, stderr io.Writer) int {
@@ -449,12 +463,15 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 		return 3
 	}
 	response := validationResponse{
-		SchemaVersion:  2,
-		Valid:          len(diagnostics) == 0,
-		BaselineCommit: pack.BaselineCommit,
-		RuleCount:      len(pack.Rules),
-		SkillCount:     len(pack.Skills),
-		Diagnostics:    diagnostics,
+		SchemaVersion:   2,
+		Valid:           len(diagnostics) == 0,
+		BaselineCommit:  pack.BaselineCommit,
+		ArtifactCount:   len(pack.Report.Artifacts),
+		RuleCount:       len(pack.Rules),
+		RecipeCount:     len(pack.Recipes),
+		SkillCount:      len(pack.Skills),
+		AutomationCount: len(pack.Automations),
+		Diagnostics:     diagnostics,
 	}
 	if response.Diagnostics == nil {
 		response.Diagnostics = make([]rulepack.Diagnostic, 0)
@@ -471,7 +488,16 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 			return 3
 		}
 	} else if response.Valid {
-		fmt.Fprintf(stdout, "Rule pack valid: %d rule(s), %d related skill(s), baseline %s\n", response.RuleCount, response.SkillCount, response.BaselineCommit)
+		fmt.Fprintf(
+			stdout,
+			"Actionable pack valid: %d artifact(s) — %d semantic rule(s), %d verification recipe(s), %d Agent Skill(s), %d automation proposal(s); baseline %s\n",
+			response.ArtifactCount,
+			response.RuleCount,
+			response.RecipeCount,
+			response.SkillCount,
+			response.AutomationCount,
+			response.BaselineCommit,
+		)
 		fmt.Fprintln(stdout, "Next: review and edit source files, then run ssb render --repo PATH.")
 	} else {
 		writeValidationDiagnostics(stderr, diagnostics)
@@ -483,7 +509,7 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 }
 
 func writeValidationDiagnostics(stderr io.Writer, diagnostics []rulepack.Diagnostic) {
-	fmt.Fprintf(stderr, "Rule pack invalid: %d problem(s)\n", len(diagnostics))
+	fmt.Fprintf(stderr, "Actionable pack invalid: %d problem(s)\n", len(diagnostics))
 	for _, item := range diagnostics {
 		location := item.Path
 		if item.Line > 0 {
@@ -636,7 +662,7 @@ func writeTextInventory(out io.Writer, report inventory.Report) {
 	if report.Truncated {
 		return
 	}
-	fmt.Fprintln(out, "Next: perform targeted semantic reads, then create .software-standards/assessment.md and evidence-backed rule files.")
+	fmt.Fprintln(out, "Next: perform targeted semantic reads, route accepted candidates to actionable artifacts, then create .software-standards/report.md.")
 }
 
 func runPrune(args []string, stdout, stderr io.Writer) int {

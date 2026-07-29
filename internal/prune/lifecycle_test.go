@@ -553,7 +553,7 @@ func TestApplyReplacesTheCompleteTrackedSkillBundle(t *testing.T) {
 name: orphan-skill
 description: A fully replaced repository skill.
 metadata:
-  topic: maintainability
+  category: maintainability
 ---
 Use the replacement workflow.
 `)
@@ -628,24 +628,25 @@ func TestApplyFailsClosedWhenTrackedSourceDrifts(t *testing.T) {
 
 func TestApprovalRejectsRetainedRuleWithUnreachableBaselineBeforeMutation(t *testing.T) {
 	root := lifecycleRepository(t)
-	rulePath := filepath.Join(root, ".software-standards", "rules", "keep-rule.md")
-	ruleData, err := os.ReadFile(rulePath)
+	reportPath := filepath.Join(root, ".software-standards", "report.md")
+	reportData, err := os.ReadFile(reportPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	const marker = "baseline_commit: "
-	start := strings.Index(string(ruleData), marker)
+	start := strings.Index(string(reportData), marker)
 	if start < 0 {
-		t.Fatal("fixture rule has no baseline_commit")
+		t.Fatal("fixture report has no baseline_commit")
 	}
 	valueStart := start + len(marker)
-	valueEnd := valueStart + strings.Index(string(ruleData[valueStart:]), "\n")
-	corrupted := string(ruleData[:valueStart]) + strings.Repeat("0", 40) + string(ruleData[valueEnd:])
-	if err := os.WriteFile(rulePath, []byte(corrupted), 0o644); err != nil {
+	valueEnd := valueStart + strings.Index(string(reportData[valueStart:]), "\n")
+	recordedBaseline := string(reportData[valueStart:valueEnd])
+	corrupted := strings.ReplaceAll(string(reportData), recordedBaseline, strings.Repeat("0", 40))
+	if err := os.WriteFile(reportPath, []byte(corrupted), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	git(t, root, "add", rulePath)
-	git(t, root, "commit", "-m", "record unreachable rule baseline")
+	git(t, root, "add", reportPath)
+	git(t, root, "commit", "-m", "record unreachable report baseline")
 
 	createReviewWithProposal(t, root, false)
 	review, _, err := prune.LoadReview(root, "review-one")
@@ -689,7 +690,7 @@ func TestApprovalRejectsRetainedRuleWithUnreachableBaselineBeforeMutation(t *tes
 	}
 }
 
-func TestApprovalRejectsDanglingRuleToSkillGraph(t *testing.T) {
+func TestApprovalRejectsLegacyRuleOwnedRelationship(t *testing.T) {
 	root := lifecycleRepository(t)
 	rulePath := filepath.Join(root, ".software-standards", "rules", "keep-rule.md")
 	ruleData, err := os.ReadFile(rulePath)
@@ -715,8 +716,8 @@ func TestApprovalRejectsDanglingRuleToSkillGraph(t *testing.T) {
 	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
-	}); err == nil || !strings.Contains(err.Error(), "references missing skill") {
-		t.Fatalf("error = %v, want pre-approval resulting-graph block", err)
+	}); err == nil || !strings.Contains(err.Error(), "field related_skills not found") {
+		t.Fatalf("error = %v, want unsupported rule-owned relationship block", err)
 	}
 }
 
@@ -1346,15 +1347,8 @@ func configureRuleUpdateCandidate(t *testing.T, root string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidateLines := strings.Split(string(sourceRule), "\n")
-	currentHead := strings.TrimSpace(git(t, root, "rev-parse", "HEAD"))
-	for index, line := range candidateLines {
-		if strings.HasPrefix(line, "baseline_commit: ") {
-			candidateLines[index] = "baseline_commit: " + currentHead
-		}
-	}
 	candidateContent := strings.Replace(
-		strings.Join(candidateLines, "\n"),
+		string(sourceRule),
 		"Keep the rule.\n",
 		"Keep the updated rule.\n",
 		1,
