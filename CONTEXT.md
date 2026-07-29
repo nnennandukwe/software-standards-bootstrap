@@ -1,72 +1,83 @@
 # Software Standards Bootstrap
 
-> Turn evidence from a pinned repository snapshot into a developer-reviewed standards proposal.
+> Turn evidence from a pinned repository snapshot into a developer-reviewed
+> actionable standards proposal.
 
-## Domain Language
+## Domain language
 
-### Primary topic
+### Artifact kind
 
-**Definition**: The single controlled software-engineering concern that best explains a proposed rule's risk or a procedural skill's intended outcome.
+**Definition**: The candidate's one primary developer-action destination:
+semantic rule, verification recipe, Agent Skill, or automation proposal.
 
-**Use when**: Classifying every retained rule and generated Agent Skill for review, projection, and adoption records.
+**Use when**: Separating implementation conditions, existing commands,
+procedural work, and proposed checks.
 
-**Avoid**: Treating the topic as a list of tags, deriving it from the file type, or confusing it with proof classification, importance, confidence, or path scope.
+**Avoid**: Mixing command/check metadata into a semantic rule or treating an
+automation proposal as implemented behavior.
 
-**Examples**:
+---
 
-- A rule preserving the repository's supported Go version has `compatibility` as its primary topic.
-- A skill that keeps generated shell completions aligned across supported shells has `compatibility` as its primary topic.
+### Category
 
-**Related terms**: Rule, Agent Skill, classification, importance, confidence, scope
+**Definition**: The single controlled engineering concern that best describes
+an accepted artifact.
+
+**Use when**: Reviewing and projecting every accepted artifact.
+
+**Avoid**: Treating category as activation, artifact kind, confidence, utility,
+derivation, or scope.
 
 ---
 
 ### Activation lens
 
-**Definition**: A v2 selection dimension that tells an agent when to load a
-rule. A rule is either repository-wide `base` guidance or uses one or more
-`language`, `framework`, and `task` lenses.
+**Definition**: A selection dimension that tells an agent when to load an
+artifact. An artifact is either `base` or uses `language`, `framework`, and
+`task` lenses.
 
-**Use when**: Routing retained rules progressively from the root `AGENTS.md`
-index to canonical rule bodies.
+**Use when**: Routing active rules, recipes, and Agent Skills from `AGENTS.md`.
 
-**Avoid**: Treating the primary topic as a loader selector, duplicating one
-cross-dimensional rule into several files, or excluding a potentially relevant
-rule when context is uncertain.
-
-**Related terms**: Scope, directive, primary topic, progressive disclosure
+**Avoid**: Using category as a loader selector or excluding a potentially
+relevant artifact when context is uncertain.
 
 ---
 
-### Directive
+### Derivation
 
-**Definition**: The rule's behavioral modality: `always`, `ask-first`, `never`,
-or `prefer`.
+**Definition**: Whether an artifact is `extracted` from a repository-maintained
+declaration/enforcement or `inferred` from repeated implementation evidence.
 
-**Use when**: Distinguishing obligations, approval boundaries, prohibitions,
-and defaults without encoding that intent only in prose.
+**Use when**: Applying the correct exact-evidence threshold.
 
-**Avoid**: Inferring importance or proof coverage from the directive.
-
-**Related terms**: Importance, classification, scope
+**Avoid**: Treating derivation, confidence, utility, or an evidence role as
+interchangeable.
 
 ---
 
-### Verification coverage
+### Verification recipe
 
-**Definition**: Whether a cited repository command proves the complete rule
-(`full`) or only a bounded part of guidance (`partial`) when that command
-passes.
+**Definition**: An ordered, deliberately invoked sequence of existing commands
+with exact `enforces` evidence, an application condition, and expected
+successful results.
 
-**Use when**: Recording `verification.proves` for a mapped command.
+**Use when**: A developer benefits from running an existing command.
 
-**Avoid**: Treating a mapped command as executed, a command's presence as a
-passing result, or a broad build as proof of every behavior.
-
-**Related terms**: Classification, proof gap, deterministic rule
+**Avoid**: Treating a recorded command as executed or passed, adding semantic
+judgment or branching, or placing the command in a semantic rule.
 
 ---
 
-## Last Updated
+### Automation proposal
 
-2026-07-27
+**Definition**: A reviewable design for a valuable check that does not exist.
+
+**Use when**: Earlier automatic feedback would add utility beyond existing
+instructions and mechanisms.
+
+**Avoid**: Treating the proposal as generated code, active policy, or
+ADR-adopted behavior.
+
+## Last updated
+
+2026-07-29

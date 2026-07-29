@@ -8,11 +8,12 @@ Software Standards Bootstrap turns a pinned repository snapshot into a Git-revie
 host agent semantic reads
           │
           ▼
-assessment + rule/skill source files
+report + four actionable artifact types
           │
-          ├── ssb validate ── exact evidence, score, proof, schema checks
+          ├── ssb validate ── schema, inventory, evidence, confidence,
+          │                   utility, and relationship checks
           ├── ssb render ──── bounded AGENTS.md projection
-          └── ssb adr ─────── Proposed record from retained sources
+          └── ssb adr ─────── Proposed record from adoptable sources
 ```
 
 For an adopted pack, the governed lifecycle protocol adds another explicit
@@ -81,11 +82,10 @@ version, exact model/provider identity, observation time, and content-addressed
 conformance evidence. There is no implicit “latest” profile and no network
 lookup.
 
-Review schemas are separate from `ssb.dev/rule/v1` and `/v2`; lifecycle
-metadata does not require a rule-v3 migration. Context and proposal files are
-immutable inputs once approved. Candidate replacements are complete files.
-Events form a digest chain binding the context, proposal, baseline, decision,
-and results.
+Review schemas are separate from actionable artifact schemas. Context and
+proposal files are immutable inputs once approved. Candidate replacements are
+complete files. Events form a digest chain binding the context, proposal,
+baseline, decision, and results.
 
 Proposal validation parses replacement rule and skill contracts and evaluates
 the proposed resulting rule-skill graph. Approval repeats that preflight for
@@ -125,9 +125,9 @@ writing a non-executable file.
 
 Ordinary `validate`, `render`, and `adr` commands continue to require rule
 evidence pinned to current `HEAD`. After an approved prune application,
-review-aware `render --review` and `adr --review` instead validate every
-resulting rule against that rule's recorded historical baseline. A baseline
-that is not a reachable ancestor of current `HEAD` is a hard evidence
+review-aware `render --review` and `adr --review` instead validate resulting
+artifacts against the report's recorded historical baseline. A baseline that
+is not a reachable ancestor of current `HEAD` is a hard evidence
 failure, even if its Git object remains locally resolvable. The rerender event binds
 both the managed-section digest and the complete `AGENTS.md` output digest;
 verification rechecks the complete regular, non-symlink output. Rerendering is
@@ -156,23 +156,30 @@ application event and plan, any required rerender event, and an observation
 time after application. Verification rechecks the complete current governed
 poststate before recording its event.
 
-### Rule pack
+### Actionable pack
 
-The rule-pack module parses strict YAML with known-field and unique-key validation. It owns:
+`rulepack.Validate` is the single public validation seam over the report and all
+four artifact types. Strict YAML uses known-field and unique-key validation.
+Artifact-specific parsers normalize into one pack consumed by rendering, JSON,
+and ADR creation.
 
-- schema and ID validation;
-- score factor bounds, arithmetic, and importance bands;
-- candidate evidence thresholds;
-- exact line-range hashing against baseline blobs;
-- the same binary, size, secret, generated/vendor, symlink, and submodule eligibility boundary used by inspection;
-- required primary-topic validation for rules and referenced skills;
-- v2 activation-lens and directive validation with v1 read compatibility;
-- classification and existing-proof mapping;
-- full versus partial verification coverage and bounded proved-property validation;
-- related Agent Skill path and frontmatter validation; and
+The module owns:
+
+- report schema, accepted index, global IDs, kinds, and canonical paths;
+- exact replay of the complete schema 2 inventory at the pinned baseline;
+- confidence gates, utility factor bounds, arithmetic, and threshold;
+- category, lenses, scopes, directive, and derivation validation;
+- evidence roles, thresholds, exact line-range hashing, and inventory
+  eligibility;
+- recipe step-to-`enforces` evidence references;
+- portable Agent Skill frontmatter and report category agreement;
+- automation proposal completeness;
+- cross-artifact relationship integrity; and
 - symlink and traversal rejection.
 
-It never interprets whether a candidate is a good engineering standard. That remains host-agent judgment reviewed by a developer.
+It never decides whether a candidate is valuable or whether a semantic name is
+good. Those remain host-agent judgments reviewed by a developer. It never
+executes a recipe or implements an automation proposal.
 
 Valid `ssb validate --format json` output includes the normalized pack in
 response schema 2. Invalid output omits the pack. This is a local interchange
@@ -181,54 +188,58 @@ boundary, not a catalog import or synchronization mechanism.
 ### Renderer
 
 The renderer creates one marked root `AGENTS.md` section and preserves every
-pre-existing byte outside it. It orders base standing orders by directive
-severity, importance, and stable ID; deduplicates mapped verification commands;
-and groups contextual source links by language, framework, and task. Contextual
-rule bodies remain only in their canonical source files for progressive
-loading.
+pre-existing byte outside it. It orders base semantic rules by directive,
+utility, and stable ID. It inlines base rule bodies, links contextual semantic
+rules and verification recipes, and indexes primary Agent Skills by activation
+context. It shows related recipe and skill links and omits automation proposals.
 
-Rule v1 has no lens or directive fields, so the renderer keeps retained v1
-rules in a separate base group labeled “directive not recorded” while
-preserving their original classification. This preserves visibility without
-inventing v2 semantics.
+An empty or automation-only pack performs no write.
 
 The section stores:
 
-- a digest of the current baseline and rule sources; and
+- a digest of the current baseline and renderable canonical sources; and
 - a self-verifying digest over the recorded source digest and generated body.
 
-A source edit leaves the old section internally valid and allows deterministic replacement. A direct section edit breaks the self-digest and is reported as drift. Missing, reversed, or duplicate markers are not repaired automatically.
+A source edit leaves the old section internally valid and allows deterministic
+replacement. A direct section edit breaks the self-digest and is reported as
+drift. Missing, reversed, or duplicate markers are not repaired automatically.
 
 ### ADR
 
-The ADR module preserves one existing convention among `docs/adr`, `docs/adrs`, `adr`, or `adrs`; otherwise it defaults to `docs/adr`. Multiple conventions require `--adr-dir`.
+The ADR module preserves one existing convention among `docs/adr`,
+`docs/adrs`, `adr`, or `adrs`; otherwise it defaults to `docs/adr`.
+Multiple conventions require `--adr-dir`.
 
 It rejects paths outside the repository, symlink components, and submodule
-prefixes. The next numeric filename is created with exclusive-create
-semantics. Existing files are never replaced. Content includes only rules and
-referenced skills that survive developer review, exposes each artifact's
-primary topic, and records v2 lenses, directive, proof coverage, and bounded
-proved property. It always has `Proposed` status.
+prefixes. The next numeric filename is created with exclusive-create semantics.
+Existing files are never replaced. Content includes only semantic rules,
+verification recipes, and Agent Skills that survive developer review. It
+records category, derivation, confidence, utility, and concise evidence
+sources. Automation proposals are excluded. An empty or automation-only pack
+fails before creating directories or files. Every created ADR has `Proposed`
+status.
 
 ## Canonical versus derived state
 
-| Artifact | Role | Editable | Proof |
+| Artifact | Role | Editable | Evidence state |
 |---|---|---:|---:|
-| `.software-standards/assessment.md` | Repository context and discarded candidates | Yes | No |
-| `.software-standards/rules/*.md` | Canonical proposed rule sources | Yes | Evidence mapping only |
-| `.agents/skills/*/SKILL.md` | Canonical proposed procedural workflows | Yes | No |
-| Root `AGENTS.md` managed section | Derived standing orders and contextual rule router | No | No |
-| Proposed ADR | Adoption record from retained sources | New record only | No |
+| `.software-standards/report.md` | Accepted index, complete inventory, confidence, utility, relationships, and run narrative | Yes | Exact inventory accounting |
+| `.software-standards/rules/*.md` | Canonical semantic rules and local evidence | Yes | Evidence mapping only |
+| `.software-standards/verification/*.yaml` | Canonical existing-command recipes | Yes | Records commands, never a run result |
+| `.agents/skills/*/SKILL.md` | Canonical procedural workflows | Yes | No |
+| `.software-standards/automation/*.yaml` | Reviewable proposed-check designs | Yes | Not implemented or adopted |
+| Root `AGENTS.md` managed section | Derived rule, recipe, and skill router | No | No |
+| Proposed ADR | Adoption record from rules, recipes, and skills | New record only | No |
 | Review `context.json` | Complete pinned lifecycle input | No | Inventory and capability evidence |
 | Review `proposal.yaml` | Semantic dispositions, structured evidence gaps, and complete candidates | Host-authored before approval | Evidence mapping only |
 | Canonical application plan | Exact pre/poststate and complete final governed configuration | Derived only | Shared plan digest |
 | Review `events.jsonl` | Digest-chained human/tool transitions | Append only | Transition and application-plan integrity |
-| Existing repository checker | Repository-owned deterministic mechanism | Outside ssb | Only when run elsewhere |
+| Existing repository checker | Repository-owned mechanism referenced by a recipe | Outside ssb | Only when run elsewhere |
 
 ## No network contract
 
 The runtime imports only the Go standard library and `go.yaml.in/yaml/v4`. No
-package opens sockets or performs update checks. V2 lenses and valid-pack JSON
+package opens sockets or performs update checks. Actionable lenses and valid-pack JSON
 make later catalog ingestion possible without adding catalog fetching,
 namespacing, synchronization, or activation to the runtime. Network access in
 release workflows and optional public benchmark evaluation is outside the

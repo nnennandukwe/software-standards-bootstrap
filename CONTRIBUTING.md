@@ -20,7 +20,8 @@ go tool govulncheck ./...
 Every behavior change starts with a focused failing test. Prefer the lowest layer that proves the user-visible contract:
 
 - workspace and inventory integration tests for Git states and object reads;
-- rule-pack tests for schema, scoring, evidence, and proof mapping;
+- actionable-pack tests for report/artifact schemas, exact inventory and
+  evidence, confidence, utility, and relationships;
 - renderer tests for byte preservation, drift, markers, and atomic failure;
 - ADR tests for convention, containment, ambiguity, and collision; and
 - CLI tests for exit code, stdout, stderr, recovery text, and filesystem effects.
@@ -34,7 +35,7 @@ Do not add:
 - runtime network behavior, telemetry, API keys, or model clients;
 - generic rule catalogs or tool-specific synchronization;
 - repository code execution during inspection;
-- generated checkers;
+- generated checkers or execution of recorded recipe commands;
 - automatic Git actions; or
 - silent overwrite or repair behavior.
 

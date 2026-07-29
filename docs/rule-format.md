@@ -1,233 +1,242 @@
-# Rule format: `ssb.dev/rule/v2`
+# Actionable pack format
 
-New proposals use one Markdown file per retained rule at:
+Software Standards Bootstrap uses one required report manifest and four
+accepted artifact kinds:
 
 ```text
-.software-standards/rules/<rule-id>.md
+.software-standards/report.md
+.software-standards/rules/<id>.md
+.software-standards/verification/<id>.yaml
+.agents/skills/<id>/SKILL.md
+.software-standards/automation/<id>.yaml
 ```
 
-The filename must match the stable lower-case kebab-case `id`. YAML frontmatter
-is strict: unknown and duplicate fields fail validation. The Markdown after
-the closing marker is the canonical rule body. `AGENTS.md` inlines base rule
-bodies and links contextual rule bodies for on-demand loading.
+This is an intentional pre-release cutover. Semantic rules use the rewritten
+`ssb.dev/rule/v2` contract. Earlier rule contracts and proof-oriented fields
+are unsupported.
 
-Existing `ssb.dev/rule/v1` files remain valid and renderable with their original
-validation semantics. They must not declare v2-only `lenses`, `directive`,
-`verification.coverage`, or `verification.proves` fields. The bundled Agent
-Skill emits v2. A v1 rule records no directive or explicit proof coverage, so
-consumers apply its canonical body as written rather than inferring v2
-semantics.
+All YAML is strict. Unknown fields and duplicate keys fail validation. IDs are
+globally unique lower-case kebab-case and each artifact kind has one canonical
+path.
 
-## Complete v2 example
+## Report: `ssb.dev/report/v1`
+
+`.software-standards/report.md` is the required pack manifest and run
+narrative:
+
+```yaml
+---
+schema: ssb.dev/report/v1
+baseline_commit: 0123456789abcdef0123456789abcdef01234567
+inventory: <complete unedited schema 2 ssb-inventory-v2 response>
+artifacts:
+  - id: keep-public-apis-compatible
+    kind: rule
+    path: .software-standards/rules/keep-public-apis-compatible.md
+    confidence: high
+    utility:
+      method: ssb-utility-v1
+      total: 80
+      factors:
+        marginal_value: 25
+        risk_reduction: 20
+        actionability: 15
+        applicability: 10
+        earlier_feedback: 10
+    related_artifacts:
+      - verify-api-compatibility
+---
+# Software standards report
+
+Inventory coverage was complete. Accepted outputs and run-wide limitations
+are summarized here.
+```
+
+The report owns:
+
+- the exact accepted artifact index, kind, and canonical path;
+- confidence and utility;
+- cross-artifact relationships;
+- complete inventory and run-wide limitations; and
+- accepted-output summaries.
+
+It does not duplicate native artifact provenance and contains no rejected
+candidates, reasons, or counts. A report with zero artifacts is valid.
+
+Agent Skills are the exception to provenance locality. Portable frontmatter
+cannot carry the complete SSB contract, so each skill manifest entry also
+records `category`, `lenses`, `scopes`, `derivation`, and `evidence`. Its
+category must match `metadata.category` in the skill.
+
+Relationships name accepted IDs. Self, duplicate, and dangling relationships
+fail validation.
+
+## Confidence and utility
+
+Every accepted artifact has `medium` or `high` confidence. Low-confidence
+candidates are removed.
+
+`ssb-utility-v1` is additive:
+
+| Factor | Maximum |
+|---|---:|
+| Marginal value beyond existing instructions and checks | 30 |
+| Risk reduction | 25 |
+| Actionability | 20 |
+| Applicability to supported coding work | 15 |
+| Earlier feedback than the existing failure surface | 10 |
+
+Bands are `very-high` for 80–100, `high` for 65–79, and `medium` for 45–64.
+Candidates below 45 are removed.
+
+## Semantic rule: `ssb.dev/rule/v2`
 
 ```markdown
 ---
 schema: ssb.dev/rule/v2
-id: verify-before-merge
-title: Verify before merge
-topic: correctness
+id: keep-public-apis-compatible
+title: Keep public APIs compatible
+category: compatibility
 lenses:
   - kind: language
     value: go
-  - kind: task
-    value: review
 directive: always
 scopes:
   - "**/*.go"
-classification: deterministic
-importance: high
-score:
-  method: ssb-score-v1
-  total: 70
-  factors:
-    prevalence: 15
-    consistency: 15
-    authority: 15
-    risk: 15
-    applicability: 10
-confidence: high
-baseline_commit: 0123456789abcdef0123456789abcdef01234567
+derivation: extracted
 evidence:
-  - path: internal/service/service.go
-    lines: 21-29
+  - role: declares
+    path: CONTRIBUTING.md
+    lines: 20-24
     excerpt_sha256: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-    authoritative: true
-verification:
-  command: go test ./...
-  source:
-    path: Makefile
-    lines: 4-6
-    excerpt_sha256: sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
-  coverage: full
-  proves: The retained Go assertions when the command passes.
-related_skills:
-  - verify-change
 ---
-Run the repository's existing verification command before merging a Go change.
+Keep in-scope public API changes backward compatible.
 ```
 
-## Activation lenses
+A rule owns category, activation, directive, scope, derivation, exact evidence,
+and an actionable body. It does not contain classification, confidence,
+utility, baseline, commands, command sources, coverage, proved properties,
+gaps, or replacement verification-approach metadata.
 
-Every v2 rule declares either:
+The rule name should express a falsifiable goal. Include a mechanism in the
+name only when that mechanism is the repository contract.
+
+## Verification recipe: `ssb.dev/verification/v1`
 
 ```yaml
+schema: ssb.dev/verification/v1
+id: verify-api-compatibility
+title: Verify API compatibility
+category: compatibility
 lenses:
-  - kind: base
+  - kind: task
+    value: verification
+scopes:
+  - "**/*.go"
+derivation: extracted
+evidence:
+  - ref: compatibility-command
+    role: enforces
+    path: Makefile
+    lines: 10-12
+    excerpt_sha256: sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
+when: Before handing off a public API change.
+steps:
+  - run: make verify-compatibility
+    source_evidence: compatibility-command
+    expected_result: The command reports no incompatible API changes.
 ```
 
-or one or more contextual lenses:
+A recipe records one or more ordered existing commands, when they apply, and
+the expected successful result. Every step references exact `enforces`
+evidence. Recipes contain no branching, implementation edits, setup decisions,
+or semantic judgment. SSB validates but never executes them.
+
+## Agent Skill
+
+Multi-step procedures with decisions, edits, setup, branching, or recovery use
+portable Agent Skills:
 
 ```yaml
+---
+name: review-api-change
+description: Review a public API change and its dependent surfaces.
+metadata:
+  category: compatibility
+---
+```
+
+The entrypoint remains `.agents/skills/<id>/SKILL.md`. The report records its
+SSB provenance, selection metadata, confidence, utility, and relationships.
+
+## Automation proposal: `ssb.dev/automation/v1`
+
+```yaml
+schema: ssb.dev/automation/v1
+id: automate-api-compatibility
+title: Add an automatic API compatibility check
+category: compatibility
 lenses:
   - kind: language
     value: go
-  - kind: framework
-    value: cobra
-  - kind: task
-    value: review
+scopes:
+  - "**/*.go"
+derivation: inferred
+evidence: <exact supporting occurrences>
+condition: In-scope public API changes remain backward compatible.
+suggested_check: Compare exported declarations against the baseline.
+trigger: Run when an in-scope public declaration changes.
+expected_success: No incompatible declaration is found.
+expected_failure: Report each incompatible declaration and source location.
 ```
 
-Supported kinds are `base`, `language`, `framework`, and `task`.
+Automation proposals are reviewable designs. They are not generated code,
+implemented checks, active standards, or ADR-adopted behavior.
 
-- `base` has no value and must be the sole lens.
-- Language and framework values are lower-case kebab-case identifiers.
-- Task values are `implementation`, `review`, `testing`, `security`,
-  `documentation`, and `release`.
-- Duplicate kind/value pairs fail validation.
+## Category, activation, and evidence
 
-A rule applies only when its path scope matches. For a contextual rule, every
-represented lens dimension must also match. Multiple values within one
-dimension are alternatives. For example, two language values mean Go or
-Python, while a language plus a task requires both dimensions. When a consumer
-cannot determine a dimension or affected path confidently, it loads the
-potentially relevant rule instead of excluding it.
-
-The canonical directory remains flat. Lenses provide deterministic virtual
-grouping without duplicating a rule that spans language, framework, and task
-contexts.
-
-## Directive
-
-`directive` records how the agent should interpret the rule:
-
-- `never`: prohibited within the rule's evidence-backed scope;
-- `ask-first`: requires developer authorization before the action;
-- `always`: required whenever the rule applies; and
-- `prefer`: the default approach, subject to documented exceptions or explicit
-  user direction.
-
-The directive does not replace importance, classification, or scope.
-
-## Scoring
-
-`ssb-score-v1` remains additive:
-
-| Factor | Range |
-|---|---:|
-| Prevalence | 0–25 |
-| Consistency | 0–20 |
-| Existing authority | 0–20 |
-| Correctness, security, or architectural risk | 0–20 |
-| Applicability | 0–15 |
-
-Bands:
-
-- `very-high`: 80–100
-- `high`: 65–79
-- `medium`: 45–64
-- `low`: 25–44
-- below 25: assessment-only
-
-The total must equal the factors. There is no fixed rule-count cap.
-
-## Primary topic
-
-Every rule declares exactly one primary software-engineering topic. It
-identifies the concern that best explains the rule's risk or change obligation;
-it does not replace lenses, scope, classification, importance, directive, or
-confidence.
-
-The controlled vocabulary is `architecture`, `compatibility`, `compliance`,
+Supported categories are `architecture`, `compatibility`, `compliance`,
 `correctness`, `developer-experience`, `documentation`, `maintainability`,
 `operability`, `performance`, `quality`, `reliability`, `security`, and
-`testability`. Prefer the narrowest accurate topic and use `quality` only when
-no narrower topic fits. See [the topic taxonomy](../skills/software-standards-bootstrap/references/topics.md).
+`testability`.
 
-## Evidence threshold and hashing
+Lenses are:
 
-A rule needs either:
+- one `base` lens without a value; or
+- contextual `language`, `framework`, and `task` lenses.
 
-- at least one evidence item marked `authoritative: true`; or
-- at least three consistent occurrences across two different files.
+Language and framework values are lower-case kebab-case. Task values are
+`planning`, `implementation`, and `verification`. An artifact applies only
+when its path scope matches. Contextual activation also requires every
+represented lens dimension; values within a dimension are alternatives.
 
-Evidence paths are repository-relative tracked regular files at
-`baseline_commit`. Line ranges are one-based and inclusive. The excerpt digest
-is SHA-256 over the exact bytes in the cited lines, including existing line
-endings. Validation reads those bytes from the pinned Git blob, not from the
-worktree.
+Evidence roles are:
 
-The same inventory eligibility boundary applies during validation. A rule
-cannot cite a binary, oversized, secret-like, generated/vendor, symlink, or
-submodule path that inspection excluded.
+- `declares`: an explicit repository-maintained obligation;
+- `demonstrates`: an implementation occurrence supporting an inferred
+  invariant; and
+- `enforces`: a repository mechanism that actively checks a condition.
 
-Rule bodies may point to preferred examples when authority or repeated evidence
-establishes them as patterns to follow. They may identify counterexamples only
-when repository authority marks the pattern deprecated, unsafe, or intentionally
-avoided. Do not invent examples or infer that differing legacy code is wrong.
+`extracted` artifacts require at least one `declares` or `enforces` citation.
+`inferred` artifacts require three distinct `demonstrates` citations across at
+least two files.
 
-## Classification and proof coverage
+Paths identify eligible tracked regular files at the report baseline. Ranges
+are one-based and inclusive. Digests hash exact cited bytes including line
+endings. Validation also replays the complete inventory at the recorded limits.
 
-`ssb` maps existing proof but never executes a cited command or claims it
-passed.
+## Projection, ADR, and JSON
 
-A v2 `deterministic` rule requires:
+`AGENTS.md` inlines base semantic rules, links contextual semantic rules and
+verification recipes, indexes Agent Skills, and omits automation proposals.
+Relationships surface links to related recipes and skills, never inactive
+automation proposals. Empty and automation-only packs do not write a managed
+section.
 
-- an existing verification command;
-- an exact `verification.source` citation;
-- `coverage: full`; and
-- a non-empty `proves` statement naming the bounded property established when
-  the command passes.
+An ADR includes adopted rules, recipes, and skills with category, derivation,
+confidence, utility, and concise evidence sources. It excludes automation
+proposals and fails safely when nothing is adoptable.
 
-A v2 `guidance` rule uses exactly one of:
-
-- an existing command plus source citation, `coverage: partial`, and a bounded
-  `proves` statement; or
-- a non-empty `proof_gap` with no coverage or proved-property fields.
-
-This separation prevents a downstream loader from treating a mapped command as
-a result or assuming a partial check proves the complete guidance.
-
-## Portable Agent Skill fields
-
-Procedural work belongs in a portable
-`.agents/skills/<skill-id>/SKILL.md` and is referenced through
-`related_skills`. Referenced skills use the Agent Skills core frontmatter:
-
-```yaml
----
-name: verify-change
-description: Run the repository's existing verification workflow before handing off a change.
-license: Apache-2.0
-compatibility: Requires the repository's own verification tooling.
-metadata:
-  source: software-standards-bootstrap
-  topic: correctness
----
-```
-
-`name` and `description` are required by the Agent Skills core format. Software
-Standards Bootstrap additionally requires `metadata.topic` for every referenced
-skill, using the same controlled vocabulary as rules. Consumer-specific
-discovery and optional fields are not portable behavior.
-
-## Validated JSON interchange
-
-`ssb validate --format json` returns response schema 2. A valid response
-includes the normalized `pack` containing the baseline, assessment, rules,
-canonical bodies, evidence, lenses, directives, proof metadata, and referenced
-skills. Invalid output contains diagnostics and omits `pack`.
-
-Stable rule IDs are repository-local. A future centralized catalog owns its
-external namespace, version, import review, and lifecycle while preserving the
-source baseline and evidence. `ssb` does not fetch, import, synchronize, or
-activate catalog rules.
+`ssb validate --format json` uses response schema 2. A valid response includes
+the normalized report and all four artifact arrays. Invalid output includes
+diagnostics and omits the normalized pack.

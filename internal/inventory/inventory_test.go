@@ -69,7 +69,7 @@ func TestScanBudgetsEveryCandidateBeforeContentExclusion(t *testing.T) {
 func TestScanForPruneAllowsExistingCommittedPack(t *testing.T) {
 	repo := newRepository(t)
 	writeFile(t, filepath.Join(repo, "README.md"), "fixture\n")
-	writeFile(t, filepath.Join(repo, ".software-standards", "assessment.md"), "assessment\n")
+	writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), "report\n")
 	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "keep-me.md"), "rule\n")
 	git(t, repo, "add", ".")
 	git(t, repo, "commit", "-m", "adopt standards")
