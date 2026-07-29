@@ -263,7 +263,7 @@ func open(ctx context.Context, path string, requireClean bool, recoveryCommand s
 // collision after inventory reads. A concurrent repository change invalidates
 // the result rather than producing mixed-baseline evidence.
 func (r *Repository) VerifyInspectSnapshot(ctx context.Context) error {
-	if err := r.verifyStableSnapshot(ctx, "inspection"); err != nil {
+	if err := r.verifyStableSnapshot(ctx, "inspection", "ssb inspect"); err != nil {
 		return err
 	}
 	return rejectExistingPack(r.root)
@@ -272,7 +272,7 @@ func (r *Repository) VerifyInspectSnapshot(ctx context.Context) error {
 // VerifyPruneSnapshot rechecks the immutable prune input while preserving the
 // existing adopted pack.
 func (r *Repository) VerifyPruneSnapshot(ctx context.Context) error {
-	if err := r.verifyStableSnapshot(ctx, "prune inspection"); err != nil {
+	if err := r.verifyStableSnapshot(ctx, "prune inspection", "ssb prune inspect"); err != nil {
 		return err
 	}
 	if err := requireExistingPack(r.root); err != nil {
@@ -311,11 +311,14 @@ func (r *Repository) RejectUntrackedConfigurations(ctx context.Context) error {
 	return nil
 }
 
-func (r *Repository) verifyStableSnapshot(ctx context.Context, operation string) error {
+func (r *Repository) verifyStableSnapshot(
+	ctx context.Context,
+	operation, recoveryCommand string,
+) error {
 	if _, err := r.Git(ctx, "symbolic-ref", "-q", "HEAD"); err != nil {
 		return &PreconditionError{
 			Problem:  "HEAD became detached during " + operation,
-			Recovery: "switch to a branch and rerun ssb inspect",
+			Recovery: "switch to a branch and rerun " + recoveryCommand,
 		}
 	}
 	current, err := r.Git(ctx, "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}")

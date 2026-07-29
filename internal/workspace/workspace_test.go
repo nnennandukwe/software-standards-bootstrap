@@ -180,6 +180,22 @@ func TestVerifyPruneSnapshotRejectsConcurrentTrackedChangesButAllowsPack(t *test
 	assertErrorContains(t, err, "tracked or staged files changed during prune inspection")
 }
 
+func TestVerifyPruneSnapshotNamesPruneCommandWhenHeadDetaches(t *testing.T) {
+	repo := committedRepository(t)
+	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "keep-me.md"), "developer work\n")
+	git(t, repo, "add", ".software-standards")
+	git(t, repo, "commit", "-m", "adopt standards")
+
+	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "checkout", "--detach", "HEAD")
+
+	err = ws.VerifyPruneSnapshot(context.Background())
+	assertErrorContains(t, err, "switch to a branch and rerun ssb prune inspect")
+}
+
 func TestOpenForInspectResolvesNestedPathToWorktreeRoot(t *testing.T) {
 	repo := committedRepository(t)
 	nested := filepath.Join(repo, "path", "with spaces", "日本語")
@@ -294,6 +310,18 @@ func TestVerifyInspectSnapshotRejectsConcurrentHeadOrTrackedChanges(t *testing.T
 
 		err = ws.VerifyInspectSnapshot(context.Background())
 		assertErrorContains(t, err, "HEAD changed during inspection")
+	})
+
+	t.Run("detached head names inspect command", func(t *testing.T) {
+		repo := committedRepository(t)
+		ws, err := workspace.OpenForInspect(context.Background(), repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		git(t, repo, "checkout", "--detach", "HEAD")
+
+		err = ws.VerifyInspectSnapshot(context.Background())
+		assertErrorContains(t, err, "switch to a branch and rerun ssb inspect")
 	})
 }
 
