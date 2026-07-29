@@ -162,7 +162,7 @@ The agent runs the inventory, analyzes repository evidence, writes the proposal,
 
 ### 4. Review and rerender
 
-Review the assessment, every proposed rule and skill, and the generated `AGENTS.md` section. Edit or delete anything you do not want to adopt.
+Review the assessment, every proposed rule and skill, and the generated `AGENTS.md` section. Edit or delete anything you do not want to adopt in the rule and skill source files; do not edit the managed section directly. Rerun `ssb validate` and `ssb render` after making changes.
 
 ```bash
 ssb validate --repo .
