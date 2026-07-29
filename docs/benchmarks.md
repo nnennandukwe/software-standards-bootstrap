@@ -74,3 +74,7 @@ paths, and forbidden-action checks.
 Those files remain immutable historical evidence for their recorded contract.
 They are not actionable-artifact acceptance. Record a fresh blind pass over all
 four pins separately.
+
+The [2026-07-29 actionable gate record](benchmarks/results/2026-07-29-actionable/README.md)
+captures a fresh complete inventory pass over all four pins. Proposal
+generation and developer retention remain explicitly open in that ledger.
