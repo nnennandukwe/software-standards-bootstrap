@@ -138,7 +138,13 @@ func ReadEvidence(ctx context.Context, repo *workspace.Repository, filePath stri
 
 // Scan reads blobs from the pinned baseline commit, not from the worktree.
 func Scan(ctx context.Context, repo *workspace.Repository, limits Limits) (Report, error) {
-	return scan(ctx, repo, limits, defaultBatchPolicy)
+	return scan(ctx, repo, limits, defaultBatchPolicy, repo.VerifyInspectSnapshot)
+}
+
+// ScanForPrune reads the same bounded current-HEAD inventory while preserving
+// the adopted standards pack required by prune review.
+func ScanForPrune(ctx context.Context, repo *workspace.Repository, limits Limits) (Report, error) {
+	return scan(ctx, repo, limits, defaultBatchPolicy, repo.VerifyPruneSnapshot)
 }
 
 func scan(
@@ -146,6 +152,7 @@ func scan(
 	repo *workspace.Repository,
 	limits Limits,
 	batches batchPolicy,
+	verify func(context.Context) error,
 ) (Report, error) {
 	limits = normalizedLimits(limits)
 	if batches.MaxEntries <= 0 || batches.MaxBytes <= 0 {
@@ -268,7 +275,7 @@ func scan(
 		}
 		start = end
 	}
-	if err := repo.VerifyInspectSnapshot(ctx); err != nil {
+	if err := verify(ctx); err != nil {
 		return Report{}, err
 	}
 	return report, nil

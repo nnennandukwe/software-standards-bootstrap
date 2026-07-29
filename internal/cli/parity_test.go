@@ -16,8 +16,9 @@ func TestREADMEAndAgentSkillMatchTheExecutableCommandContract(t *testing.T) {
 	for _, form := range []string{
 		"ssb inspect  [--repo PATH] [--format text|json] [resource limits]",
 		"ssb validate [--repo PATH] [--format text|json]",
-		"ssb render   [--repo PATH] [--dry-run]",
-		"ssb adr      [--repo PATH] [--adr-dir PATH] [--dry-run]",
+		"ssb render   [--repo PATH] [--review ID] [--dry-run]",
+		"ssb adr      [--repo PATH] [--review ID] [--adr-dir PATH] [--dry-run]",
+		"ssb prune    <inspect|validate|approve|apply|recover|status|verify> [options]",
 	} {
 		if !strings.Contains(readme, form) {
 			t.Errorf("README missing canonical form %q", form)
@@ -31,6 +32,16 @@ func TestREADMEAndAgentSkillMatchTheExecutableCommandContract(t *testing.T) {
 	} {
 		if !strings.Contains(readme, required) {
 			t.Errorf("README missing inspect contract %q", required)
+		}
+	}
+	for _, required := range []string{
+		"ssb prune inspect --repo . --review <id> --capabilities <profile>",
+		"ssb prune validate --repo . --review <id> --format text",
+		"ssb prune status --repo . --review <id>",
+		"Application remains a dry run unless `--write` is explicitly authorized.",
+	} {
+		if !strings.Contains(skill, required) {
+			t.Errorf("Agent Skill missing prune contract %q", required)
 		}
 	}
 
@@ -64,6 +75,37 @@ func TestREADMEAndAgentSkillMatchTheExecutableCommandContract(t *testing.T) {
 	}
 }
 
+func TestPruneDocumentationKeepsLeadInsAdjacentToExamples(t *testing.T) {
+	root := repositoryRoot(t)
+	skill := readText(t, filepath.Join(root, "skills", "software-standards-bootstrap", "SKILL.md"))
+	reference := readText(t, filepath.Join(
+		root,
+		"skills",
+		"software-standards-bootstrap",
+		"references",
+		"prune-review.md",
+	))
+	pruneDoc := readText(t, filepath.Join(root, "docs", "prune.md"))
+
+	if !strings.Contains(skill, "proof. Run:\n\n```bash\nssb prune inspect") {
+		t.Error("Agent Skill separates the prune-inspection lead-in from its command example")
+	}
+	if !strings.Contains(reference, "and provide:\n\n```yaml\ntarget:") {
+		t.Error("prune reference separates the replacement lead-in from its target example")
+	}
+	if !strings.Contains(pruneDoc, "insufficient.\nFor example:\n\n```yaml\nevidence_gaps:") {
+		t.Error("prune documentation separates the evidence-gap lead-in from its example")
+	}
+}
+
+func TestDocumentationParityNormalizesCheckoutLineEndings(t *testing.T) {
+	got := normalizeDocumentationText("lead:\r\n\r\n```bash\r\nssb prune inspect\r\n")
+	want := "lead:\n\n```bash\nssb prune inspect\n"
+	if got != want {
+		t.Fatalf("normalized documentation = %q, want %q", got, want)
+	}
+}
+
 func repositoryRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
@@ -79,5 +121,10 @@ func readText(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(data)
+	return normalizeDocumentationText(string(data))
+}
+
+func normalizeDocumentationText(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	return strings.ReplaceAll(text, "\r", "\n")
 }

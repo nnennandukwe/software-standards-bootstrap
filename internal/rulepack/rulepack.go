@@ -165,6 +165,22 @@ type skillFrontmatter struct {
 // Validate parses the current editable pack and verifies all evidence against
 // the repository's pinned HEAD commit. Validation never writes files.
 func Validate(ctx context.Context, repo *workspace.Repository) (Pack, []Diagnostic, error) {
+	return validatePack(ctx, repo, false)
+}
+
+// ValidateRetainedPack parses an adopted pack and verifies each rule against
+// the historical baseline recorded in that rule. It is intended for
+// review-aware post-application rendering and ADR creation; ordinary editable
+// pack validation remains pinned to the repository's current HEAD.
+func ValidateRetainedPack(ctx context.Context, repo *workspace.Repository) (Pack, []Diagnostic, error) {
+	return validatePack(ctx, repo, true)
+}
+
+func validatePack(
+	ctx context.Context,
+	repo *workspace.Repository,
+	retained bool,
+) (Pack, []Diagnostic, error) {
 	pack := Pack{
 		BaselineCommit: repo.Baseline(),
 		AssessmentPath: ".software-standards/assessment.md",
@@ -244,7 +260,15 @@ func Validate(ctx context.Context, repo *workspace.Repository) (Pack, []Diagnost
 			continue
 		}
 		pack.Rules = append(pack.Rules, rule)
-		diagnostics = append(diagnostics, validateRule(ctx, repo, rule, fileName)...)
+		if retained {
+			retainedDiagnostics, retainedErr := validateRetainedRule(ctx, repo, rule, fileName)
+			if retainedErr != nil {
+				return Pack{}, nil, retainedErr
+			}
+			diagnostics = append(diagnostics, retainedDiagnostics...)
+		} else {
+			diagnostics = append(diagnostics, validateRule(ctx, repo, rule, fileName)...)
+		}
 
 		if prior, exists := seenRuleIDs[rule.ID]; exists {
 			diagnostics = append(diagnostics, diagnostic(relative, "id", fmt.Sprintf("duplicate rule id %q also used by %s", rule.ID, prior), "give every rule a stable unique id"))
@@ -297,6 +321,62 @@ func parseRule(relative string, data []byte) (Rule, *Diagnostic) {
 	rule.SourcePath = relative
 	rule.Body = string(body)
 	return rule, nil
+}
+
+// ValidateCandidateRule validates complete proposed rule bytes against the
+// current commit without requiring the candidate to exist in the worktree.
+func ValidateCandidateRule(
+	ctx context.Context,
+	repo *workspace.Repository,
+	relative string,
+	data []byte,
+) (Rule, []Diagnostic) {
+	rule, parseDiagnostic := parseRule(relative, data)
+	if parseDiagnostic != nil {
+		return Rule{}, []Diagnostic{*parseDiagnostic}
+	}
+	return rule, validateRule(ctx, repo, rule, path.Base(relative))
+}
+
+// ValidateRetainedRule validates an adopted rule against the historical
+// baseline explicitly recorded in its frontmatter.
+func ValidateRetainedRule(
+	ctx context.Context,
+	repo *workspace.Repository,
+	relative string,
+	data []byte,
+) (Rule, []Diagnostic, error) {
+	rule, parseDiagnostic := parseRule(relative, data)
+	if parseDiagnostic != nil {
+		return Rule{}, []Diagnostic{*parseDiagnostic}, nil
+	}
+	diagnostics, err := validateRetainedRule(ctx, repo, rule, path.Base(relative))
+	return rule, diagnostics, err
+}
+
+func validateRetainedRule(
+	ctx context.Context,
+	repo *workspace.Repository,
+	rule Rule,
+	fileName string,
+) ([]Diagnostic, error) {
+	historical, err := repo.AtCommit(ctx, rule.BaselineCommit)
+	if err != nil {
+		if !errors.Is(err, workspace.ErrHistoricalCommit) {
+			return nil, err
+		}
+		return []Diagnostic{diagnostic(
+			rule.SourcePath,
+			"baseline_commit",
+			fmt.Sprintf(
+				"recorded baseline_commit %q is not a reachable ancestor; retained-rule evidence cannot be verified: %v",
+				rule.BaselineCommit,
+				err,
+			),
+			"restore the recorded baseline to current repository history or update this rule through a new approved prune review",
+		)}, nil
+	}
+	return validateRule(ctx, historical, rule, fileName), nil
 }
 
 func validateRule(ctx context.Context, repo *workspace.Repository, rule Rule, fileName string) []Diagnostic {
@@ -560,13 +640,25 @@ func loadSkill(root, skillID string) (Skill, []Diagnostic, error) {
 	if err != nil || len(data) == 0 {
 		return Skill{}, diagnostics, err
 	}
+	skill, parsed := validateSkillBytes(relative, skillID, data)
+	return skill, append(diagnostics, parsed...), nil
+}
+
+// ValidateCandidateSkill validates complete proposed Agent Skill bytes without
+// requiring the candidate to exist in the worktree.
+func ValidateCandidateSkill(relative, skillID string, data []byte) (Skill, []Diagnostic) {
+	return validateSkillBytes(relative, skillID, data)
+}
+
+func validateSkillBytes(relative, skillID string, data []byte) (Skill, []Diagnostic) {
+	diagnostics := make([]Diagnostic, 0)
 	frontmatter, body, splitErr := splitFrontmatter(data)
 	if splitErr != nil {
-		return Skill{}, append(diagnostics, diagnostic(relative, "frontmatter", splitErr.Error(), "add Agent Skill YAML frontmatter")), nil
+		return Skill{}, append(diagnostics, diagnostic(relative, "frontmatter", splitErr.Error(), "add Agent Skill YAML frontmatter"))
 	}
 	var metadata skillFrontmatter
 	if err := yaml.Load(frontmatter, &metadata, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
-		return Skill{}, append(diagnostics, diagnostic(relative, "frontmatter", err.Error(), "use only Agent Skills core specification fields")), nil
+		return Skill{}, append(diagnostics, diagnostic(relative, "frontmatter", err.Error(), "use only Agent Skills core specification fields"))
 	}
 	if metadata.Name != skillID {
 		diagnostics = append(diagnostics, diagnostic(relative, "name", fmt.Sprintf("skill name %q must match directory %q", metadata.Name, skillID), "align the skill name and directory"))
@@ -592,7 +684,7 @@ func loadSkill(root, skillID string) (Skill, []Diagnostic, error) {
 		Topic:       topic,
 		SourcePath:  relative,
 		Body:        string(body),
-	}, diagnostics, nil
+	}, diagnostics
 }
 
 func findSymlinkComponent(root, relative string) (string, bool, error) {

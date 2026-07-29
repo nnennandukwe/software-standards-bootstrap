@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -59,6 +60,109 @@ Run the cited repository check and report its result.
 	}
 	if pack.Rules[0].Topic != "correctness" || pack.Skills[0].Topic != "correctness" {
 		t.Fatalf("unexpected primary topics: rule=%q skill=%q", pack.Rules[0].Topic, pack.Skills[0].Topic)
+	}
+}
+
+func TestValidateRetainedPackUsesEachRulesRecordedBaseline(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeFile(t, filepath.Join(repo, ".software-standards", "assessment.md"), "# Assessment\n")
+	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "verify-before-merge.md"), validRule(
+		baseline,
+		excerptHash("package main\n"),
+		excerptHash("verify:\n\tgo test ./...\n"),
+	))
+	writeFile(t, filepath.Join(repo, ".agents", "skills", "verify-change", "SKILL.md"), `---
+name: verify-change
+description: Verify changes with the repository's existing check.
+metadata:
+  topic: correctness
+---
+# Verify
+`)
+	git(t, repo, "add", ".software-standards", ".agents")
+	git(t, repo, "commit", "-m", "adopt standards")
+
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, diagnostics, err := rulepack.Validate(context.Background(), ws); err != nil {
+		t.Fatal(err)
+	} else if len(diagnostics) == 0 {
+		t.Fatal("ordinary validation unexpectedly accepted an ancestor rule baseline")
+	}
+	pack, diagnostics, err := rulepack.ValidateRetainedPack(context.Background(), ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diagnostics) != 0 {
+		t.Fatalf("retained pack diagnostics = %#v, want none", diagnostics)
+	}
+	if len(pack.Rules) != 1 || pack.Rules[0].BaselineCommit != baseline {
+		t.Fatalf("unexpected retained pack: %#v", pack)
+	}
+}
+
+func TestValidateRetainedRuleRejectsUnreachableBaseline(t *testing.T) {
+	repo, _ := evidenceRepository(t)
+	unreachable := strings.Repeat("0", 40)
+	data := []byte(validRule(
+		unreachable,
+		excerptHash("package main\n"),
+		excerptHash("verify:\n\tgo test ./...\n"),
+	))
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, diagnostics, err := rulepack.ValidateRetainedRule(
+		context.Background(),
+		ws,
+		".software-standards/rules/verify-before-merge.md",
+		data,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diagnostics) == 0 {
+		t.Fatal("unreachable baseline produced no diagnostic")
+	}
+	found := false
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Field == "baseline_commit" &&
+			strings.Contains(diagnostic.Message, "reachable ancestor") &&
+			strings.Contains(diagnostic.Recovery, "repository history") &&
+			strings.Contains(diagnostic.Recovery, "review") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("diagnostics = %#v, want actionable unreachable-baseline failure", diagnostics)
+	}
+}
+
+func TestValidateRetainedPackPropagatesCanceledGitOperation(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeFile(t, filepath.Join(repo, ".software-standards", "assessment.md"), "# Assessment\n")
+	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "verify-before-merge.md"), validRule(
+		baseline,
+		excerptHash("package main\n"),
+		excerptHash("verify:\n\tgo test ./...\n"),
+	))
+	git(t, repo, "add", ".software-standards")
+	git(t, repo, "commit", "-m", "adopt standards")
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, diagnostics, err := rulepack.ValidateRetainedPack(ctx, ws)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	if len(diagnostics) != 0 {
+		t.Fatalf("operational failure became diagnostics: %#v", diagnostics)
 	}
 }
 

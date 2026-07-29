@@ -188,8 +188,9 @@ The developer-created pull request and its merge are the adoption decision.
 ```text
 ssb inspect  [--repo PATH] [--format text|json] [resource limits]
 ssb validate [--repo PATH] [--format text|json]
-ssb render   [--repo PATH] [--dry-run]
-ssb adr      [--repo PATH] [--adr-dir PATH] [--dry-run]
+ssb render   [--repo PATH] [--review ID] [--dry-run]
+ssb adr      [--repo PATH] [--review ID] [--adr-dir PATH] [--dry-run]
+ssb prune    <inspect|validate|approve|apply|recover|status|verify> [options]
 ```
 
 - `inspect` creates a safe inventory of one committed repository snapshot.
@@ -199,7 +200,40 @@ ssb adr      [--repo PATH] [--adr-dir PATH] [--dry-run]
 
 `inspect` supports `--max-candidate-files` and `--max-candidate-bytes`. `--allow-partial` permits diagnostic output from an incomplete inventory, but that output cannot be used to generate a proposal. Exit code `4`: inventory coverage incomplete.
 
+- `0`: success
+- `1`: rule-pack or prune-proposal validation failure
+- `2`: usage or repository precondition failure
+- `3`: unexpected internal failure
+- `4`: inventory coverage incomplete
+
 Run `ssb <command> --help` for complete command options.
+
+## Governed lifecycle review
+
+`prune` is the current name for a governed lifecycle review of an adopted
+pack. It does not mean automatic cleanup. The workflow compares every rule and
+repository Agent Skill with a developer-selected, point-in-time host/model
+capability profile and proposes `keep`, `update`, `consolidate`, `remove`, or
+`unable-to-determine`. Every disposition requires evidence and rationale.
+Actionable dispositions bind repository and capability evidence; an
+unable-to-determine disposition records a structured evidence gap against an
+exact artifact. Unknown provenance remains unable to determine.
+Skill provenance covers the complete tracked bundle; a partially declared
+skill remains unknown, and ignored untracked governed files block inspection.
+
+Each review is stored under
+`.software-standards/reviews/<review-id>/` with its immutable context,
+proposal, candidate inputs, evidence snapshots, and digest-chained events.
+
+Prune inspection fails closed on incomplete inventory and writes only an
+immutable review context. The Agent Skill writes the semantic proposal. The
+CLI validates it, records one digest-bound human approval, shows application
+as a dry run by default, and applies only after `--write`. Application,
+rerendering, optional ADR creation, and receipt-backed verification are
+separate events. One canonical application-plan digest binds dry run, mutation,
+recovery, and verification. If no changes are approved, status reports a
+terminal no-change outcome without inventing application or verification.
+See [the prune protocol](docs/prune.md).
 
 ## Safety
 
@@ -210,8 +244,14 @@ The `ssb` CLI:
 - does not execute repository code, tests, hooks, or mapped verification commands;
 - does not stage, commit, branch, push, or open pull requests;
 - reads inspection input from the committed Git tree rather than worktree files;
-- stops proposal generation when inventory coverage is incomplete; and
-- leaves generated files local and uncommitted for developer review.
+- stops proposal generation when inventory coverage is incomplete;
+- leaves generated files local and uncommitted for developer review;
+- pins prune capability evidence and preserves unknown provenance as unknown;
+- keeps prune application dry-run by default and journals approved writes for
+  recovery;
+- rejects portable-path escapes and case-fold collisions before mutation; and
+- binds verification to the exact application, governed poststate, rerender,
+  and external check receipts.
 
 ## Detailed documentation
 
@@ -219,8 +259,17 @@ The `ssb` CLI:
 - [Topic taxonomy](skills/software-standards-bootstrap/references/topics.md)
 - [Architecture and trust boundaries](docs/architecture.md)
 - [Agent workflow tests](docs/agent-smoke-tests.md)
+- [Governed prune protocol](docs/prune.md)
 - [Verification record](docs/verification.md)
 - [Contributing](CONTRIBUTING.md)
+
+## Non-goals
+
+`ssb` does not provide a generic rules catalog, automatic synchronization with
+an online model registry, vendor-release-note trust, tool-specific rule
+projections, checker generation, hosted services, direct model APIs, telemetry,
+hooks, automatic refresh, unreviewed rewriting or deletion, or downstream
+product activation. The `prune` name and command architecture remain revisable.
 
 ## Development
 

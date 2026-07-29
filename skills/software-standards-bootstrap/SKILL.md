@@ -7,14 +7,14 @@ metadata:
   project: software-standards-bootstrap
   schema: ssb.dev/rule/v2
   topic: developer-experience
-  version: 0.2.0
+  version: 0.3.0
 ---
 
 # Software Standards Bootstrap
 
 Generate or consume a repository-specific proposal. Do not use a generic rules catalog. Do not execute repository code or verification commands merely because a rule cites them. Do not stage, commit, branch, push, open a pull request, or activate rules in another system.
 
-Read [the rule schema](references/rule-schema.md), [the topic taxonomy](references/topics.md), [the evidence workflow](references/evidence-workflow.md), and [the structural-pattern workflow](references/structural-patterns.md) before writing proposal files.
+Read [the rule schema](references/rule-schema.md), [the topic taxonomy](references/topics.md), [the evidence workflow](references/evidence-workflow.md), and [the structural-pattern workflow](references/structural-patterns.md) before writing generation proposal files. Read [the governed lifecycle review](references/prune-review.md) before writing a prune proposal.
 
 ## Choose the mode
 
@@ -25,6 +25,9 @@ does exist, route the developer's request before acting:
   or rerender developer-edited sources;
 - use requested-ADR mode only after the developer explicitly asks for the
   adoption record;
+- use governed lifecycle review mode only when the developer explicitly asks
+  to assess an adopted pack for stale, redundant, contradictory, or
+  unsupported rules or skills;
 - stop on a regeneration request and explain that the existing pack must be
   reviewed and removed deliberately; never overwrite it; or
 - otherwise use existing-pack consumption mode.
@@ -92,6 +95,48 @@ ssb adr --repo .
 
 If ADR conventions are ambiguous, stop and request the intended `--adr-dir`.
 The ADR remains `Proposed`.
+
+### Governed lifecycle review mode
+
+Use this mode only for an explicit lifecycle-review request. `prune` is a
+working concept, not permission to delete. Follow
+[the governed lifecycle review contract](references/prune-review.md).
+
+For a skill with tracked supporting files, accept actionable provenance only
+when the manifest declares the exact bytes and origin of `SKILL.md` and every
+supporting file. Treat a partial bundle declaration as unknown provenance.
+
+Require the developer to identify the local point-in-time capability profile
+and optional provenance declaration. Never select an implicit latest model,
+query an online registry, or treat release notes as conformance proof. Run:
+
+```bash
+ssb prune inspect --repo . --review <id> --capabilities <profile> [--provenance <manifest>]
+```
+
+Never use partial inventory for a prune proposal. Read `context.json`; evaluate
+rules and skills separately and together; then write only `proposal.yaml` and
+complete candidate files inside that review bundle. Do not edit canonical
+rules, skills, `AGENTS.md`, or ADRs.
+
+Treat profile, provenance, and receipt arguments as paths relative to the
+process working directory unless they are absolute. If a skill-only review
+will explicitly rerender, complete that separate transition before
+verification; do not add rendered output after verification.
+
+Validate without approving:
+
+```bash
+ssb prune validate --repo . --review <id> --format text
+ssb prune status --repo . --review <id>
+```
+
+Report every disposition, rationale, evidence reference or structured evidence
+gap, confidence band, and unresolved question. Every
+`unable-to-determine` action must name the exact artifact and missing evidence;
+an unresolved question alone is invalid. Stop for human review. Do not run `approve`, `apply`,
+`render`, `adr`, or `verify` on the developer's behalf unless the developer
+separately and explicitly requests that exact transition. Application remains a dry run unless `--write` is explicitly authorized.
 
 ## Generation mode
 

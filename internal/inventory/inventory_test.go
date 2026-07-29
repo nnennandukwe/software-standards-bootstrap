@@ -66,6 +66,27 @@ func TestScanBudgetsEveryCandidateBeforeContentExclusion(t *testing.T) {
 	}
 }
 
+func TestScanForPruneAllowsExistingCommittedPack(t *testing.T) {
+	repo := newRepository(t)
+	writeFile(t, filepath.Join(repo, "README.md"), "fixture\n")
+	writeFile(t, filepath.Join(repo, ".software-standards", "assessment.md"), "assessment\n")
+	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "keep-me.md"), "rule\n")
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "adopt standards")
+
+	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := inventory.ScanForPrune(context.Background(), ws, inventory.DefaultLimits())
+	if err != nil {
+		t.Fatalf("prune scan rejected an adopted pack: %v", err)
+	}
+	if report.Truncated || report.BaselineCommit != ws.Baseline() {
+		t.Fatalf("unexpected prune report: %#v", report)
+	}
+}
+
 func TestScanIncludesExactCandidateByteBoundaryAndStopsBeforeNextBlob(t *testing.T) {
 	repo := newRepository(t)
 	writeFile(t, filepath.Join(repo, "a.txt"), "aa")
