@@ -4,7 +4,7 @@ Software Standards Bootstrap (`ssb`) generates three kinds of AI-facing guidance
 
 1. **Coding-convention rules** that explain how code should be structured, implemented, tested, reviewed, and maintained.
 2. **Agent Skills** that give AI coding tools step-by-step instructions for repository-specific engineering workflows.
-3. **An optimized root `AGENTS.md`** that routes AI coding tools to the rules and skills relevant to their current files and task.
+3. **An optimized root `AGENTS.md`** that routes AI coding tools to the rules and related skills relevant to their current files and task.
 
 Together, these files give future AI-assisted work repository-specific context for planning changes, generating code, testing, maintenance, code review, and release work.
 
@@ -52,7 +52,7 @@ Rules define constraints. Skills define procedures.
 
 `ssb` renders the proposed guidance into a managed section in the repository's root `AGENTS.md`.
 
-Base rules become standing orders. Contextual rules are routed by affected path, language, framework, and task. Rules link to procedural skills when needed. This gives an AI tool the relevant repository guidance without loading every rule for every task.
+Base rules become standing orders. Contextual rules are routed by affected path, language, framework, and task. Rules reference procedural skills when needed. This gives an AI tool the relevant repository guidance without loading every rule for every task.
 
 The rule and skill files are the editable sources. `AGENTS.md` is generated from them.
 
@@ -76,7 +76,7 @@ The ADR remains `Proposed` until the developer-created pull request is merged.
 
 ## How future AI work uses the output
 
-Once approved and committed, compatible AI coding tools can use the generated files throughout the software development lifecycle.
+Once reviewed and merged, compatible AI coding tools can use the generated files throughout the software development lifecycle.
 
 | AI-assisted activity | Repository context supplied |
 |---|---|
@@ -121,6 +121,7 @@ It does not provide a generic rules catalog, invent standards without repository
 - A repository with at least one commit on an attached branch
 - No tracked or staged working-tree changes
 - Go 1.26.5 when building `ssb` from source
+- `GOBIN` or `$(go env GOPATH)/bin` on `PATH`
 - A compatible coding agent that can use the bundled Agent Skill
 
 Untracked files are allowed during inspection.
