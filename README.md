@@ -8,7 +8,7 @@ Software Standards Bootstrap (`ssb`) generates three kinds of AI-facing guidance
 
 Together, these files give future AI-assisted work repository-specific context for planning changes, generating code, testing, maintenance, code review, and release work.
 
-Run `ssb` in a repository that already contains engineering conventions but does not yet document them clearly for AI coding tools. A compatible coding agent analyzes the committed repository and proposes rules, skills, and `AGENTS.md` guidance. Developers review, edit, delete, or approve those files before they become part of the repository.
+Run `ssb` in a repository whose engineering conventions are not yet documented for AI tools. A compatible coding agent analyzes the committed repository and proposes these files. Developers review, edit, delete, or approve them before adoption.
 
 The coding agent performs the semantic analysis. The `ssb` CLI pins the input commit, builds a safe inventory, validates the generated evidence, renders `AGENTS.md`, and creates an optional Proposed ADR.
 
@@ -87,8 +87,6 @@ Once reviewed and merged, compatible AI coding tools can use the generated files
 | Maintenance | Established patterns for changing code without breaking repository structure or conventions |
 | Release work | Relevant release rules, procedures, checks, and ask-first boundaries |
 
-The goal is to give AI tools the same repository-specific context a responsible developer would need before making or reviewing a change.
-
 ## Human review and deterministic guardrails
 
 Generation creates an uncommitted proposal. Developers decide which rules and skills become part of the repository through normal Git review.
@@ -101,15 +99,13 @@ A rule is **deterministic** only when the repository already contains a command 
 
 ## Who it is for
 
-`ssb` is for repositories that:
+`ssb` is for teams making an existing repository's SDLC more AI-integrated while preserving engineering judgment, repository conventions, and review responsibility. It fits repositories that:
 
 - use or plan to use AI tools for software development;
 - contain coding or SDLC conventions that AI tools need to follow;
 - need documented rules, reusable Agent Skills, or a clearer root `AGENTS.md`;
 - want generated guidance backed by inspectable repository evidence; and
 - require developer approval before that guidance is adopted.
-
-It is designed for teams making their SDLC more AI-integrated while preserving engineering judgment, repository conventions, and review responsibility.
 
 It does not provide a generic rules catalog, invent standards without repository evidence, or replace developer review.
 
@@ -216,8 +212,6 @@ The `ssb` CLI:
 - reads inspection input from the committed Git tree rather than worktree files;
 - stops proposal generation when inventory coverage is incomplete; and
 - leaves generated files local and uncommitted for developer review.
-
-The coding agent performs the semantic analysis and writes the proposal. The CLI provides the inventory, validation, rendering, and ADR safety boundaries.
 
 ## Detailed documentation
 
