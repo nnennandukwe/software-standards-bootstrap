@@ -87,30 +87,74 @@ immutable inputs once approved. Candidate replacements are complete files.
 Events form a digest chain binding the context, proposal, baseline, decision,
 and results.
 
+Proposal validation parses replacement rule and skill contracts and evaluates
+the proposed resulting rule-skill graph. Approval repeats that preflight for
+the exact accepted decision set and records no event when it fails.
+
 The review bundle retains exact copies of the selected capability profile,
 all referenced conformance evidence, and the optional provenance declaration
-under `inputs/`. Context loading rechecks those durable copies.
+under `inputs/`. Context loading rechecks those durable copies. Ignored
+untracked files under governed roots block inspection. Skill provenance is
+complete-bundle provenance: partial declarations produce `unknown`, while
+fully declared files with different origins produce `mixed`.
 
 Application accepts only approved actions, verifies current source and
-candidate digests, refuses unrelated tracked changes, and writes a recovery
-journal before mutation. Replacement skill targets enumerate the complete
+candidate digests, refuses unrelated tracked changes, and derives one
+content-addressed application plan containing exact prestate, poststate, and
+the complete final governed configuration. Dry run, event validation,
+journaling, recovery, and verification share this plan. Application writes a
+recovery journal before mutation. Replacement skill targets enumerate the complete
 entrypoint/support bundle, including intended regular-file modes. Existing
 paths are atomically moved to a phase-specific private
 claim before replacement; exclusive creation prevents a concurrent repository
 writer from being overwritten. A repository-wide mutation lock separates
-claims owned by different reviews. Rollback and recovery restore only
-recognized pre/poststate bytes and remove directories created by the failed transition.
+claims owned by different reviews. After the application event commits, the
+journal remains until both locks are released successfully, then is removed
+through the still-open identity-pinned review descriptor. Explicit stale-lock
+recovery covers journal-free lock cleanup windows. Rollback and recovery restore
+only recognized pre/poststate bytes and remove directories created by the
+failed transition.
 
 Git executable mode is a platform capability, not a best-effort hint. Windows
 proposal validation rejects `100755` candidates because the filesystem cannot
 materialize that Git tree mode without changing the index, and the CLI does not
-stage. It does not report an application state after silently writing a
-non-executable file.
+stage. Application planning also rejects a Windows change whose existing
+prestate is `100755`, including removal, before dry-run output can imply that
+the plan is writable. It does not report an application state after silently
+writing a non-executable file.
+
+Ordinary `validate`, `render`, and `adr` commands continue to require rule
+evidence pinned to current `HEAD`. After an approved prune application,
+review-aware `render --review` and `adr --review` instead validate every
+resulting rule against that rule's recorded historical baseline. A baseline
+that is not a reachable ancestor of current `HEAD` is a hard evidence
+failure, even if its Git object remains locally resolvable. The rerender event binds
+both the managed-section digest and the complete `AGENTS.md` output digest;
+verification rechecks the complete regular, non-symlink output. Rerendering is
+optional for skill-only reviews, but an explicitly recorded render event is
+still bound into their verification receipts and event and therefore must
+precede verification.
+
+Portable paths are validated independently of the current operating system.
+Traversal, alternate separators, drive or stream syntax, Windows-reserved
+device names, invalid Windows filename characters, and trailing dots or spaces
+are rejected before filesystem access. The same validation and case-fold
+collision check applies to tracked baseline rules and complete skill bundles,
+not only proposed candidates. Review roots and durable capability/provenance
+snapshots reject symlinked path components before lifecycle reads, locks,
+recovery, or event writes.
+
 Dry run is the default. Unknown provenance can only produce
 `unable-to-determine`, and that disposition cannot be approved for application.
+It must record a structured evidence gap for an exact source artifact. A review
+with no approved applicable operations derives a terminal no-change outcome
+without an application event.
 
 Verification consumes externally produced, content-addressed receipts. It
-does not run the commands named by those receipts.
+does not run the commands named by those receipts. Receipts bind the exact
+application event and plan, any required rerender event, and an observation
+time after application. Verification rechecks the complete current governed
+poststate before recording its event.
 
 ### Rule pack
 
@@ -176,8 +220,9 @@ proved property. It always has `Proposed` status.
 | Root `AGENTS.md` managed section | Derived standing orders and contextual rule router | No | No |
 | Proposed ADR | Adoption record from retained sources | New record only | No |
 | Review `context.json` | Complete pinned lifecycle input | No | Inventory and capability evidence |
-| Review `proposal.yaml` | Semantic dispositions and complete candidates | Host-authored before approval | Evidence mapping only |
-| Review `events.jsonl` | Digest-chained human/tool transitions | Append only | Transition integrity |
+| Review `proposal.yaml` | Semantic dispositions, structured evidence gaps, and complete candidates | Host-authored before approval | Evidence mapping only |
+| Canonical application plan | Exact pre/poststate and complete final governed configuration | Derived only | Shared plan digest |
+| Review `events.jsonl` | Digest-chained human/tool transitions | Append only | Transition and application-plan integrity |
 | Existing repository checker | Repository-owned deterministic mechanism | Outside ssb | Only when run elsewhere |
 
 ## No network contract

@@ -36,6 +36,7 @@ type Result struct {
 	DryRun        bool   `json:"dry_run"`
 	SourceDigest  string `json:"source_digest"`
 	ContentDigest string `json:"content_digest"`
+	OutputDigest  string `json:"output_digest"`
 	Content       []byte `json:"-"`
 }
 
@@ -62,6 +63,7 @@ func Apply(repo *workspace.Repository, pack rulepack.Pack, dryRun bool) (Result,
 		DryRun:        dryRun,
 		SourceDigest:  sourceDigest,
 		ContentDigest: contentDigest,
+		OutputDigest:  digest(next),
 		Content:       next,
 	}
 	if dryRun || !result.Changed {

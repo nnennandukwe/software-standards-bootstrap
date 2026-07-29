@@ -13,7 +13,9 @@ import (
 	"testing"
 
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/cli"
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/prune"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/rulepack"
+	"go.yaml.in/yaml/v4"
 )
 
 func TestInspectJSONIsReadOnlyAndMachineReadable(t *testing.T) {
@@ -313,6 +315,312 @@ func TestReviewAwareRenderAndADRValidateTransitionBeforeWriting(t *testing.T) {
 	}
 }
 
+func TestReviewAwareRenderAndADRValidateRetainedHistoricalRules(t *testing.T) {
+	repo, evidenceBaseline := evidenceRepository(t)
+	writeValidPack(t, repo, evidenceBaseline)
+	updatedRulePath := filepath.Join(
+		repo,
+		".software-standards",
+		"rules",
+		"verify-before-merge.md",
+	)
+	updatedRule, err := os.ReadFile(updatedRulePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retainedRule := strings.ReplaceAll(string(updatedRule), "verify-before-merge", "retain-history")
+	writeFile(t, filepath.Join(
+		repo,
+		".software-standards",
+		"rules",
+		"retain-history.md",
+	), retainedRule)
+	git(t, repo, "add", ".software-standards")
+	git(t, repo, "commit", "-m", "adopt two rules")
+	adoptedBaseline := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
+
+	profileDir := t.TempDir()
+	capabilityEvidence := filepath.Join(profileDir, "host-run.json")
+	writeFile(t, capabilityEvidence, "{\"supported\":true}\n")
+	profile := filepath.Join(profileDir, "capabilities.yaml")
+	writeFile(t, profile, `schema: ssb.dev/capability-profile/v1
+id: retained-rule-fixture
+host: {name: codex, version: 1.2.3}
+model: {provider: openai, id: gpt-example}
+observed_at: 2026-07-27T18:00:00Z
+evidence:
+  - id: host-run
+    kind: conformance
+    path: host-run.json
+    sha256: `+fileSHA256(t, capabilityEvidence)+`
+capabilities:
+  - id: repository-instructions
+    status: supported
+    evidence_ids: [host-run]
+`)
+	provenance := filepath.Join(profileDir, "provenance.yaml")
+	writeFile(t, provenance, `schema: ssb.dev/artifact-provenance/v1
+artifacts:
+  - path: .software-standards/rules/retain-history.md
+    sha256: `+fileSHA256(t, filepath.Join(repo, ".software-standards", "rules", "retain-history.md"))+`
+    origin: generated
+    declaration: Generated and adopted through the repository standards workflow.
+  - path: .software-standards/rules/verify-before-merge.md
+    sha256: `+fileSHA256(t, updatedRulePath)+`
+    origin: generated
+    declaration: Generated and adopted through the repository standards workflow.
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	runCLI := func(arguments ...string) string {
+		t.Helper()
+		stdout.Reset()
+		stderr.Reset()
+		if code := cli.Run(arguments, &stdout, &stderr); code != 0 {
+			t.Fatalf("%v exit=%d stdout=%q stderr=%q", arguments, code, stdout.String(), stderr.String())
+		}
+		return stdout.String()
+	}
+	runCLI(
+		"prune", "inspect",
+		"--repo", repo,
+		"--review", "retained-rule-review",
+		"--capabilities", profile,
+		"--provenance", provenance,
+		"--format", "json",
+	)
+
+	reviewRoot := filepath.Join(
+		repo,
+		".software-standards",
+		"reviews",
+		"retained-rule-review",
+	)
+	contextData, err := os.ReadFile(filepath.Join(reviewRoot, "context.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reviewContext prune.Context
+	if err := json.Unmarshal(contextData, &reviewContext); err != nil {
+		t.Fatal(err)
+	}
+	artifacts := make(map[string]prune.Artifact)
+	for _, artifact := range reviewContext.Artifacts {
+		artifacts[artifact.ID] = artifact
+	}
+	retainedArtifact, retainedExists := artifacts["retain-history"]
+	updatedArtifact, updatedExists := artifacts["verify-before-merge"]
+	if !retainedExists || !updatedExists {
+		t.Fatalf("context artifacts = %#v, want both rules", reviewContext.Artifacts)
+	}
+	var repositoryEvidence prune.EvidenceRef
+	for _, file := range reviewContext.Inventory.Files {
+		if file.Path == "main.go" {
+			repositoryEvidence = prune.EvidenceRef{
+				Path: "main.go", Lines: "1-1", SHA256: file.SHA256,
+			}
+		}
+	}
+	if repositoryEvidence.SHA256 == "" {
+		t.Fatal("main.go evidence is absent from the review context")
+	}
+
+	candidateRelative := "candidates/update-rule/verify-before-merge.md"
+	candidatePath := filepath.Join(reviewRoot, filepath.FromSlash(candidateRelative))
+	candidate := strings.Replace(
+		string(updatedRule),
+		"baseline_commit: "+evidenceBaseline,
+		"baseline_commit: "+adoptedBaseline,
+		1,
+	)
+	candidate = strings.Replace(
+		candidate,
+		"Run the repository verification command before merging.",
+		"Run the repository verification command before merging any changed rule.",
+		1,
+	)
+	writeFile(t, candidatePath, candidate)
+
+	action := func(id, disposition string, artifact prune.Artifact) prune.Action {
+		return prune.Action{
+			ID:          id,
+			Disposition: disposition,
+			Sources: []prune.ArtifactRef{{
+				Kind: artifact.Kind, ID: artifact.ID, Path: artifact.Path, SHA256: artifact.SHA256,
+			}},
+			Rationale:          "Pinned repository and capability evidence support this disposition.",
+			Confidence:         prune.ConfidenceHigh,
+			RepositoryEvidence: []prune.EvidenceRef{repositoryEvidence},
+			CapabilityRefs:     []string{"repository-instructions"},
+			RequiredVerification: []prune.CheckRequirement{{
+				ID: "review-check", Command: "ssb validate --repo .",
+			}},
+		}
+	}
+	keep := action("keep-rule", prune.DispositionKeep, retainedArtifact)
+	update := action("update-rule", prune.DispositionUpdate, updatedArtifact)
+	update.Target = &prune.CandidateRef{
+		Kind:       prune.ArtifactRule,
+		ID:         "verify-before-merge",
+		TargetPath: updatedArtifact.Path,
+		SourcePath: candidateRelative,
+		SHA256:     fileSHA256(t, candidatePath),
+		Mode:       "100644",
+	}
+	proposalData, err := yaml.Marshal(prune.Proposal{
+		Schema:        prune.ProposalSchema,
+		ReviewID:      "retained-rule-review",
+		ContextDigest: reviewContext.ContextDigest,
+		Actions:       []prune.Action{keep, update},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(reviewRoot, "proposal.yaml"), proposalData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runCLI("prune", "validate", "--repo", repo, "--review", "retained-rule-review")
+	runCLI(
+		"prune", "approve",
+		"--repo", repo,
+		"--review", "retained-rule-review",
+		"--approve", "update-rule",
+		"--reject", "keep-rule",
+	)
+	var dryRun prune.ApplyResult
+	if err := json.Unmarshal([]byte(runCLI(
+		"prune", "apply",
+		"--repo", repo,
+		"--review", "retained-rule-review",
+		"--format", "json",
+	)), &dryRun); err != nil {
+		t.Fatal(err)
+	}
+	var applied prune.ApplyResult
+	if err := json.Unmarshal([]byte(runCLI(
+		"prune", "apply",
+		"--repo", repo,
+		"--review", "retained-rule-review",
+		"--format", "json",
+		"--write",
+	)), &applied); err != nil {
+		t.Fatal(err)
+	}
+	if applied.PlanDigest == "" || applied.PlanDigest != dryRun.PlanDigest {
+		t.Fatalf("dry-run plan %q != applied plan %q", dryRun.PlanDigest, applied.PlanDigest)
+	}
+
+	runCLI("render", "--repo", repo, "--review", "retained-rule-review")
+	runCLI("adr", "--repo", repo, "--review", "retained-rule-review")
+	review, diagnostics, err := prune.LoadReview(repo, "retained-rule-review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diagnostics) != 0 {
+		t.Fatalf("review diagnostics = %#v", diagnostics)
+	}
+	var applicationEventDigest string
+	var renderEventDigest string
+	for _, event := range review.Events {
+		switch event.Kind {
+		case prune.EventApplied:
+			applicationEventDigest = event.EventDigest
+		case prune.EventRendered:
+			renderEventDigest = event.EventDigest
+		}
+	}
+	if applicationEventDigest == "" || renderEventDigest == "" {
+		t.Fatalf("review events = %#v, want applied and rendered", review.Events)
+	}
+
+	receipts := t.TempDir()
+	receiptEvidence := filepath.Join(receipts, "logs", "ssb-validate.txt")
+	writeFile(t, receiptEvidence, "PASS\n")
+	writeFile(t, filepath.Join(receipts, "review-check.yaml"), `schema: ssb.dev/prune-check-receipt/v1
+review_id: retained-rule-review
+proposal_digest: `+review.ProposalDigest+`
+application_event_digest: `+applicationEventDigest+`
+plan_digest: `+applied.PlanDigest+`
+render_event_digest: `+renderEventDigest+`
+check_id: review-check
+command: ssb validate --repo .
+status: passed
+observed_at: 2099-07-27T18:02:00Z
+evidence:
+  - path: logs/ssb-validate.txt
+    sha256: `+fileSHA256(t, receiptEvidence)+`
+`)
+	agentsPath := filepath.Join(repo, "AGENTS.md")
+	renderedAgents, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertVerifyFails := func(want string) {
+		t.Helper()
+		stdout.Reset()
+		stderr.Reset()
+		code := cli.Run([]string{
+			"prune", "verify",
+			"--repo", repo,
+			"--review", "retained-rule-review",
+			"--receipts", receipts,
+		}, &stdout, &stderr)
+		if code != 2 || !strings.Contains(stderr.String(), want) {
+			t.Fatalf("verify exit=%d stdout=%q stderr=%q, want %q", code, stdout.String(), stderr.String(), want)
+		}
+		status := runCLI(
+			"prune", "status",
+			"--repo", repo,
+			"--review", "retained-rule-review",
+			"--format", "json",
+		)
+		if strings.Contains(status, `"verified": true`) {
+			t.Fatalf("failed verification recorded verified status: %s", status)
+		}
+	}
+
+	writeFile(t, agentsPath, "human edit outside the managed section\n"+string(renderedAgents))
+	assertVerifyFails("rendered poststate drift")
+	if err := os.WriteFile(agentsPath, renderedAgents, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	externalAgents := filepath.Join(t.TempDir(), "AGENTS.md")
+	writeFile(t, externalAgents, string(renderedAgents))
+	if err := os.Remove(agentsPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(externalAgents, agentsPath); err == nil {
+		assertVerifyFails("safe regular repository file")
+		if err := os.Remove(agentsPath); err != nil {
+			t.Fatal(err)
+		}
+	} else if !os.IsNotExist(err) {
+		t.Logf("symlink unavailable; whole-file drift path still exercised: %v", err)
+	}
+	if err := os.WriteFile(agentsPath, renderedAgents, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runCLI(
+		"prune", "verify",
+		"--repo", repo,
+		"--review", "retained-rule-review",
+		"--receipts", receipts,
+	)
+	status := runCLI(
+		"prune", "status",
+		"--repo", repo,
+		"--review", "retained-rule-review",
+		"--format", "json",
+	)
+	if !strings.Contains(status, `"verified": true`) {
+		t.Fatalf("status = %s, want verified review", status)
+	}
+}
+
 func TestPruneCLIWalksExplicitStatesWithoutImplicitVerification(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
 	writeValidPack(t, repo, baseline)
@@ -388,16 +696,19 @@ actions:
         sha256: %s
     rationale: Provenance was not declared.
     confidence: low
+    evidence_gaps:
+      - kind: provenance
+        artifact_path: %s
+        detail: No provenance declaration matches the inventoried bytes.
     unresolved_questions:
       - Who authored and adopted this rule?
-`, reviewContext.ContextDigest, artifact.Kind, artifact.ID, artifact.Path, artifact.SHA256)
+`, reviewContext.ContextDigest, artifact.Kind, artifact.ID, artifact.Path, artifact.SHA256, artifact.Path)
 	writeFile(t, proposalPath, proposal)
 
 	for _, command := range [][]string{
 		{"prune", "validate", "--repo", repo, "--review", "cli-review"},
 		{"prune", "approve", "--repo", repo, "--review", "cli-review", "--reject", "review-keep-rule"},
 		{"prune", "apply", "--repo", repo, "--review", "cli-review"},
-		{"prune", "apply", "--repo", repo, "--review", "cli-review", "--write"},
 	} {
 		stdout.Reset()
 		stderr.Reset()
@@ -407,19 +718,38 @@ actions:
 	}
 	stdout.Reset()
 	stderr.Reset()
+	if code := cli.Run([]string{
+		"prune", "apply", "--repo", repo, "--review", "cli-review", "--write",
+	}, &stdout, &stderr); code != 0 ||
+		!strings.Contains(stdout.String(), "No changes were approved") ||
+		!strings.Contains(stdout.String(), "Plan: sha256:") ||
+		!strings.Contains(stdout.String(), "without application or verification") {
+		t.Fatalf("no-change apply exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
 	code = cli.Run([]string{
 		"prune", "status", "--repo", repo, "--review", "cli-review", "--format", "json",
 	}, &stdout, &stderr)
-	if code != 0 || !strings.Contains(stdout.String(), `"applied": true`) ||
+	if code != 0 || !strings.Contains(stdout.String(), `"applied": false`) ||
+		!strings.Contains(stdout.String(), `"no_changes_approved": true`) ||
 		!strings.Contains(stdout.String(), `"verified": false`) {
 		t.Fatalf("status exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	stdout.Reset()
 	stderr.Reset()
+	code = cli.Run([]string{
+		"prune", "status", "--repo", repo, "--review", "cli-review",
+	}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), "no-changes-approved=true") {
+		t.Fatalf("text status exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
 	if code := cli.Run([]string{
 		"prune", "verify", "--repo", repo, "--review", "cli-review", "--receipts", t.TempDir(),
-	}, &stdout, &stderr); code != 1 {
-		t.Fatalf("evidence-free verify exit=%d, want 1; stderr=%q", code, stderr.String())
+	}, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), "no changes were approved") {
+		t.Fatalf("no-change verify exit=%d, want 2; stderr=%q", code, stderr.String())
 	}
 	stdout.Reset()
 	stderr.Reset()

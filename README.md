@@ -89,15 +89,22 @@ new record and refuses overwrite or path escape.
 pack. It does not mean automatic cleanup. The workflow compares every rule and
 repository Agent Skill with a developer-selected, point-in-time host/model
 capability profile and proposes `keep`, `update`, `consolidate`, `remove`, or
-`unable-to-determine`. Every actionable disposition requires repository and
-capability evidence. Unknown provenance remains unable to determine.
+`unable-to-determine`. Every disposition requires evidence and rationale.
+Actionable dispositions bind repository and capability evidence; an
+unable-to-determine disposition records a structured evidence gap against an
+exact artifact. Unknown provenance remains unable to determine.
+Skill provenance covers the complete tracked bundle; a partially declared
+skill remains unknown, and ignored untracked governed files block inspection.
 
 Prune inspection fails closed on incomplete inventory and writes only an
 immutable review context. The Agent Skill writes the semantic proposal. The
 CLI validates it, records one digest-bound human approval, shows application
 as a dry run by default, and applies only after `--write`. Application,
 rerendering, optional ADR creation, and receipt-backed verification are
-separate events. See [the prune protocol](docs/prune.md).
+separate events. One canonical application-plan digest binds dry run, mutation,
+recovery, and verification. If no changes are approved, status reports a
+terminal no-change outcome without inventing application or verification.
+See [the prune protocol](docs/prune.md).
 
 ## Agent Skill workflow
 
@@ -187,6 +194,11 @@ See [the rule format](docs/rule-format.md), [topic taxonomy](skills/software-sta
   provenance as unknown, and bind approval and later events to exact digests.
 - Prune application is dry-run by default and uses a recovery journal; it
   never stages or commits the resulting files.
+- Portable paths reject Windows drive, UNC, backslash, traversal, symlink, and
+  case-fold collision escapes before reads or writes.
+- Verification binds the exact application event, canonical plan, current
+  governed poststate, required rerender event, complete rendered output, and
+  post-application receipts.
 - Writes are bounded, staged locally, and left uncommitted.
 
 ## Non-goals

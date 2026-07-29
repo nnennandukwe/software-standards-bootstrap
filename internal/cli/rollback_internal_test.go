@@ -1,9 +1,13 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/prune"
 )
 
 func TestADRRollbackRemovesDirectoriesCreatedByFailedTransition(t *testing.T) {
@@ -28,5 +32,25 @@ func TestADRRollbackRemovesDirectoriesCreatedByFailedTransition(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "docs")); !os.IsNotExist(err) {
 		t.Fatalf("rollback left created directory tree: %v", err)
+	}
+}
+
+func TestCommittedTransitionNeverRollsBackItsArtifact(t *testing.T) {
+	rolledBack := false
+	err := reconcileTransitionCompletion(
+		prune.Event{EventDigest: "sha256:committed"},
+		errors.New("injected lock cleanup failure"),
+		"render",
+		"AGENTS.md was restored",
+		func() error {
+			rolledBack = true
+			return nil
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "lock cleanup failure") {
+		t.Fatalf("error = %v, want committed cleanup failure", err)
+	}
+	if rolledBack {
+		t.Fatal("committed transition rolled back its artifact")
 	}
 }

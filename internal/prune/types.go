@@ -57,6 +57,12 @@ const (
 	ConfidenceLow    = "low"
 	ConfidenceMedium = "medium"
 	ConfidenceHigh   = "high"
+
+	EvidenceGapInventory  = "inventory"
+	EvidenceGapProvenance = "provenance"
+	EvidenceGapCapability = "capability"
+	EvidenceGapRepository = "repository"
+	EvidenceGapConflict   = "conflict"
 )
 
 // Diagnostic is one actionable contract failure.
@@ -203,6 +209,14 @@ type EvidenceRef struct {
 	SHA256 string `yaml:"sha256" json:"sha256"`
 }
 
+// EvidenceGap records the exact context subject and missing fact that prevents
+// an evidence-backed lifecycle disposition.
+type EvidenceGap struct {
+	Kind         string `yaml:"kind" json:"kind"`
+	ArtifactPath string `yaml:"artifact_path" json:"artifact_path"`
+	Detail       string `yaml:"detail" json:"detail"`
+}
+
 // CheckRequirement declares external evidence required before verification.
 type CheckRequirement struct {
 	ID      string `yaml:"id" json:"id"`
@@ -220,6 +234,7 @@ type Action struct {
 	Confidence           string             `yaml:"confidence" json:"confidence"`
 	RepositoryEvidence   []EvidenceRef      `yaml:"repository_evidence,omitempty" json:"repository_evidence,omitempty"`
 	CapabilityRefs       []string           `yaml:"capability_refs,omitempty" json:"capability_refs,omitempty"`
+	EvidenceGaps         []EvidenceGap      `yaml:"evidence_gaps,omitempty" json:"evidence_gaps,omitempty"`
 	UnresolvedQuestions  []string           `yaml:"unresolved_questions,omitempty" json:"unresolved_questions,omitempty"`
 	RequiredVerification []CheckRequirement `yaml:"required_verification,omitempty" json:"required_verification,omitempty"`
 }
@@ -230,14 +245,4 @@ type Proposal struct {
 	ReviewID      string   `yaml:"review_id" json:"review_id"`
 	ContextDigest string   `yaml:"context_digest" json:"context_digest"`
 	Actions       []Action `yaml:"actions" json:"actions"`
-}
-
-// Reference constructs the exact proposal identity for an artifact.
-func Reference(artifact Artifact) ArtifactRef {
-	return ArtifactRef{
-		Kind:   artifact.Kind,
-		ID:     artifact.ID,
-		Path:   artifact.Path,
-		SHA256: artifact.SHA256,
-	}
 }

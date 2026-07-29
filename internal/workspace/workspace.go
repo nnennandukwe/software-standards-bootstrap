@@ -15,12 +15,22 @@ import (
 	"strings"
 )
 
-// ErrPrecondition identifies a repository state the developer must fix before
-// ssb can continue.
-var ErrPrecondition = errors.New("repository precondition failed")
+var (
+	// ErrPrecondition identifies a repository state the developer must fix
+	// before ssb can continue.
+	ErrPrecondition = errors.New("repository precondition failed")
+	// ErrHistoricalCommit identifies a baseline that is invalid, unresolved,
+	// or outside the current repository history.
+	ErrHistoricalCommit = errors.New("historical commit is unavailable")
+	// ErrGitOperation identifies a Git execution failure rather than a
+	// repository-state rejection.
+	ErrGitOperation = errors.New("Git operation failed")
+)
 
 var gitVersionPattern = regexp.MustCompile(`^git version ([0-9]+)\.([0-9]+)(?:\.|$)`)
 var objectIDPattern = regexp.MustCompile(`^[0-9a-f]{40,64}$`)
+
+var runRepositoryGit = runGitInput
 
 // PreconditionError describes an expected, actionable repository-state error.
 type PreconditionError struct {
@@ -63,19 +73,53 @@ func (r *Repository) Baseline() string { return r.baseline }
 // It is used to validate historical evidence retained by an adopted pack.
 func (r *Repository) AtCommit(ctx context.Context, commit string) (*Repository, error) {
 	if !objectIDPattern.MatchString(commit) {
-		return nil, fmt.Errorf("commit must be a full lowercase object id")
+		return nil, fmt.Errorf("%w: commit must be a full lowercase object id", ErrHistoricalCommit)
 	}
-	output, err := r.Git(ctx, "rev-parse", "--verify", "--end-of-options", commit+"^{commit}")
+	output, err := r.GitWithInput(
+		ctx,
+		[]byte(commit+"^{commit}\n"),
+		"cat-file",
+		"--batch-check=%(objectname) %(objecttype)",
+	)
 	if err != nil {
 		return nil, fmt.Errorf("resolve historical commit %s: %w", commit, err)
 	}
-	resolved := trimGitLine(output)
+	fields := strings.Fields(string(output))
+	if len(fields) == 2 && fields[1] == "missing" {
+		return nil, fmt.Errorf(
+			"%w: historical commit %s cannot be resolved",
+			ErrHistoricalCommit,
+			commit,
+		)
+	}
+	if len(fields) != 2 || fields[1] != "commit" || !objectIDPattern.MatchString(fields[0]) {
+		return nil, fmt.Errorf(
+			"%w: Git returned an invalid historical commit response",
+			ErrGitOperation,
+		)
+	}
+	resolved := fields[0]
+	if _, err := r.Git(ctx, "merge-base", "--is-ancestor", resolved, r.baseline); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("verify historical commit ancestry: %w", err)
+		}
+		var exitError *exec.ExitError
+		if errors.As(err, &exitError) && exitError.ExitCode() == 1 {
+			return nil, fmt.Errorf(
+				"%w: historical commit %s is not an ancestor of current baseline %s",
+				ErrHistoricalCommit,
+				resolved,
+				r.baseline,
+			)
+		}
+		return nil, fmt.Errorf("verify historical commit ancestry: %w", err)
+	}
 	return &Repository{root: r.root, baseline: resolved, gitPath: r.gitPath}, nil
 }
 
 // OpenForInspect applies the strict, clean-start inspection preconditions.
 func OpenForInspect(ctx context.Context, path string) (*Repository, error) {
-	repo, err := open(ctx, path, true)
+	repo, err := open(ctx, path, true, "ssb inspect")
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +134,7 @@ func OpenForInspect(ctx context.Context, path string) (*Repository, error) {
 // standards pack. Unlike OpenForInspect, it never treats the existing pack as
 // an overwrite collision.
 func OpenForPrune(ctx context.Context, path string) (*Repository, error) {
-	repo, err := open(ctx, path, true)
+	repo, err := open(ctx, path, true, "ssb prune inspect")
 	if err != nil {
 		return nil, err
 	}
@@ -140,10 +184,10 @@ func requireExistingPack(root string) error {
 // Open resolves a commit-backed repository without requiring a clean worktree.
 // Commands that write must validate their own bounded targets after calling it.
 func Open(ctx context.Context, path string) (*Repository, error) {
-	return open(ctx, path, false)
+	return open(ctx, path, false, "")
 }
 
-func open(ctx context.Context, path string, requireClean bool) (*Repository, error) {
+func open(ctx context.Context, path string, requireClean bool, recoveryCommand string) (*Repository, error) {
 	if path == "" {
 		path = "."
 	}
@@ -203,7 +247,7 @@ func open(ctx context.Context, path string, requireClean bool) (*Repository, err
 		if len(status) != 0 {
 			return nil, &PreconditionError{
 				Problem:  "tracked or staged changes make the inspection baseline ambiguous",
-				Recovery: "commit, stash, or restore tracked changes and rerun ssb inspect",
+				Recovery: "commit, stash, or restore tracked changes and rerun " + recoveryCommand,
 			}
 		}
 	}
@@ -242,7 +286,7 @@ func (r *Repository) VerifyPruneSnapshot(ctx context.Context) error {
 func (r *Repository) RejectUntrackedConfigurations(ctx context.Context) error {
 	output, err := r.Git(
 		ctx,
-		"ls-files", "--others", "--exclude-standard", "-z", "--",
+		"ls-files", "--others", "-z", "--",
 		".software-standards/rules", ".agents/skills",
 	)
 	if err != nil {
@@ -297,12 +341,12 @@ func (r *Repository) verifyStableSnapshot(ctx context.Context, operation string)
 // Git runs Git with the repository fixed by -C and returns stdout. Arguments
 // are passed directly to exec.Command; repository paths never enter a shell.
 func (r *Repository) Git(ctx context.Context, args ...string) ([]byte, error) {
-	return runGitInput(ctx, r.gitPath, r.root, nil, args...)
+	return runRepositoryGit(ctx, r.gitPath, r.root, nil, args...)
 }
 
 // GitWithInput runs a read-only Git plumbing command with explicit stdin.
 func (r *Repository) GitWithInput(ctx context.Context, input []byte, args ...string) ([]byte, error) {
-	return runGitInput(ctx, r.gitPath, r.root, input, args...)
+	return runRepositoryGit(ctx, r.gitPath, r.root, input, args...)
 }
 
 // ReadBaselineFile returns a tracked regular file from the pinned commit.
@@ -414,7 +458,22 @@ func runGitInput(ctx context.Context, gitPath, dir string, input []byte, args ..
 		if message == "" {
 			message = err.Error()
 		}
-		return nil, fmt.Errorf("git %s: %s", strings.Join(args, " "), message)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf(
+				"%w: git %s: %s: %w",
+				ErrGitOperation,
+				strings.Join(args, " "),
+				message,
+				ctxErr,
+			)
+		}
+		return nil, fmt.Errorf(
+			"%w: git %s: %s: %w",
+			ErrGitOperation,
+			strings.Join(args, " "),
+			message,
+			err,
+		)
 	}
 	return stdout.Bytes(), nil
 }
