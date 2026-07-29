@@ -23,10 +23,15 @@ import (
 )
 
 const (
-	SchemaVersionV1 = "ssb.dev/rule/v1"
-	SchemaVersionV2 = "ssb.dev/rule/v2"
-	ScoreMethod     = "ssb-score-v1"
-	topicRecovery   = "use one primary topic: architecture, compatibility, compliance, correctness, developer-experience, documentation, maintainability, operability, performance, quality, reliability, security, or testability"
+	ReportSchema       = "ssb.dev/report/v1"
+	SchemaVersionV1    = "ssb.dev/rule/v1"
+	SchemaVersionV2    = "ssb.dev/rule/v2"
+	RuleSchema         = SchemaVersionV2
+	VerificationSchema = "ssb.dev/verification/v1"
+	AutomationSchema   = "ssb.dev/automation/v1"
+	ScoreMethod        = "ssb-score-v1"
+	UtilityMethod      = "ssb-utility-v1"
+	topicRecovery      = "use one primary topic: architecture, compatibility, compliance, correctness, developer-experience, documentation, maintainability, operability, performance, quality, reliability, security, or testability"
 )
 
 var (
@@ -90,10 +95,101 @@ type ScoreFactors struct {
 
 // Evidence points to an exact line range in the baseline commit.
 type Evidence struct {
+	Ref           string `yaml:"ref,omitempty" json:"ref,omitempty"`
+	Role          string `yaml:"role,omitempty" json:"role,omitempty"`
 	Path          string `yaml:"path" json:"path"`
 	Lines         string `yaml:"lines" json:"lines"`
 	ExcerptSHA256 string `yaml:"excerpt_sha256" json:"excerpt_sha256"`
 	Authoritative bool   `yaml:"authoritative,omitempty" json:"authoritative,omitempty"`
+}
+
+// Utility records the transparent ssb-utility-v1 ranking arithmetic owned by
+// the report manifest.
+type Utility struct {
+	Method  string         `yaml:"method" json:"method"`
+	Total   int            `yaml:"total" json:"total"`
+	Factors UtilityFactors `yaml:"factors" json:"factors"`
+}
+
+// UtilityFactors are the bounded ssb-utility-v1 inputs.
+type UtilityFactors struct {
+	MarginalValue   int `yaml:"marginal_value" json:"marginal_value"`
+	RiskReduction   int `yaml:"risk_reduction" json:"risk_reduction"`
+	Actionability   int `yaml:"actionability" json:"actionability"`
+	Applicability   int `yaml:"applicability" json:"applicability"`
+	EarlierFeedback int `yaml:"earlier_feedback" json:"earlier_feedback"`
+}
+
+// InventoryLimits and the following inventory types preserve the complete
+// ssb-inventory-v2 coverage accounting inside report.md without coupling the
+// report schema to inventory's JSON-only representation.
+type InventoryLimits struct {
+	MaxCandidateFiles int   `yaml:"max_candidate_files" json:"max_candidate_files"`
+	MaxCandidateBytes int64 `yaml:"max_candidate_bytes" json:"max_candidate_bytes"`
+	MaxFileBytes      int64 `yaml:"max_file_bytes" json:"max_file_bytes"`
+}
+
+type InventoryExclusions struct {
+	Binary     int `yaml:"binary" json:"binary"`
+	Generated  int `yaml:"generated" json:"generated"`
+	Oversized  int `yaml:"oversized" json:"oversized"`
+	SecretLike int `yaml:"secret_like" json:"secret_like"`
+	Symlink    int `yaml:"symlink" json:"symlink"`
+	Submodule  int `yaml:"submodule" json:"submodule"`
+	VendorTree int `yaml:"vendor_or_generated_tree" json:"vendor_or_generated_tree"`
+	NonRegular int `yaml:"non_regular" json:"non_regular"`
+}
+
+type InventoryFile struct {
+	Path     string `yaml:"path" json:"path"`
+	BlobOID  string `yaml:"blob_oid" json:"blob_oid"`
+	Bytes    int64  `yaml:"bytes" json:"bytes"`
+	Lines    int    `yaml:"lines" json:"lines"`
+	Language string `yaml:"language,omitempty" json:"language,omitempty"`
+	SHA256   string `yaml:"sha256" json:"sha256"`
+}
+
+type ReportInventory struct {
+	SchemaVersion           int                 `yaml:"schema_version" json:"schema_version"`
+	InventoryVersion        string              `yaml:"inventory_version" json:"inventory_version"`
+	BaselineCommit          string              `yaml:"baseline_commit" json:"baseline_commit"`
+	Limits                  InventoryLimits     `yaml:"limits" json:"limits"`
+	CandidateFiles          int                 `yaml:"candidate_files" json:"candidate_files"`
+	CandidateBytes          int64               `yaml:"candidate_bytes" json:"candidate_bytes"`
+	ScannedFiles            int                 `yaml:"scanned_files" json:"scanned_files"`
+	ScannedBytes            int64               `yaml:"scanned_bytes" json:"scanned_bytes"`
+	IndexedFiles            int                 `yaml:"indexed_files" json:"indexed_files"`
+	IndexedBytes            int64               `yaml:"indexed_bytes" json:"indexed_bytes"`
+	Files                   []InventoryFile     `yaml:"files" json:"files"`
+	Excluded                InventoryExclusions `yaml:"excluded" json:"excluded"`
+	Truncated               bool                `yaml:"truncated" json:"truncated"`
+	TruncationReason        string              `yaml:"truncation_reason,omitempty" json:"truncation_reason,omitempty"`
+	RemainingCandidateFiles int                 `yaml:"remaining_candidate_files" json:"remaining_candidate_files"`
+	RemainingCandidateBytes int64               `yaml:"remaining_candidate_bytes" json:"remaining_candidate_bytes"`
+}
+
+// ManifestArtifact is one accepted output indexed by report.md.
+type ManifestArtifact struct {
+	ID                 string     `yaml:"id" json:"id"`
+	Kind               string     `yaml:"kind" json:"kind"`
+	Path               string     `yaml:"path" json:"path"`
+	Confidence         string     `yaml:"confidence" json:"confidence"`
+	Utility            Utility    `yaml:"utility" json:"utility"`
+	RelatedArtifactIDs []string   `yaml:"related_artifacts,omitempty" json:"related_artifacts,omitempty"`
+	Category           string     `yaml:"category,omitempty" json:"category,omitempty"`
+	Lenses             []Lens     `yaml:"lenses,omitempty" json:"lenses,omitempty"`
+	Scopes             []string   `yaml:"scopes,omitempty" json:"scopes,omitempty"`
+	Derivation         string     `yaml:"derivation,omitempty" json:"derivation,omitempty"`
+	Evidence           []Evidence `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+}
+
+// Report is the accepted artifact index and run narrative.
+type Report struct {
+	Schema         string             `yaml:"schema" json:"schema"`
+	BaselineCommit string             `yaml:"baseline_commit" json:"baseline_commit"`
+	Inventory      ReportInventory    `yaml:"inventory" json:"inventory"`
+	Artifacts      []ManifestArtifact `yaml:"artifacts" json:"artifacts"`
+	Body           string             `yaml:"-" json:"body"`
 }
 
 // Lens identifies one context dimension used to select a rule. Values within
@@ -118,10 +214,12 @@ type Rule struct {
 	Schema          string       `yaml:"schema" json:"schema"`
 	ID              string       `yaml:"id" json:"id"`
 	Title           string       `yaml:"title" json:"title"`
+	Category        string       `yaml:"category,omitempty" json:"category,omitempty"`
 	Topic           string       `yaml:"topic" json:"topic"`
 	Lenses          []Lens       `yaml:"lenses,omitempty" json:"lenses,omitempty"`
 	Directive       string       `yaml:"directive,omitempty" json:"directive,omitempty"`
 	Scopes          []string     `yaml:"scopes" json:"scopes"`
+	Derivation      string       `yaml:"derivation,omitempty" json:"derivation,omitempty"`
 	Classification  string       `yaml:"classification" json:"classification"`
 	Importance      string       `yaml:"importance" json:"importance"`
 	Score           Score        `yaml:"score" json:"score"`
@@ -139,19 +237,65 @@ type Rule struct {
 type Skill struct {
 	ID          string `json:"id"`
 	Description string `json:"description"`
+	Category    string `json:"category,omitempty"`
 	Topic       string `json:"topic"`
 	SourcePath  string `json:"source_path"`
 	Body        string `json:"body"`
 }
 
+// VerificationStep is one existing command in a recorded recipe.
+type VerificationStep struct {
+	Run            string `yaml:"run" json:"run"`
+	SourceEvidence string `yaml:"source_evidence" json:"source_evidence"`
+	ExpectedResult string `yaml:"expected_result" json:"expected_result"`
+}
+
+// VerificationRecipe records an ordered, deliberately invoked existing
+// command sequence. SSB validates but never executes it.
+type VerificationRecipe struct {
+	Schema     string             `yaml:"schema" json:"schema"`
+	ID         string             `yaml:"id" json:"id"`
+	Title      string             `yaml:"title" json:"title"`
+	Category   string             `yaml:"category" json:"category"`
+	Lenses     []Lens             `yaml:"lenses" json:"lenses"`
+	Scopes     []string           `yaml:"scopes" json:"scopes"`
+	Derivation string             `yaml:"derivation" json:"derivation"`
+	Evidence   []Evidence         `yaml:"evidence" json:"evidence"`
+	When       string             `yaml:"when" json:"when"`
+	Steps      []VerificationStep `yaml:"steps" json:"steps"`
+	SourcePath string             `yaml:"-" json:"source_path"`
+}
+
+// AutomationProposal is a reviewable checker design, not adopted behavior.
+type AutomationProposal struct {
+	Schema          string     `yaml:"schema" json:"schema"`
+	ID              string     `yaml:"id" json:"id"`
+	Title           string     `yaml:"title" json:"title"`
+	Category        string     `yaml:"category" json:"category"`
+	Lenses          []Lens     `yaml:"lenses" json:"lenses"`
+	Scopes          []string   `yaml:"scopes" json:"scopes"`
+	Derivation      string     `yaml:"derivation" json:"derivation"`
+	Evidence        []Evidence `yaml:"evidence" json:"evidence"`
+	Condition       string     `yaml:"condition" json:"condition"`
+	SuggestedCheck  string     `yaml:"suggested_check" json:"suggested_check"`
+	Trigger         string     `yaml:"trigger" json:"trigger"`
+	ExpectedSuccess string     `yaml:"expected_success" json:"expected_success"`
+	ExpectedFailure string     `yaml:"expected_failure" json:"expected_failure"`
+	SourcePath      string     `yaml:"-" json:"source_path"`
+}
+
 // Pack contains parsed artifacts even when diagnostics are returned. Consumers
 // must not render or create an ADR unless diagnostics is empty.
 type Pack struct {
-	BaselineCommit string  `json:"baseline_commit"`
-	AssessmentPath string  `json:"assessment_path"`
-	Assessment     string  `json:"assessment"`
-	Rules          []Rule  `json:"rules"`
-	Skills         []Skill `json:"skills"`
+	BaselineCommit string               `json:"baseline_commit"`
+	ReportPath     string               `json:"report_path,omitempty"`
+	Report         Report               `json:"report,omitempty"`
+	AssessmentPath string               `json:"assessment_path"`
+	Assessment     string               `json:"assessment"`
+	Rules          []Rule               `json:"rules"`
+	Recipes        []VerificationRecipe `json:"verification_recipes,omitempty"`
+	Skills         []Skill              `json:"skills"`
+	Automations    []AutomationProposal `json:"automation_proposals,omitempty"`
 }
 
 type skillFrontmatter struct {
@@ -165,6 +309,9 @@ type skillFrontmatter struct {
 // Validate parses the current editable pack and verifies all evidence against
 // the repository's pinned HEAD commit. Validation never writes files.
 func Validate(ctx context.Context, repo *workspace.Repository) (Pack, []Diagnostic, error) {
+	if reportExists(repo.Root()) {
+		return validateActionablePack(ctx, repo, false)
+	}
 	return validatePack(ctx, repo, false)
 }
 
@@ -173,7 +320,580 @@ func Validate(ctx context.Context, repo *workspace.Repository) (Pack, []Diagnost
 // review-aware post-application rendering and ADR creation; ordinary editable
 // pack validation remains pinned to the repository's current HEAD.
 func ValidateRetainedPack(ctx context.Context, repo *workspace.Repository) (Pack, []Diagnostic, error) {
+	if reportExists(repo.Root()) {
+		return validateActionablePack(ctx, repo, true)
+	}
 	return validatePack(ctx, repo, true)
+}
+
+func reportExists(root string) bool {
+	_, err := os.Lstat(filepath.Join(root, ".software-standards", "report.md"))
+	return err == nil
+}
+
+type semanticRuleSource struct {
+	Schema     string     `yaml:"schema"`
+	ID         string     `yaml:"id"`
+	Title      string     `yaml:"title"`
+	Category   string     `yaml:"category"`
+	Lenses     []Lens     `yaml:"lenses"`
+	Directive  string     `yaml:"directive"`
+	Scopes     []string   `yaml:"scopes"`
+	Derivation string     `yaml:"derivation"`
+	Evidence   []Evidence `yaml:"evidence"`
+}
+
+func validateActionablePack(
+	ctx context.Context,
+	repo *workspace.Repository,
+	retained bool,
+) (Pack, []Diagnostic, error) {
+	const reportPath = ".software-standards/report.md"
+	pack := Pack{
+		BaselineCommit: repo.Baseline(),
+		ReportPath:     reportPath,
+		Rules:          make([]Rule, 0),
+		Recipes:        make([]VerificationRecipe, 0),
+		Skills:         make([]Skill, 0),
+		Automations:    make([]AutomationProposal, 0),
+	}
+	diagnostics := make([]Diagnostic, 0)
+
+	packRootPath := filepath.Join(repo.Root(), ".software-standards")
+	info, err := os.Lstat(packRootPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			diagnostics = append(diagnostics, diagnostic(
+				".software-standards",
+				"file",
+				".software-standards does not exist",
+				"create .software-standards/report.md and rerun ssb validate",
+			))
+			return pack, diagnostics, nil
+		}
+		return Pack{}, nil, fmt.Errorf("inspect .software-standards: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		diagnostics = append(diagnostics, diagnostic(
+			".software-standards",
+			"file",
+			".software-standards must be a real directory, not a symlink",
+			"move the editable pack inside the repository",
+		))
+		return pack, diagnostics, nil
+	}
+
+	reportBytes, reportDiagnostics, err := readRequiredRegularFile(
+		filepath.Join(repo.Root(), filepath.FromSlash(reportPath)),
+		reportPath,
+	)
+	if err != nil {
+		return Pack{}, nil, err
+	}
+	diagnostics = append(diagnostics, reportDiagnostics...)
+	if len(reportBytes) == 0 {
+		return pack, diagnostics, nil
+	}
+	frontmatter, body, splitErr := splitFrontmatter(reportBytes)
+	if splitErr != nil {
+		diagnostics = append(diagnostics, diagnostic(
+			reportPath,
+			"frontmatter",
+			splitErr.Error(),
+			"add strict YAML frontmatter between --- markers",
+		))
+		return pack, diagnostics, nil
+	}
+	if err := yaml.Load(
+		frontmatter,
+		&pack.Report,
+		yaml.WithKnownFields(),
+		yaml.WithUniqueKeys(),
+	); err != nil {
+		diagnostics = append(diagnostics, yamlDiagnostic(
+			reportPath,
+			err,
+			"remove unknown or duplicate fields and use the ssb.dev/report/v1 schema",
+		))
+		return pack, diagnostics, nil
+	}
+	pack.Report.Body = string(body)
+	pack.BaselineCommit = pack.Report.BaselineCommit
+	diagnostics = append(diagnostics, validateReport(repo, pack.Report, retained)...)
+	if strings.TrimSpace(pack.Report.Body) == "" {
+		diagnostics = append(diagnostics, diagnostic(
+			reportPath,
+			"body",
+			"report narrative must not be empty",
+			"record run-wide limitations and accepted-output summaries",
+		))
+	}
+
+	evidenceRepo := repo
+	if retained {
+		historical, historicalErr := repo.AtCommit(ctx, pack.Report.BaselineCommit)
+		if historicalErr != nil {
+			if !errors.Is(historicalErr, workspace.ErrHistoricalCommit) {
+				return Pack{}, nil, historicalErr
+			}
+			diagnostics = append(diagnostics, diagnostic(
+				reportPath,
+				"baseline_commit",
+				fmt.Sprintf(
+					"recorded baseline_commit %q is not a reachable ancestor; artifact evidence cannot be verified: %v",
+					pack.Report.BaselineCommit,
+					historicalErr,
+				),
+				"restore the recorded baseline to current repository history or update this pack through a new approved review",
+			))
+			return pack, diagnostics, nil
+		}
+		evidenceRepo = historical
+	}
+
+	entriesByID := make(map[string]ManifestArtifact, len(pack.Report.Artifacts))
+	entriesByPath := make(map[string]ManifestArtifact, len(pack.Report.Artifacts))
+	for index, artifact := range pack.Report.Artifacts {
+		field := fmt.Sprintf("artifacts[%d]", index)
+		diagnostics = append(diagnostics, validateManifestArtifact(reportPath, field, artifact)...)
+		if prior, exists := entriesByID[artifact.ID]; exists {
+			diagnostics = append(diagnostics, diagnostic(
+				reportPath,
+				field+".id",
+				fmt.Sprintf("duplicate artifact id %q also used by %s", artifact.ID, prior.Path),
+				"give every accepted artifact a globally unique stable id",
+			))
+		} else {
+			entriesByID[artifact.ID] = artifact
+		}
+		if prior, exists := entriesByPath[artifact.Path]; exists {
+			diagnostics = append(diagnostics, diagnostic(
+				reportPath,
+				field+".path",
+				fmt.Sprintf("duplicate artifact path %q also used by %s", artifact.Path, prior.ID),
+				"list each canonical artifact path once",
+			))
+		} else {
+			entriesByPath[artifact.Path] = artifact
+		}
+	}
+
+	for _, artifact := range pack.Report.Artifacts {
+		switch artifact.Kind {
+		case "rule":
+			rule, artifactDiagnostics, loadErr := loadActionableRule(
+				ctx,
+				evidenceRepo,
+				repo.Root(),
+				artifact,
+			)
+			if loadErr != nil {
+				return Pack{}, nil, loadErr
+			}
+			diagnostics = append(diagnostics, artifactDiagnostics...)
+			if rule.ID != "" {
+				pack.Rules = append(pack.Rules, rule)
+			}
+		case "verification", "skill", "automation":
+			diagnostics = append(diagnostics, diagnostic(
+				reportPath,
+				"artifacts",
+				fmt.Sprintf("artifact kind %q is not supported by this validation slice", artifact.Kind),
+				"complete the corresponding actionable artifact contract before validation",
+			))
+		}
+	}
+
+	for _, artifact := range pack.Report.Artifacts {
+		seenRelated := make(map[string]struct{}, len(artifact.RelatedArtifactIDs))
+		for _, relatedID := range artifact.RelatedArtifactIDs {
+			if relatedID == artifact.ID {
+				diagnostics = append(diagnostics, diagnostic(
+					reportPath,
+					"related_artifacts",
+					fmt.Sprintf("artifact %s cannot relate to itself", artifact.ID),
+					"remove the self relationship",
+				))
+			}
+			if _, duplicate := seenRelated[relatedID]; duplicate {
+				diagnostics = append(diagnostics, diagnostic(
+					reportPath,
+					"related_artifacts",
+					fmt.Sprintf("artifact %s repeats relationship %s", artifact.ID, relatedID),
+					"list each related artifact once",
+				))
+			}
+			seenRelated[relatedID] = struct{}{}
+			if _, exists := entriesByID[relatedID]; !exists {
+				diagnostics = append(diagnostics, diagnostic(
+					reportPath,
+					"related_artifacts",
+					fmt.Sprintf("artifact %s references missing related artifact %s", artifact.ID, relatedID),
+					"restore the related artifact or remove the dangling relationship",
+				))
+			}
+		}
+	}
+
+	unlisted, scanErr := unlistedNativeArtifacts(repo.Root(), entriesByPath)
+	if scanErr != nil {
+		return Pack{}, nil, scanErr
+	}
+	for _, relative := range unlisted {
+		diagnostics = append(diagnostics, diagnostic(
+			relative,
+			"file",
+			relative+" is not listed in .software-standards/report.md",
+			"add the accepted artifact to the report or remove the unaccepted file",
+		))
+	}
+	sort.Slice(pack.Rules, func(i, j int) bool { return pack.Rules[i].ID < pack.Rules[j].ID })
+	return pack, diagnostics, nil
+}
+
+func validateReport(repo *workspace.Repository, report Report, retained bool) []Diagnostic {
+	const reportPath = ".software-standards/report.md"
+	diagnostics := make([]Diagnostic, 0)
+	add := func(field, message, recovery string) {
+		diagnostics = append(diagnostics, diagnostic(reportPath, field, message, recovery))
+	}
+	if report.Schema != ReportSchema {
+		add("schema", "schema must be "+ReportSchema, "update the report schema value")
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(report.BaselineCommit) {
+		add("baseline_commit", "baseline_commit must be a 40-character lowercase Git object id", "copy the exact commit from ssb inspect")
+	} else if !retained && report.BaselineCommit != repo.Baseline() {
+		add(
+			"baseline_commit",
+			fmt.Sprintf("baseline_commit must equal current HEAD %s", repo.Baseline()),
+			"reinspect the new commit and refresh the report and every evidence hash",
+		)
+	}
+	inventory := report.Inventory
+	if inventory.SchemaVersion != 2 || inventory.InventoryVersion != "ssb-inventory-v2" {
+		add("inventory", "inventory must preserve schema 2 ssb-inventory-v2 accounting", "copy the complete successful ssb inspect inventory")
+	}
+	if inventory.BaselineCommit != report.BaselineCommit {
+		add("inventory.baseline_commit", "inventory baseline_commit must match the report baseline_commit", "copy one complete inventory for the report baseline")
+	}
+	if inventory.Truncated {
+		add("inventory.truncated", "report inventory coverage must be complete", "rerun inspection with sufficient limits before producing artifacts")
+	}
+	if inventory.Limits.MaxCandidateFiles <= 0 ||
+		inventory.Limits.MaxCandidateBytes <= 0 ||
+		inventory.Limits.MaxFileBytes <= 0 {
+		add("inventory.limits", "inventory limits must be positive", "copy the exact limits from ssb inspect")
+	}
+	if inventory.CandidateFiles != inventory.ScannedFiles+inventory.RemainingCandidateFiles ||
+		inventory.CandidateBytes != inventory.ScannedBytes+inventory.RemainingCandidateBytes {
+		add("inventory", "candidate, scanned, and remaining inventory accounting is inconsistent", "copy the complete inventory without editing its counts")
+	}
+	if inventory.IndexedFiles != len(inventory.Files) {
+		add("inventory.indexed_files", "indexed_files must equal the number of inventory file records", "copy every indexed file record from ssb inspect")
+	}
+	var indexedBytes int64
+	for _, file := range inventory.Files {
+		indexedBytes += file.Bytes
+	}
+	if inventory.IndexedBytes != indexedBytes {
+		add("inventory.indexed_bytes", "indexed_bytes must equal the sum of inventory file bytes", "copy the complete inventory without editing its byte counts")
+	}
+	return diagnostics
+}
+
+func validateManifestArtifact(sourcePath, field string, artifact ManifestArtifact) []Diagnostic {
+	diagnostics := make([]Diagnostic, 0)
+	add := func(suffix, message, recovery string) {
+		diagnostics = append(diagnostics, diagnostic(sourcePath, field+suffix, message, recovery))
+	}
+	if !stableIDPattern.MatchString(artifact.ID) {
+		add(".id", "artifact id must be lower-case kebab-case", "choose a stable id such as verify-test-migrations")
+	}
+	expectedPath := ""
+	switch artifact.Kind {
+	case "rule":
+		expectedPath = path.Join(".software-standards/rules", artifact.ID+".md")
+	case "verification":
+		expectedPath = path.Join(".software-standards/verification", artifact.ID+".yaml")
+	case "skill":
+		expectedPath = path.Join(".agents/skills", artifact.ID, "SKILL.md")
+	case "automation":
+		expectedPath = path.Join(".software-standards/automation", artifact.ID+".yaml")
+	default:
+		add(".kind", fmt.Sprintf("artifact kind %q is not supported", artifact.Kind), "use rule, verification, skill, or automation")
+	}
+	if expectedPath != "" && artifact.Path != expectedPath {
+		add(
+			".path",
+			fmt.Sprintf("%s artifact path must be %s", artifact.Kind, expectedPath),
+			"move the artifact to its canonical path or correct the manifest entry",
+		)
+	}
+	if artifact.Confidence != "medium" && artifact.Confidence != "high" {
+		add(
+			".confidence",
+			"accepted artifact confidence must be medium or high",
+			"remove the candidate instead of preserving a low-confidence artifact",
+		)
+	}
+	diagnostics = append(diagnostics, validateUtility(sourcePath, field+".utility", artifact.Utility)...)
+	if artifact.Kind != "skill" &&
+		(artifact.Category != "" || len(artifact.Lenses) != 0 ||
+			len(artifact.Scopes) != 0 || artifact.Derivation != "" ||
+			len(artifact.Evidence) != 0) {
+		add("", "native artifact provenance belongs in its source file", "remove category, lenses, scopes, derivation, and evidence from this manifest entry")
+	}
+	return diagnostics
+}
+
+func validateUtility(sourcePath, field string, utility Utility) []Diagnostic {
+	diagnostics := make([]Diagnostic, 0)
+	add := func(suffix, message, recovery string) {
+		diagnostics = append(diagnostics, diagnostic(sourcePath, field+suffix, message, recovery))
+	}
+	if utility.Method != UtilityMethod {
+		add(".method", "utility method must be "+UtilityMethod, "use the versioned actionable-artifact utility method")
+	}
+	factors := []struct {
+		name  string
+		value int
+		max   int
+	}{
+		{"marginal_value", utility.Factors.MarginalValue, 30},
+		{"risk_reduction", utility.Factors.RiskReduction, 25},
+		{"actionability", utility.Factors.Actionability, 20},
+		{"applicability", utility.Factors.Applicability, 15},
+		{"earlier_feedback", utility.Factors.EarlierFeedback, 10},
+	}
+	sum := 0
+	for _, factor := range factors {
+		sum += factor.value
+		if factor.value < 0 || factor.value > factor.max {
+			add(
+				".factors."+factor.name,
+				fmt.Sprintf("%s utility %d is outside 0-%d", factor.name, factor.value, factor.max),
+				"correct the factor within its documented range",
+			)
+		}
+	}
+	if utility.Total != sum {
+		add(".total", fmt.Sprintf("utility total %d does not equal factor sum %d", utility.Total, sum), "recalculate the transparent utility score")
+	}
+	if utility.Total < 45 {
+		add(
+			".total",
+			fmt.Sprintf("utility %d is below the 45-point acceptance threshold", utility.Total),
+			"remove the candidate instead of preserving a rejected artifact",
+		)
+	} else if utility.Total > 100 {
+		add(".total", fmt.Sprintf("utility %d is above 100", utility.Total), "correct the factor arithmetic")
+	}
+	return diagnostics
+}
+
+func loadActionableRule(
+	ctx context.Context,
+	evidenceRepo *workspace.Repository,
+	root string,
+	manifest ManifestArtifact,
+) (Rule, []Diagnostic, error) {
+	data, diagnostics, err := readRequiredRegularFile(
+		filepath.Join(root, filepath.FromSlash(manifest.Path)),
+		manifest.Path,
+	)
+	if err != nil || len(data) == 0 {
+		if len(data) == 0 && len(diagnostics) != 0 {
+			for index := range diagnostics {
+				diagnostics[index].Recovery = "remove its manifest entry or restore the artifact at the canonical path"
+			}
+		}
+		return Rule{}, diagnostics, err
+	}
+	frontmatter, body, splitErr := splitFrontmatter(data)
+	if splitErr != nil {
+		return Rule{}, append(diagnostics, diagnostic(
+			manifest.Path,
+			"frontmatter",
+			splitErr.Error(),
+			"add strict YAML frontmatter between --- markers",
+		)), nil
+	}
+	var source semanticRuleSource
+	if err := yaml.Load(frontmatter, &source, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+		return Rule{}, append(diagnostics, yamlDiagnostic(
+			manifest.Path,
+			err,
+			"remove old proof-oriented fields and use the current ssb.dev/rule/v2 schema",
+		)), nil
+	}
+	rule := Rule{
+		Schema:     source.Schema,
+		ID:         source.ID,
+		Title:      source.Title,
+		Category:   source.Category,
+		Lenses:     source.Lenses,
+		Directive:  source.Directive,
+		Scopes:     source.Scopes,
+		Derivation: source.Derivation,
+		Evidence:   source.Evidence,
+		SourcePath: manifest.Path,
+		Body:       string(body),
+		Confidence: manifest.Confidence,
+	}
+	diagnostics = append(diagnostics, validateActionableRule(ctx, evidenceRepo, rule, manifest)...)
+	return rule, diagnostics, nil
+}
+
+func validateActionableRule(
+	ctx context.Context,
+	repo *workspace.Repository,
+	rule Rule,
+	manifest ManifestArtifact,
+) []Diagnostic {
+	diagnostics := make([]Diagnostic, 0)
+	add := func(field, message, recovery string) {
+		diagnostics = append(diagnostics, diagnostic(rule.SourcePath, field, message, recovery))
+	}
+	if rule.Schema != RuleSchema {
+		add("schema", "schema must be "+RuleSchema, "rewrite this pre-release rule using the current semantic rule contract")
+	}
+	if rule.ID != manifest.ID {
+		add("id", fmt.Sprintf("rule id %q must match manifest id %q", rule.ID, manifest.ID), "align the rule id, filename, and report entry")
+	}
+	if strings.TrimSpace(rule.Title) == "" {
+		add("title", "title is required", "add a concise developer-facing title")
+	}
+	if _, supported := supportedTopics[rule.Category]; rule.Category == "" || !supported {
+		add("category", fmt.Sprintf("category %q is not supported", rule.Category), strings.ReplaceAll(topicRecovery, "topic", "category"))
+	}
+	if strings.TrimSpace(rule.Body) == "" {
+		add("body", "rule body is required", "write the actionable semantic obligation")
+	}
+	diagnostics = append(diagnostics, validateRuleV2Activation(rule)...)
+	diagnostics = append(diagnostics, validateScopes(rule.SourcePath, rule.Scopes)...)
+	diagnostics = append(diagnostics, validateDerivationEvidence(ctx, repo, rule.SourcePath, rule.Derivation, rule.Evidence)...)
+	return diagnostics
+}
+
+func validateScopes(sourcePath string, scopes []string) []Diagnostic {
+	diagnostics := make([]Diagnostic, 0)
+	if len(scopes) == 0 {
+		diagnostics = append(diagnostics, diagnostic(sourcePath, "scopes", "at least one path scope is required", "add one or more repository-relative glob scopes"))
+	}
+	for index, scope := range scopes {
+		if unsafeScope(scope) {
+			diagnostics = append(diagnostics, diagnostic(
+				sourcePath,
+				fmt.Sprintf("scopes[%d]", index),
+				fmt.Sprintf("unsafe or empty scope %q", scope),
+				"use a repository-relative glob without path traversal",
+			))
+		}
+	}
+	return diagnostics
+}
+
+func validateDerivationEvidence(
+	ctx context.Context,
+	repo *workspace.Repository,
+	sourcePath string,
+	derivation string,
+	evidence []Evidence,
+) []Diagnostic {
+	diagnostics := make([]Diagnostic, 0)
+	add := func(field, message, recovery string) {
+		diagnostics = append(diagnostics, diagnostic(sourcePath, field, message, recovery))
+	}
+	if derivation != "extracted" && derivation != "inferred" {
+		add("derivation", "derivation must be extracted or inferred", "record how the artifact was derived from repository evidence")
+	}
+	if len(evidence) == 0 {
+		add("evidence", "at least one exact evidence citation is required", "cite eligible baseline lines and their excerpt hash")
+	}
+	seenLocations := make(map[string]struct{}, len(evidence))
+	demonstrates := 0
+	demonstratedFiles := make(map[string]struct{})
+	hasAuthority := false
+	for index, item := range evidence {
+		field := fmt.Sprintf("evidence[%d]", index)
+		switch item.Role {
+		case "declares", "enforces":
+			hasAuthority = true
+		case "demonstrates":
+			demonstrates++
+			demonstratedFiles[item.Path] = struct{}{}
+		default:
+			add(field+".role", fmt.Sprintf("evidence role %q is not supported", item.Role), "use declares, demonstrates, or enforces")
+		}
+		diagnostics = append(diagnostics, validateEvidence(ctx, repo, sourcePath, field, item)...)
+		location := item.Path + "\x00" + item.Lines
+		if _, duplicate := seenLocations[location]; duplicate {
+			add("evidence", fmt.Sprintf("duplicate evidence location %s:%s", item.Path, item.Lines), "cite each distinct occurrence once")
+		}
+		seenLocations[location] = struct{}{}
+	}
+	if derivation == "extracted" && !hasAuthority {
+		add("evidence", "extracted artifacts require at least one declares or enforces citation", "cite the repository-maintained obligation or active enforcement mechanism")
+	}
+	if derivation == "inferred" && (demonstrates < 3 || len(demonstratedFiles) < 2) {
+		add("evidence", "inferred artifacts require three demonstrates citations across at least two files", "add consistent implementation occurrences or remove the candidate")
+	}
+	return diagnostics
+}
+
+func yamlDiagnostic(sourcePath string, err error, recovery string) Diagnostic {
+	line := 1
+	var loadError *yaml.LoadError
+	if errors.As(err, &loadError) && loadError.Mark.Line > 0 {
+		line = loadError.Mark.Line + 1
+	}
+	return Diagnostic{
+		Path:     sourcePath,
+		Line:     line,
+		Field:    "frontmatter",
+		Message:  err.Error(),
+		Recovery: recovery,
+	}
+}
+
+func unlistedNativeArtifacts(root string, listed map[string]ManifestArtifact) ([]string, error) {
+	directories := []struct {
+		relative string
+		suffix   string
+	}{
+		{relative: ".software-standards/rules", suffix: ".md"},
+		{relative: ".software-standards/verification", suffix: ".yaml"},
+		{relative: ".software-standards/automation", suffix: ".yaml"},
+	}
+	unlisted := make([]string, 0)
+	for _, directory := range directories {
+		absolute := filepath.Join(root, filepath.FromSlash(directory.relative))
+		info, err := os.Lstat(absolute)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("inspect artifact directory %s: %w", directory.relative, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return nil, fmt.Errorf("artifact directory %s must be a real directory", directory.relative)
+		}
+		entries, err := os.ReadDir(absolute)
+		if err != nil {
+			return nil, fmt.Errorf("read artifact directory %s: %w", directory.relative, err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), directory.suffix) {
+				continue
+			}
+			relative := path.Join(directory.relative, entry.Name())
+			if _, exists := listed[relative]; !exists {
+				unlisted = append(unlisted, relative)
+			}
+		}
+	}
+	sort.Strings(unlisted)
+	return unlisted, nil
 }
 
 func validatePack(
