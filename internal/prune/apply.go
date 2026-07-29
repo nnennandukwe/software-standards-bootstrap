@@ -487,6 +487,7 @@ func validateCandidate(
 	repo *workspace.Repository,
 	target CandidateRef,
 	content []byte,
+	manifestByID map[string]rulepack.ManifestArtifact,
 ) error {
 	switch target.Kind {
 	case ArtifactRule:
@@ -495,9 +496,21 @@ func validateCandidate(
 			return fmt.Errorf("candidate %s violates the rule contract: %s", target.SourcePath, diagnostics[0].Message)
 		}
 	case ArtifactSkill:
-		_, diagnostics := rulepack.ValidateCandidateSkill(target.TargetPath, target.ID, content)
+		skill, diagnostics := rulepack.ValidateCandidateSkill(target.TargetPath, target.ID, content)
 		if len(diagnostics) != 0 {
 			return fmt.Errorf("candidate %s violates the Agent Skill contract: %s", target.SourcePath, diagnostics[0].Message)
+		}
+		manifest, exists := manifestByID[target.ID]
+		if !exists || manifest.Kind != ArtifactSkill {
+			return fmt.Errorf("candidate %s has no matching skill entry in report.md", target.SourcePath)
+		}
+		if skill.Category != manifest.Category {
+			return fmt.Errorf(
+				"candidate %s changes metadata.category from %s to %s; create a new actionable pack so report.md can record fresh skill provenance",
+				target.SourcePath,
+				manifest.Category,
+				skill.Category,
+			)
 		}
 	default:
 		return fmt.Errorf("candidate %s has unsupported kind %s", target.SourcePath, target.Kind)
@@ -516,6 +529,26 @@ func buildCandidateOperations(
 	_, reportContent, err := actionableReportChange(review, approval)
 	if err != nil {
 		return nil, err
+	}
+	manifestByID := make(map[string]rulepack.ManifestArtifact)
+	needsSkillManifest := false
+	for _, candidate := range candidates {
+		if candidate.target != nil && candidate.target.Kind == ArtifactSkill {
+			needsSkillManifest = true
+			break
+		}
+	}
+	if needsSkillManifest {
+		pack, diagnostics, err := rulepack.ValidateRetainedPack(ctx, repo)
+		if err != nil {
+			return nil, fmt.Errorf("validate retained actionable pack: %w", err)
+		}
+		if len(diagnostics) != 0 {
+			return nil, fmt.Errorf("retained actionable pack is invalid: %s", diagnostics[0].Message)
+		}
+		for _, artifact := range pack.Report.Artifacts {
+			manifestByID[artifact.ID] = artifact
+		}
 	}
 	operations := make(map[string]operation, len(plan.Changes))
 	for _, change := range plan.Changes {
@@ -546,7 +579,7 @@ func buildCandidateOperations(
 				)
 			}
 			if candidate.target != nil {
-				if err := validateCandidate(ctx, repo, *candidate.target, content); err != nil {
+				if err := validateCandidate(ctx, repo, *candidate.target, content, manifestByID); err != nil {
 					return nil, err
 				}
 			}

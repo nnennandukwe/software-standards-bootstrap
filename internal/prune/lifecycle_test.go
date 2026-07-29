@@ -628,6 +628,52 @@ Use the replacement workflow.
 	}
 }
 
+func TestApproveRejectsSkillCategoryDriftFromReport(t *testing.T) {
+	root := lifecycleRepository(t)
+	createReviewWithProposal(t, root, false)
+	review, _, err := prune.LoadReview(root, "review-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := "candidates/orphan-skill/SKILL.md"
+	candidatePath := filepath.Join(review.Root, filepath.FromSlash(source))
+	writeFile(t, candidatePath, `---
+name: orphan-skill
+description: A replacement that changes the manifest-owned category.
+metadata:
+  category: correctness
+---
+Use the replacement workflow.
+`)
+	review.Proposal.Actions[1].Disposition = prune.DispositionUpdate
+	review.Proposal.Actions[1].Target = &prune.CandidateRef{
+		Kind:       prune.ArtifactSkill,
+		ID:         "orphan-skill",
+		TargetPath: ".agents/skills/orphan-skill/SKILL.md",
+		SourcePath: source,
+		SHA256:     fileDigest(t, candidatePath),
+		Mode:       "100644",
+	}
+	data, err := yaml.Marshal(review.Proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+		ReviewID: "review-one",
+		Approved: []string{"keep-rule", "orphan-skill"},
+	}); err == nil ||
+		!strings.Contains(err.Error(), "changes metadata.category from maintainability to correctness") {
+		t.Fatalf("error = %v, want report category drift block", err)
+	}
+	if _, err := os.Lstat(filepath.Join(review.Root, "events.jsonl")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("category drift recorded approval event: %v", err)
+	}
+}
+
 func TestApplyFailsClosedWhenTrackedSourceDrifts(t *testing.T) {
 	root := lifecycleRepository(t)
 	createReviewWithProposal(t, root, false)

@@ -209,8 +209,7 @@ func runADR(args []string, stdout, stderr io.Writer) (exitCode int) {
 		if !*dryRun {
 			preview, previewErr := adr.Create(ctx, repo, pack, adr.Options{Directory: *adrDir, DryRun: true})
 			if previewErr != nil {
-				fmt.Fprintf(stderr, "error: preview review-aware ADR target: %s\n", previewErr)
-				return 3
+				return writeADRError(stderr, previewErr)
 			}
 			adrRollbackDirs, err = missingDirectories(
 				repo.Root(),
@@ -224,16 +223,7 @@ func runADR(args []string, stdout, stderr io.Writer) (exitCode int) {
 	}
 	result, err := adr.Create(ctx, repo, pack, adr.Options{Directory: *adrDir, DryRun: *dryRun})
 	if err != nil {
-		fmt.Fprintf(stderr, "error: %s\n", err)
-		if errors.Is(err, adr.ErrNoAdoptableArtifacts) {
-			fmt.Fprintln(stderr, "next: retain a semantic rule, verification recipe, or Agent Skill before creating an ADR.")
-			return 2
-		}
-		if errors.Is(err, adr.ErrAmbiguousDirectory) || errors.Is(err, adr.ErrUnsafeTarget) || errors.Is(err, adr.ErrCollision) {
-			fmt.Fprintln(stderr, "next: choose a safe repository ADR directory with --adr-dir PATH and rerun.")
-			return 2
-		}
-		return 3
+		return writeADRError(stderr, err)
 	}
 	if *dryRun {
 		fmt.Fprintf(stdout, "Dry run — proposed %s:\n\n", result.Path)
@@ -265,6 +255,21 @@ func runADR(args []string, stdout, stderr io.Writer) (exitCode int) {
 	fmt.Fprintf(stdout, "Created %s with Proposed status.\n", result.Path)
 	fmt.Fprintln(stdout, "Next: review every uncommitted path and create the adoption pull request yourself.")
 	return 0
+}
+
+func writeADRError(stderr io.Writer, err error) int {
+	fmt.Fprintf(stderr, "error: %s\n", err)
+	if errors.Is(err, adr.ErrNoAdoptableArtifacts) {
+		fmt.Fprintln(stderr, "next: retain a semantic rule, verification recipe, or Agent Skill before creating an ADR.")
+		return 2
+	}
+	if errors.Is(err, adr.ErrAmbiguousDirectory) ||
+		errors.Is(err, adr.ErrUnsafeTarget) ||
+		errors.Is(err, adr.ErrCollision) {
+		fmt.Fprintln(stderr, "next: choose a safe repository ADR directory with --adr-dir PATH and rerun.")
+		return 2
+	}
+	return 3
 }
 
 func validateRulePackForCommand(
@@ -346,11 +351,15 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 	}
 	if *dryRun {
 		if !result.Changed {
-			fmt.Fprintf(
-				stdout,
-				"%s would not be changed: the pack has no active semantic rule, verification recipe, or Agent Skill to project.\n",
-				result.Path,
-			)
+			if len(pack.Rules) == 0 && len(pack.Recipes) == 0 && len(pack.Skills) == 0 {
+				fmt.Fprintf(
+					stdout,
+					"%s would not be changed: the pack has no active semantic rule, verification recipe, or Agent Skill to project.\n",
+					result.Path,
+				)
+			} else {
+				fmt.Fprintf(stdout, "%s is already current; no write would occur.\n", result.Path)
+			}
 			return 0
 		}
 		fmt.Fprintf(stdout, "Dry run — proposed %s:\n\n", result.Path)

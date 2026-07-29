@@ -909,6 +909,11 @@ func TestValidateJSONExportsActionableInterchangeFields(t *testing.T) {
 		strings.Contains(stdout.String(), `"score":`) {
 		t.Fatalf("normalized JSON retained removed rule fields:\n%s", stdout.String())
 	}
+	for _, required := range []string{`"rules": [`, `"verification_recipes": []`, `"skills": [`, `"automation_proposals": []`} {
+		if !strings.Contains(stdout.String(), required) {
+			t.Fatalf("normalized JSON omitted artifact array %s:\n%s", required, stdout.String())
+		}
+	}
 }
 
 func TestRenderDryRunAndValidationFailureHaveNoFilesystemEffects(t *testing.T) {
@@ -978,6 +983,27 @@ func TestRenderDryRunReportsNoWriteForZeroArtifactPack(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(repo, "AGENTS.md")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("zero-artifact dry run created AGENTS.md: %v", err)
+	}
+}
+
+func TestRenderDryRunReportsAlreadyCurrentForActivePack(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidPack(t, repo, baseline)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := cli.Run([]string{"render", "--repo", repo}, &stdout, &stderr); code != 0 {
+		t.Fatalf("initial render failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code := cli.Run([]string{"render", "--repo", repo, "--dry-run"}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("stable dry run failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "AGENTS.md is already current") ||
+		strings.Contains(stdout.String(), "no active semantic rule") {
+		t.Fatalf("stable active-pack response is misleading:\n%s", stdout.String())
 	}
 }
 

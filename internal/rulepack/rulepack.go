@@ -255,9 +255,9 @@ type Pack struct {
 	ReportPath     string               `json:"report_path,omitempty"`
 	Report         Report               `json:"report,omitempty"`
 	Rules          []Rule               `json:"rules"`
-	Recipes        []VerificationRecipe `json:"verification_recipes,omitempty"`
+	Recipes        []VerificationRecipe `json:"verification_recipes"`
 	Skills         []Skill              `json:"skills"`
-	Automations    []AutomationProposal `json:"automation_proposals,omitempty"`
+	Automations    []AutomationProposal `json:"automation_proposals"`
 }
 
 type skillFrontmatter struct {

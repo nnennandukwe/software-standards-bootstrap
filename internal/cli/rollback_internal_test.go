@@ -9,8 +9,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/adr"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/prune"
 )
+
+func TestWriteADRErrorClassifiesNoAdoptableArtifactsAsRecoverable(t *testing.T) {
+	var stderr bytes.Buffer
+	if code := writeADRError(&stderr, adr.ErrNoAdoptableArtifacts); code != 2 {
+		t.Fatalf("exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "retain a semantic rule, verification recipe, or Agent Skill") {
+		t.Fatalf("missing recovery guidance: %q", stderr.String())
+	}
+}
 
 func TestADRRollbackRemovesDirectoriesCreatedByFailedTransition(t *testing.T) {
 	root := t.TempDir()
