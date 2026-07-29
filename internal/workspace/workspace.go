@@ -28,7 +28,7 @@ var (
 )
 
 var gitVersionPattern = regexp.MustCompile(`^git version ([0-9]+)\.([0-9]+)(?:\.|$)`)
-var objectIDPattern = regexp.MustCompile(`^[0-9a-f]{40,64}$`)
+var objectIDPattern = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 
 var runRepositoryGit = runGitInput
 
