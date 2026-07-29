@@ -98,6 +98,14 @@ func TestPruneDocumentationKeepsLeadInsAdjacentToExamples(t *testing.T) {
 	}
 }
 
+func TestDocumentationParityNormalizesCheckoutLineEndings(t *testing.T) {
+	got := normalizeDocumentationText("lead:\r\n\r\n```bash\r\nssb prune inspect\r\n")
+	want := "lead:\n\n```bash\nssb prune inspect\n"
+	if got != want {
+		t.Fatalf("normalized documentation = %q, want %q", got, want)
+	}
+}
+
 func repositoryRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
@@ -113,5 +121,10 @@ func readText(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(data)
+	return normalizeDocumentationText(string(data))
+}
+
+func normalizeDocumentationText(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	return strings.ReplaceAll(text, "\r", "\n")
 }
