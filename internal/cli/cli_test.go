@@ -15,6 +15,7 @@ import (
 
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/cli"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/prune"
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/render"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/rulepack"
 	"go.yaml.in/yaml/v4"
 )
@@ -301,7 +302,7 @@ func TestReviewAwareRenderAndADRValidateTransitionBeforeWriting(t *testing.T) {
 		},
 		{
 			command: []string{"adr", "--repo", repo, "--review", "missing-review"},
-			target:  filepath.Join(repo, "docs", "adr", "0001-agentic-rules.md"),
+			target:  filepath.Join(repo, "docs", "adr", "0001-actionable-standards.md"),
 		},
 	} {
 		var stdout bytes.Buffer
@@ -954,21 +955,7 @@ func TestRenderDryRunAndValidationFailureHaveNoFilesystemEffects(t *testing.T) {
 func TestRenderDryRunReportsNoWriteForZeroArtifactPack(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
 	writeValidPack(t, repo, baseline)
-	reportPath := filepath.Join(repo, ".software-standards", "report.md")
-	report, err := os.ReadFile(reportPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifactsStart := strings.Index(string(report), "artifacts:\n")
-	bodyStart := strings.Index(string(report), "---\n# Software standards report")
-	if artifactsStart < 0 || bodyStart < 0 || bodyStart <= artifactsStart {
-		t.Fatalf("unexpected report fixture:\n%s", report)
-	}
-	emptyReport := string(report[:artifactsStart]) + "artifacts: []\n" + string(report[bodyStart:])
-	writeFile(t, reportPath, emptyReport)
-	if err := os.Remove(filepath.Join(repo, ".software-standards", "rules", "verify-before-merge.md")); err != nil {
-		t.Fatal(err)
-	}
+	removeAllArtifactsFromPack(t, repo)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -983,6 +970,56 @@ func TestRenderDryRunReportsNoWriteForZeroArtifactPack(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(repo, "AGENTS.md")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("zero-artifact dry run created AGENTS.md: %v", err)
+	}
+}
+
+func TestRenderExplainsZeroArtifactProjectionRemoval(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidPack(t, repo, baseline)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := cli.Run([]string{"render", "--repo", repo}, &stdout, &stderr); code != 0 {
+		t.Fatalf("initial render failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	agentsPath := filepath.Join(repo, "AGENTS.md")
+	before, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removeAllArtifactsFromPack(t, repo)
+
+	stdout.Reset()
+	stderr.Reset()
+	code := cli.Run([]string{"render", "--repo", repo, "--dry-run"}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("removal dry run failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "would remove its managed Software Standards Bootstrap section") {
+		t.Fatalf("removal dry run is unclear:\n%s", stdout.String())
+	}
+	afterDryRun, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(afterDryRun, before) {
+		t.Fatal("removal dry run changed AGENTS.md")
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = cli.Run([]string{"render", "--repo", repo}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("projection removal failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Removed the managed Software Standards Bootstrap section") {
+		t.Fatalf("projection removal response is unclear:\n%s", stdout.String())
+	}
+	afterRemoval, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(afterRemoval), render.StartMarker) {
+		t.Fatalf("managed section remains:\n%s", afterRemoval)
 	}
 }
 
@@ -1050,7 +1087,7 @@ func TestADRValidatesThenCreatesExactlyOneNewProposedRecord(t *testing.T) {
 	if code != 0 || stderr.Len() != 0 {
 		t.Fatalf("ADR dry-run failed: exit=%d stderr=%q", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "docs/adr/0001-agentic-rules.md") ||
+	if !strings.Contains(stdout.String(), "docs/adr/0001-actionable-standards.md") ||
 		!strings.Contains(stdout.String(), "Status: Proposed") {
 		t.Fatalf("ADR dry-run output is incomplete:\n%s", stdout.String())
 	}
@@ -1064,10 +1101,10 @@ func TestADRValidatesThenCreatesExactlyOneNewProposedRecord(t *testing.T) {
 	if code != 0 || stderr.Len() != 0 {
 		t.Fatalf("ADR creation failed: exit=%d stderr=%q", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "Created docs/adr/0001-agentic-rules.md") {
+	if !strings.Contains(stdout.String(), "Created docs/adr/0001-actionable-standards.md") {
 		t.Fatalf("ADR output did not disclose path: %q", stdout.String())
 	}
-	record, err := os.ReadFile(filepath.Join(repo, "docs", "adr", "0001-agentic-rules.md"))
+	record, err := os.ReadFile(filepath.Join(repo, "docs", "adr", "0001-actionable-standards.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1207,9 +1244,23 @@ Run the repository verification command before merging.
 `, excerptHash("package main\n")))
 }
 
-func writeValidPackV2(t *testing.T, repo, baseline string) {
+func removeAllArtifactsFromPack(t *testing.T, repo string) {
 	t.Helper()
-	writeValidPack(t, repo, baseline)
+	reportPath := filepath.Join(repo, ".software-standards", "report.md")
+	report, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifactsStart := strings.Index(string(report), "artifacts:\n")
+	bodyStart := strings.Index(string(report), "---\n# Software standards report")
+	if artifactsStart < 0 || bodyStart < 0 || bodyStart <= artifactsStart {
+		t.Fatalf("unexpected report fixture:\n%s", report)
+	}
+	emptyReport := string(report[:artifactsStart]) + "artifacts: []\n" + string(report[bodyStart:])
+	writeFile(t, reportPath, emptyReport)
+	if err := os.Remove(filepath.Join(repo, ".software-standards", "rules", "verify-before-merge.md")); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func excerptHash(excerpt string) string {

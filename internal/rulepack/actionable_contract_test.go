@@ -319,6 +319,42 @@ Do the thing.
 		}
 	})
 
+	t.Run("wrong extension", func(t *testing.T) {
+		repo, baseline := evidenceRepository(t)
+		writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), actionableReport(baseline, "  []"))
+		writeFile(t, filepath.Join(repo, ".software-standards", "rules", "notes.txt"), "not a canonical rule\n")
+
+		ws, err := workspace.Open(context.Background(), repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !diagnosticsContain(diagnostics, "not a supported artifact path") {
+			t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+		}
+	})
+
+	t.Run("nested artifact", func(t *testing.T) {
+		repo, baseline := evidenceRepository(t)
+		writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), actionableReport(baseline, "  []"))
+		writeFile(t, filepath.Join(repo, ".software-standards", "rules", "nested", "unlisted.md"), "not canonical\n")
+
+		ws, err := workspace.Open(context.Background(), repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !diagnosticsContain(diagnostics, "artifact directories must be flat") {
+			t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+		}
+	})
+
 	t.Run("missing artifact", func(t *testing.T) {
 		repo, baseline := evidenceRepository(t)
 		writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), actionableReport(baseline, validRuleManifestEntry()))
@@ -434,6 +470,69 @@ Keep public API changes backward compatible.
 			t.Fatalf("unexpected diagnostics: %#v", diagnostics)
 		}
 	})
+}
+
+func TestValidateRejectsDeprecatedSkillTopicMetadata(t *testing.T) {
+	repo, _ := skillPackRepository(
+		t,
+		"  category: correctness\n  topic: correctness",
+		excerptHash("verify:\n\tgo test ./...\n"),
+	)
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !diagnosticsContain(diagnostics, "metadata.topic is not supported") {
+		t.Fatalf("deprecated skill topic was accepted: %#v", diagnostics)
+	}
+
+	_, candidateDiagnostics := rulepack.ValidateCandidateSkill(
+		".agents/skills/review-change/SKILL.md",
+		"review-change",
+		[]byte(`---
+name: review-change
+description: Review a Go change using the repository workflow.
+metadata:
+  category: correctness
+  topic: correctness
+---
+# Review change
+`),
+	)
+	if !diagnosticsContain(candidateDiagnostics, "metadata.topic is not supported") {
+		t.Fatalf("deprecated candidate skill topic was accepted: %#v", candidateDiagnostics)
+	}
+}
+
+func TestValidateReportsSkillProvenanceAtManifestField(t *testing.T) {
+	repo, _ := skillPackRepository(
+		t,
+		"  category: correctness",
+		"sha256:"+strings.Repeat("0", 64),
+	)
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range diagnostics {
+		if !strings.Contains(item.Message, "excerpt hash does not match") {
+			continue
+		}
+		if item.Path != ".software-standards/report.md" ||
+			item.Field != "artifacts[0].evidence[0]" {
+			t.Fatalf("skill provenance diagnostic points away from its owner: %#v", item)
+		}
+		return
+	}
+	t.Fatalf("missing skill provenance diagnostic: %#v", diagnostics)
 }
 
 func TestValidateRejectsInventoryThatDoesNotMatchBaseline(t *testing.T) {
@@ -926,6 +1025,48 @@ func validRuleManifestEntry() string {
         actionability: 15
         applicability: 10
         earlier_feedback: 10`
+}
+
+func skillPackRepository(t *testing.T, metadata, evidenceHash string) (string, string) {
+	t.Helper()
+	repo, baseline := evidenceRepository(t)
+	writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), actionableReport(
+		baseline,
+		fmt.Sprintf(`  - id: review-change
+    kind: skill
+    path: .agents/skills/review-change/SKILL.md
+    confidence: medium
+    utility:
+      method: ssb-utility-v1
+      total: 60
+      factors:
+        marginal_value: 15
+        risk_reduction: 15
+        actionability: 15
+        applicability: 10
+        earlier_feedback: 5
+    category: correctness
+    lenses:
+      - kind: task
+        value: verification
+    scopes:
+      - "**/*.go"
+    derivation: extracted
+    evidence:
+      - role: enforces
+        path: Makefile
+        lines: 1-2
+        excerpt_sha256: %s`, evidenceHash),
+	))
+	writeFile(t, filepath.Join(repo, ".agents", "skills", "review-change", "SKILL.md"), fmt.Sprintf(`---
+name: review-change
+description: Review a Go change using the repository workflow.
+metadata:
+%s
+---
+# Review change
+`, metadata))
+	return repo, baseline
 }
 
 func evidenceRepository(t *testing.T) (string, string) {

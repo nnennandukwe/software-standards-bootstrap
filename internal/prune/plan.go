@@ -249,18 +249,19 @@ func actionableReportChange(
 	if err != nil {
 		return nil, nil, fmt.Errorf("open repository for report manifest update: %w", err)
 	}
-	if repo.Baseline() != review.Context.BaselineCommit {
+	reviewBaseline, err := repo.AtCommit(context.Background(), review.Context.BaselineCommit)
+	if err != nil {
 		return nil, nil, fmt.Errorf(
-			"report manifest baseline is stale: expected %s, found %s",
+			"open actionable report at review baseline %s: %w",
 			review.Context.BaselineCommit,
-			repo.Baseline(),
+			err,
 		)
 	}
-	reportData, err := repo.ReadBaselineFile(context.Background(), actionableReportPath)
+	reportData, err := reviewBaseline.ReadBaselineFile(context.Background(), actionableReportPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read actionable report at review baseline: %w", err)
 	}
-	reportEntry, exists, err := repo.EntryAtBaseline(context.Background(), actionableReportPath)
+	reportEntry, exists, err := reviewBaseline.EntryAtBaseline(context.Background(), actionableReportPath)
 	if err != nil {
 		return nil, nil, err
 	}

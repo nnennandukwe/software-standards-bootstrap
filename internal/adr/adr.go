@@ -1,5 +1,5 @@
 // Package adr creates one Proposed architecture decision record from the
-// developer-retained rule and skill source files.
+// developer-retained semantic rules, verification recipes, and Agent Skills.
 package adr
 
 import (
@@ -56,7 +56,7 @@ func Create(ctx context.Context, repo *workspace.Repository, pack rulepack.Pack,
 	if err != nil {
 		return Result{}, err
 	}
-	fileName := fmt.Sprintf("%0*d-agentic-rules.md", width, number)
+	fileName := fmt.Sprintf("%0*d-actionable-standards.md", width, number)
 	relativePath := filepath.ToSlash(filepath.Join(relativeDir, fileName))
 	if relativeDir == "." {
 		relativePath = fileName

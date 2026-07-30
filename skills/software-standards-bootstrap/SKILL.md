@@ -261,7 +261,8 @@ section. Edit canonical sources and the report together, then rerun.
 
 The projection inlines base semantic rules, links contextual rules and recipes,
 indexes primary Agent Skills, and omits automation proposals. An empty or
-automation-only pack performs no projection write.
+automation-only pack does not create or rewrite an unprojected `AGENTS.md`, but
+removes a stale generated managed section when one exists.
 
 ### 6. Disclose the complete uncommitted result
 

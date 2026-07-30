@@ -198,7 +198,7 @@ type Rule struct {
 	Body       string `yaml:"-" json:"body"`
 }
 
-// Skill is a validated portable Agent Skill referenced by a rule.
+// Skill is a validated portable Agent Skill indexed by the report manifest.
 type Skill struct {
 	ID          string `json:"id"`
 	Description string `json:"description"`
@@ -274,8 +274,8 @@ func Validate(ctx context.Context, repo *workspace.Repository) (Pack, []Diagnost
 	return validateActionablePack(ctx, repo, false)
 }
 
-// ValidateRetainedPack parses an adopted pack and verifies each rule against
-// the historical baseline recorded in that rule. It is intended for
+// ValidateRetainedPack parses an adopted pack and verifies artifact evidence
+// against the historical baseline recorded in report.md. It is intended for
 // review-aware post-application rendering and ADR creation; ordinary editable
 // pack validation remains pinned to the repository's current HEAD.
 func ValidateRetainedPack(ctx context.Context, repo *workspace.Repository) (Pack, []Diagnostic, error) {
@@ -438,7 +438,7 @@ func validateActionablePack(
 		}
 	}
 
-	for _, artifact := range pack.Report.Artifacts {
+	for index, artifact := range pack.Report.Artifacts {
 		if canonicalArtifactPath(artifact.Kind, artifact.ID) != artifact.Path {
 			continue
 		}
@@ -476,6 +476,8 @@ func validateActionablePack(
 				ctx,
 				evidenceRepo,
 				repo.Root(),
+				reportPath,
+				fmt.Sprintf("artifacts[%d]", index),
 				artifact,
 			)
 			if loadErr != nil {
@@ -674,7 +676,10 @@ func validateManifestArtifact(sourcePath, field string, artifact ManifestArtifac
 			add(".category", fmt.Sprintf("category %q is not supported", artifact.Category), categoryRecovery)
 		}
 		diagnostics = append(diagnostics, validateActionableLenses(sourcePath, field+".lenses", artifact.Lenses)...)
-		diagnostics = append(diagnostics, validateScopes(sourcePath, artifact.Scopes)...)
+		diagnostics = append(
+			diagnostics,
+			prefixDiagnosticFields(validateScopes(sourcePath, artifact.Scopes), field+".")...,
+		)
 	}
 	return diagnostics
 }
@@ -1027,6 +1032,8 @@ func loadActionableSkill(
 	ctx context.Context,
 	evidenceRepo *workspace.Repository,
 	root string,
+	reportPath string,
+	manifestField string,
 	manifest ManifestArtifact,
 ) (Skill, []Diagnostic, error) {
 	data, diagnostics, err := readManifestArtifact(root, manifest)
@@ -1050,6 +1057,7 @@ func loadActionableSkill(
 			"use only Agent Skills core specification fields",
 		)), nil
 	}
+	diagnostics = append(diagnostics, validateDeprecatedSkillMetadata(manifest.Path, metadata)...)
 	skill := Skill{
 		ID:          manifest.ID,
 		Description: metadata.Description,
@@ -1082,13 +1090,16 @@ func loadActionableSkill(
 	if strings.TrimSpace(skill.Body) == "" {
 		diagnostics = append(diagnostics, diagnostic(manifest.Path, "body", "skill body is required", "document the procedural workflow"))
 	}
-	diagnostics = append(diagnostics, validateDerivationEvidence(
-		ctx,
-		evidenceRepo,
-		manifest.Path,
-		manifest.Derivation,
-		manifest.Evidence,
-	)...)
+	diagnostics = append(
+		diagnostics,
+		prefixDiagnosticFields(validateDerivationEvidence(
+			ctx,
+			evidenceRepo,
+			reportPath,
+			manifest.Derivation,
+			manifest.Evidence,
+		), manifestField+".")...,
+	)
 	return skill, diagnostics, nil
 }
 
@@ -1254,10 +1265,38 @@ func unlistedNativeArtifacts(
 			return nil, nil, fmt.Errorf("read artifact directory %s: %w", directory.relative, err)
 		}
 		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), directory.suffix) {
+			relative := path.Join(directory.relative, entry.Name())
+			if entry.IsDir() {
+				diagnostics = append(diagnostics, diagnostic(
+					relative,
+					"file",
+					"native artifact directories must be flat",
+					"move the artifact to the top-level canonical directory or remove the nested directory",
+				))
 				continue
 			}
-			relative := path.Join(directory.relative, entry.Name())
+			info, err := entry.Info()
+			if err != nil {
+				return nil, nil, fmt.Errorf("inspect artifact path %s: %w", relative, err)
+			}
+			if entry.Type()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+				diagnostics = append(diagnostics, diagnostic(
+					relative,
+					"file",
+					"native artifact paths must be real regular files",
+					"replace the path with a canonical regular artifact file or remove it",
+				))
+				continue
+			}
+			if !strings.HasSuffix(entry.Name(), directory.suffix) {
+				diagnostics = append(diagnostics, diagnostic(
+					relative,
+					"file",
+					relative+" is not a supported artifact path",
+					"use the canonical "+directory.suffix+" extension at the top level or remove the file",
+				))
+				continue
+			}
 			if _, exists := listed[relative]; !exists {
 				unlisted = append(unlisted, relative)
 			}
@@ -1451,6 +1490,7 @@ func ValidateCandidateSkill(relative, skillID string, data []byte) (Skill, []Dia
 	if err := yaml.Load(frontmatter, &metadata, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
 		return Skill{}, append(diagnostics, yamlDiagnostic(relative, err, "use only Agent Skills core specification fields"))
 	}
+	diagnostics = append(diagnostics, validateDeprecatedSkillMetadata(relative, metadata)...)
 	if metadata.Name != skillID {
 		diagnostics = append(diagnostics, diagnostic(relative, "name", fmt.Sprintf("skill name %q must match directory %q", metadata.Name, skillID), "align the skill name and directory"))
 	}
@@ -1479,6 +1519,25 @@ func ValidateCandidateSkill(relative, skillID string, data []byte) (Skill, []Dia
 		SourcePath:  relative,
 		Body:        string(body),
 	}, diagnostics
+}
+
+func validateDeprecatedSkillMetadata(relative string, metadata skillFrontmatter) []Diagnostic {
+	if _, exists := metadata.Metadata["topic"]; !exists {
+		return nil
+	}
+	return []Diagnostic{diagnostic(
+		relative,
+		"metadata.topic",
+		"metadata.topic is not supported",
+		"remove metadata.topic and use metadata.category",
+	)}
+}
+
+func prefixDiagnosticFields(diagnostics []Diagnostic, prefix string) []Diagnostic {
+	for index := range diagnostics {
+		diagnostics[index].Field = prefix + diagnostics[index].Field
+	}
+	return diagnostics
 }
 
 func readRequiredRegularFile(absolute, relative string) ([]byte, []Diagnostic, error) {

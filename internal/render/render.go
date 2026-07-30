@@ -34,6 +34,7 @@ type Result struct {
 	Path          string `json:"path"`
 	Changed       bool   `json:"changed"`
 	DryRun        bool   `json:"dry_run"`
+	Exists        bool   `json:"exists"`
 	SourceDigest  string `json:"source_digest"`
 	ContentDigest string `json:"content_digest"`
 	OutputDigest  string `json:"output_digest"`
@@ -49,13 +50,27 @@ func Apply(repo *workspace.Repository, pack rulepack.Pack, dryRun bool) (Result,
 		return Result{}, err
 	}
 	if len(pack.Rules) == 0 && len(pack.Recipes) == 0 && len(pack.Skills) == 0 {
-		return Result{
-			Path:         "AGENTS.md",
-			Changed:      false,
-			DryRun:       dryRun,
-			OutputDigest: digest(existing),
-			Content:      existing,
-		}, nil
+		next, err := removeManagedSection(existing)
+		if err != nil {
+			return Result{}, err
+		}
+		result := Result{
+			Path:          "AGENTS.md",
+			Changed:       !bytes.Equal(existing, next),
+			DryRun:        dryRun,
+			Exists:        exists,
+			SourceDigest:  digest(nil),
+			ContentDigest: digest(nil),
+			OutputDigest:  digest(next),
+			Content:       next,
+		}
+		if dryRun || !result.Changed {
+			return result, nil
+		}
+		if err := writeAtomic(target, existing, next, mode, exists); err != nil {
+			return Result{}, err
+		}
+		return result, nil
 	}
 
 	section, sourceDigest, contentDigest, err := buildSection(pack)
@@ -70,6 +85,7 @@ func Apply(repo *workspace.Repository, pack rulepack.Pack, dryRun bool) (Result,
 		Path:          "AGENTS.md",
 		Changed:       !bytes.Equal(existing, next),
 		DryRun:        dryRun,
+		Exists:        true,
 		SourceDigest:  sourceDigest,
 		ContentDigest: contentDigest,
 		OutputDigest:  digest(next),
@@ -303,7 +319,7 @@ func writeSkills(
 		fmt.Fprintf(
 			body,
 			"\n- [%s](%s) — description: %s; category: `%s`; lenses: %s; scope: %s\n",
-			skillTitle(skill.ID),
+			titleFromID(skill.ID),
 			skill.SourcePath,
 			strings.TrimSpace(skill.Description),
 			skill.Category,
@@ -332,7 +348,7 @@ func writeRelationships(
 				body,
 				"%s- Related recipe: [%s](%s)\n",
 				indent,
-				manifestTitle(related),
+				titleFromID(related.ID),
 				related.Path,
 			)
 		case "skill":
@@ -340,24 +356,11 @@ func writeRelationships(
 				body,
 				"%s- Related skill: [%s](%s)\n",
 				indent,
-				skillTitle(related.ID),
+				titleFromID(related.ID),
 				related.Path,
 			)
 		}
 	}
-}
-
-func manifestTitle(artifact rulepack.ManifestArtifact) string {
-	switch artifact.Kind {
-	case "verification":
-		return titleFromID(artifact.ID)
-	default:
-		return titleFromID(artifact.ID)
-	}
-}
-
-func skillTitle(id string) string {
-	return titleFromID(id)
 }
 
 func titleFromID(id string) string {
@@ -424,38 +427,65 @@ func directiveRank(directive string) int {
 }
 
 func replaceManagedSection(existing, section []byte) ([]byte, error) {
+	start, end, found, err := managedSectionRange(existing)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		next := make([]byte, 0, len(existing)-(end-start)+len(section))
+		next = append(next, existing[:start]...)
+		next = append(next, section...)
+		next = append(next, existing[end:]...)
+		return next, nil
+	}
+
+	next := append([]byte(nil), existing...)
+	switch {
+	case len(next) == 0:
+	case bytes.HasSuffix(next, []byte("\n\n")):
+	case bytes.HasSuffix(next, []byte("\n")):
+		next = append(next, '\n')
+	default:
+		next = append(next, '\n', '\n')
+	}
+	next = append(next, section...)
+	next = append(next, '\n')
+	return next, nil
+}
+
+func removeManagedSection(existing []byte) ([]byte, error) {
+	start, end, found, err := managedSectionRange(existing)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return append([]byte(nil), existing...), nil
+	}
+	next := make([]byte, 0, len(existing)-(end-start))
+	next = append(next, existing[:start]...)
+	next = append(next, existing[end:]...)
+	return next, nil
+}
+
+func managedSectionRange(existing []byte) (int, int, bool, error) {
 	startCount := bytes.Count(existing, []byte(StartMarker))
 	endCount := bytes.Count(existing, []byte(EndMarker))
 	if startCount == 0 && endCount == 0 {
-		next := append([]byte(nil), existing...)
-		switch {
-		case len(next) == 0:
-		case bytes.HasSuffix(next, []byte("\n\n")):
-		case bytes.HasSuffix(next, []byte("\n")):
-			next = append(next, '\n')
-		default:
-			next = append(next, '\n', '\n')
-		}
-		next = append(next, section...)
-		next = append(next, '\n')
-		return next, nil
+		return 0, 0, false, nil
 	}
 	if startCount != 1 || endCount != 1 {
-		return nil, fmt.Errorf("%w: expected exactly one start and one end marker", ErrMarkers)
+		return 0, 0, false, fmt.Errorf("%w: expected exactly one start and one end marker", ErrMarkers)
 	}
 	start := bytes.Index(existing, []byte(StartMarker))
 	end := bytes.Index(existing, []byte(EndMarker))
 	if end < start+len(StartMarker) {
-		return nil, fmt.Errorf("%w: end marker appears before start marker", ErrMarkers)
+		return 0, 0, false, fmt.Errorf("%w: end marker appears before start marker", ErrMarkers)
 	}
-	if err := verifyExistingSection(existing[start : end+len(EndMarker)]); err != nil {
-		return nil, err
+	end += len(EndMarker)
+	if err := verifyExistingSection(existing[start:end]); err != nil {
+		return 0, 0, false, err
 	}
-	next := make([]byte, 0, len(existing)-((end+len(EndMarker))-start)+len(section))
-	next = append(next, existing[:start]...)
-	next = append(next, section...)
-	next = append(next, existing[end+len(EndMarker):]...)
-	return next, nil
+	return start, end, true, nil
 }
 
 func verifyExistingSection(section []byte) error {

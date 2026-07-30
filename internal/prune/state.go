@@ -538,6 +538,18 @@ func verifyRenderedPoststate(repoRoot string, event Event) error {
 	if err != nil {
 		return err
 	}
+	if !payload.Exists {
+		if _, err := os.Lstat(target); !errors.Is(err, os.ErrNotExist) {
+			if err == nil {
+				return fmt.Errorf("%s exists but the recorded render left no file", payload.Path)
+			}
+			return fmt.Errorf("inspect %s: %w", payload.Path, err)
+		}
+		if payload.OutputDigest != digestBytes(nil) {
+			return fmt.Errorf("%s recorded an invalid absent-file render digest", payload.Path)
+		}
+		return nil
+	}
 	if err := requireRegularBundleFile(repoRoot, target); err != nil {
 		return fmt.Errorf("%s is not a safe regular repository file: %w", payload.Path, err)
 	}

@@ -112,7 +112,7 @@ It contains no rejected candidates or reasons. A zero-artifact report is valid.
 After developer review, `ssb` can create an optional ADR:
 
 ```text
-docs/adr/NNNN-agentic-rules.md
+docs/adr/NNNN-actionable-standards.md
 ```
 
 The ADR remains `Proposed` until the developer-created pull request is merged.
@@ -239,7 +239,7 @@ ssb prune    <inspect|validate|approve|apply|recover|status|verify> [options]
 - `inspect` creates a safe inventory of one committed repository snapshot.
 - `validate` checks the report, all four artifact schemas, inventory, evidence,
   confidence, utility, scopes, and relationships.
-- `render` updates only the managed Software Standards Bootstrap section of root `AGENTS.md`.
+- `render` updates only the managed Software Standards Bootstrap section of root `AGENTS.md`, removing that section when no rule, recipe, or skill is active.
 - `adr` creates one new Proposed ADR from retained rules, recipes, and skills.
 
 `inspect` supports `--max-candidate-files` and `--max-candidate-bytes`. `--allow-partial` permits diagnostic output from an incomplete inventory, but that output cannot be used to generate a proposal. Exit code `4`: inventory coverage incomplete.

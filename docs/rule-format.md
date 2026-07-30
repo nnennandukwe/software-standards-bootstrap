@@ -231,7 +231,8 @@ endings. Validation also replays the complete inventory at the recorded limits.
 verification recipes, indexes Agent Skills, and omits automation proposals.
 Relationships surface links to related recipes and skills, never inactive
 automation proposals. Empty and automation-only packs do not write a managed
-section.
+section; rendering either leaves an unprojected `AGENTS.md` unchanged or
+removes a previously generated managed section.
 
 An ADR includes adopted rules, recipes, and skills with category, derivation,
 confidence, utility, and concise evidence sources. It excludes automation

@@ -28,7 +28,7 @@ func TestCreatePreservesConventionAndNeverOverwrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dryRun.Path != "docs/adrs/0008-agentic-rules.md" {
+	if dryRun.Path != "docs/adrs/0008-actionable-standards.md" {
 		t.Fatalf("dry-run path = %q", dryRun.Path)
 	}
 	if _, err := os.Lstat(filepath.Join(repo, dryRun.Path)); !errors.Is(err, os.ErrNotExist) {
@@ -48,7 +48,7 @@ func TestCreatePreservesConventionAndNeverOverwrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Path != "docs/adrs/0009-agentic-rules.md" {
+	if second.Path != "docs/adrs/0009-actionable-standards.md" {
 		t.Fatalf("second path = %q", second.Path)
 	}
 	after, err := os.ReadFile(firstPath)
@@ -76,7 +76,7 @@ func TestCreateRequiresDirectoryChoiceWhenAmbiguous(t *testing.T) {
 	if !errors.Is(err, adr.ErrAmbiguousDirectory) {
 		t.Fatalf("expected ambiguity error, got %v", err)
 	}
-	matches, globErr := filepath.Glob(filepath.Join(repo, "docs", "*", "*-agentic-rules.md"))
+	matches, globErr := filepath.Glob(filepath.Join(repo, "docs", "*", "*-actionable-standards.md"))
 	if globErr != nil {
 		t.Fatal(globErr)
 	}
@@ -161,7 +161,7 @@ func TestCreateWriteFailureLeavesNoPartialADR(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected ADR write failure")
 	}
-	matches, globErr := filepath.Glob(filepath.Join(directory, "*-agentic-rules.md"))
+	matches, globErr := filepath.Glob(filepath.Join(directory, "*-actionable-standards.md"))
 	if globErr != nil {
 		t.Fatal(globErr)
 	}

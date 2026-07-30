@@ -15,6 +15,7 @@ import (
 
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/inventory"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/prune"
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/render"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/rulepack"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/workspace"
 	"go.yaml.in/yaml/v4"
@@ -501,6 +502,217 @@ func TestApplyDefaultsToDryRunThenAppliesApprovedRemoval(t *testing.T) {
 		t.Fatal(err)
 	} else if len(diagnostics) != 0 {
 		t.Fatalf("atomically updated pack is invalid: %#v", diagnostics)
+	}
+}
+
+func TestAppliedReviewRemainsAuditableAfterCommittingChanges(t *testing.T) {
+	root := lifecycleRepository(t)
+	createReviewWithProposal(t, root, false)
+	review, _, err := prune.LoadReview(root, "review-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	review.Proposal.Actions[1].Disposition = prune.DispositionRemove
+	proposalData, err := yaml.Marshal(review.Proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), proposalData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+		ReviewID: "review-one",
+		Approved: []string{"keep-rule", "orphan-skill"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
+		ReviewID: "review-one",
+		Write:    true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-m", "apply governed removal")
+
+	status, diagnostics, err := prune.ReviewStatus(root, "review-one")
+	if err != nil {
+		t.Fatalf("durable review became unreadable after commit: %v", err)
+	}
+	if len(diagnostics) != 0 || !status.Applied {
+		t.Fatalf("status=%#v diagnostics=%#v, want durable applied review", status, diagnostics)
+	}
+}
+
+func TestZeroArtifactRemovalClearsProjectionAndRecordsReplayableRender(t *testing.T) {
+	root := lifecycleRepository(t)
+	repo, err := workspace.Open(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack := rulepack.Pack{
+		BaselineCommit: repo.Baseline(),
+		Report: rulepack.Report{
+			Artifacts: []rulepack.ManifestArtifact{{
+				ID:   "keep-rule",
+				Kind: "rule",
+				Path: ".software-standards/rules/keep-rule.md",
+			}},
+		},
+		Rules: []rulepack.Rule{{
+			Schema:     rulepack.RuleSchema,
+			ID:         "keep-rule",
+			Title:      "Keep the rule",
+			Category:   "maintainability",
+			Lenses:     []rulepack.Lens{{Kind: "base"}},
+			Directive:  "always",
+			Scopes:     []string{"**/*"},
+			Derivation: "extracted",
+			Evidence: []rulepack.Evidence{{
+				Role:  "declares",
+				Path:  "README.md",
+				Lines: "1-1",
+			}},
+			SourcePath: ".software-standards/rules/keep-rule.md",
+			Body:       "Keep the rule.\n",
+		}},
+	}
+	if _, err := render.Apply(repo, pack, false); err != nil {
+		t.Fatalf("render initial pack: %v", err)
+	}
+
+	createReviewWithProposal(t, root, false)
+	review, _, err := prune.LoadReview(root, "review-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range review.Proposal.Actions {
+		review.Proposal.Actions[index].Disposition = prune.DispositionRemove
+	}
+	proposalData, err := yaml.Marshal(review.Proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), proposalData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+		ReviewID: "review-one",
+		Approved: []string{"keep-rule", "orphan-skill"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
+		ReviewID: "review-one",
+		Write:    true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	repo, err = workspace.Open(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack, packDiagnostics, err := rulepack.ValidateRetainedPack(context.Background(), repo)
+	if err != nil || len(packDiagnostics) != 0 {
+		t.Fatalf("validate zero-artifact pack: diagnostics=%#v error=%v", packDiagnostics, err)
+	}
+	transition, err := prune.BeginTransition(root, "review-one", prune.EventRendered, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := render.Apply(repo, pack, false)
+	if err != nil {
+		_ = transition.Cancel()
+		t.Fatal(err)
+	}
+	if !result.Changed {
+		_ = transition.Cancel()
+		t.Fatalf("zero-artifact render did not remove the stale managed section: %#v", result)
+	}
+	if _, err := transition.Complete(result); err != nil {
+		t.Fatal(err)
+	}
+
+	agents, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(agents), render.StartMarker) ||
+		strings.Contains(string(agents), "Keep the rule.") {
+		t.Fatalf("zero-artifact render retained stale guidance:\n%s", agents)
+	}
+	status, diagnostics, err := prune.ReviewStatus(root, "review-one")
+	if err != nil {
+		t.Fatalf("zero-artifact render event is not replayable: %v", err)
+	}
+	if len(diagnostics) != 0 || !status.Rendered {
+		t.Fatalf("status=%#v diagnostics=%#v, want replayable render state", status, diagnostics)
+	}
+}
+
+func TestZeroArtifactRenderWithoutTargetRecordsReplayableNoOp(t *testing.T) {
+	root := lifecycleRepository(t)
+	createReviewWithProposal(t, root, false)
+	review, _, err := prune.LoadReview(root, "review-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range review.Proposal.Actions {
+		review.Proposal.Actions[index].Disposition = prune.DispositionRemove
+	}
+	proposalData, err := yaml.Marshal(review.Proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), proposalData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+		ReviewID: "review-one",
+		Approved: []string{"keep-rule", "orphan-skill"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
+		ReviewID: "review-one",
+		Write:    true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	repo, err := workspace.Open(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack, diagnostics, err := rulepack.ValidateRetainedPack(context.Background(), repo)
+	if err != nil || len(diagnostics) != 0 {
+		t.Fatalf("validate zero-artifact pack: diagnostics=%#v error=%v", diagnostics, err)
+	}
+	transition, err := prune.BeginTransition(root, "review-one", prune.EventRendered, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := render.Apply(repo, pack, false)
+	if err != nil {
+		_ = transition.Cancel()
+		t.Fatal(err)
+	}
+	if result.Changed || result.Exists ||
+		result.SourceDigest == "" || result.ContentDigest == "" || result.OutputDigest == "" {
+		_ = transition.Cancel()
+		t.Fatalf("unexpected zero-artifact no-op render: %#v", result)
+	}
+	if _, err := transition.Complete(result); err != nil {
+		t.Fatal(err)
+	}
+	status, statusDiagnostics, err := prune.ReviewStatus(root, "review-one")
+	if err != nil {
+		t.Fatalf("zero-artifact no-op render event is not replayable: %v", err)
+	}
+	if len(statusDiagnostics) != 0 || !status.Rendered {
+		t.Fatalf("status=%#v diagnostics=%#v, want replayable render state", status, statusDiagnostics)
 	}
 }
 
@@ -1114,12 +1326,14 @@ func TestVerifyBindsOptionalRenderForSkillOnlyApplication(t *testing.T) {
 		Path          string `json:"path"`
 		Changed       bool   `json:"changed"`
 		DryRun        bool   `json:"dry_run"`
+		Exists        bool   `json:"exists"`
 		SourceDigest  string `json:"source_digest"`
 		ContentDigest string `json:"content_digest"`
 		OutputDigest  string `json:"output_digest"`
 	}{
 		Path:          "AGENTS.md",
 		Changed:       true,
+		Exists:        true,
 		SourceDigest:  "sha256:" + strings.Repeat("a", 64),
 		ContentDigest: "sha256:" + strings.Repeat("b", 64),
 		OutputDigest:  fileDigest(t, agentsPath),

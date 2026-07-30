@@ -362,7 +362,15 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 			}
 			return 0
 		}
-		fmt.Fprintf(stdout, "Dry run — proposed %s:\n\n", result.Path)
+		if len(pack.Rules) == 0 && len(pack.Recipes) == 0 && len(pack.Skills) == 0 {
+			fmt.Fprintf(
+				stdout,
+				"Dry run — %s would remove its managed Software Standards Bootstrap section; proposed file:\n\n",
+				result.Path,
+			)
+		} else {
+			fmt.Fprintf(stdout, "Dry run — proposed %s:\n\n", result.Path)
+		}
 		_, _ = stdout.Write(result.Content)
 		if len(result.Content) == 0 || result.Content[len(result.Content)-1] != '\n' {
 			fmt.Fprintln(stdout)
@@ -385,14 +393,22 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 		}
 	}
 	if result.Changed {
-		fmt.Fprintf(
-			stdout,
-			"Rendered %s from %d semantic rule(s), %d verification recipe(s), and %d Agent Skill(s).\n",
-			result.Path,
-			len(pack.Rules),
-			len(pack.Recipes),
-			len(pack.Skills),
-		)
+		if len(pack.Rules) == 0 && len(pack.Recipes) == 0 && len(pack.Skills) == 0 {
+			fmt.Fprintf(
+				stdout,
+				"Removed the managed Software Standards Bootstrap section from %s because the pack has no active semantic rule, verification recipe, or Agent Skill.\n",
+				result.Path,
+			)
+		} else {
+			fmt.Fprintf(
+				stdout,
+				"Rendered %s from %d semantic rule(s), %d verification recipe(s), and %d Agent Skill(s).\n",
+				result.Path,
+				len(pack.Rules),
+				len(pack.Recipes),
+				len(pack.Skills),
+			)
+		}
 	} else {
 		fmt.Fprintf(stdout, "%s requires no write for the current actionable artifacts.\n", result.Path)
 	}
@@ -772,7 +788,7 @@ func runPruneInspect(args []string, stdout, stderr io.Writer) int {
 		}
 		return writeJSON(stdout, stderr, summary)
 	}
-	fmt.Fprintf(stdout, "Created prune review context %s (%d rule/skill artifact(s)).\n", result.ContextPath, len(result.Context.Artifacts))
+	fmt.Fprintf(stdout, "Created prune review context %s (%d actionable artifact(s)).\n", result.ContextPath, len(result.Context.Artifacts))
 	fmt.Fprintln(stdout, "Next: use the repository Agent Skill to write proposal.yaml, then run ssb prune validate.")
 	return 0
 }

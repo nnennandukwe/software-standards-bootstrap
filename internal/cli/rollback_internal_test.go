@@ -33,7 +33,7 @@ func TestADRRollbackRemovesDirectoriesCreatedByFailedTransition(t *testing.T) {
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	record := filepath.Join(targetDir, "0001-agentic-rules.md")
+	record := filepath.Join(targetDir, "0001-actionable-standards.md")
 	if err := os.WriteFile(record, []byte("partial\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

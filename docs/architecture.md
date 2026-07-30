@@ -198,7 +198,9 @@ utility, and stable ID. It inlines base rule bodies, links contextual semantic
 rules and verification recipes, and indexes primary Agent Skills by activation
 context. It shows related recipe and skill links and omits automation proposals.
 
-An empty or automation-only pack performs no write.
+An empty or automation-only pack does not create or rewrite an unprojected
+`AGENTS.md`; if a generated managed section remains from an earlier pack, the
+renderer removes that stale section and preserves all surrounding bytes.
 
 The section stores:
 

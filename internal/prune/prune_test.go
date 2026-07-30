@@ -601,7 +601,7 @@ Keep the rule.
 `, evidenceDigest))
 	writeFile(t, filepath.Join(repo, ".agents", "skills", "orphan-skill", "SKILL.md"), `---
 name: orphan-skill
-description: A repository-authored skill that is not referenced by a rule.
+description: A repository-authored primary Agent Skill indexed by the report.
 metadata:
   category: maintainability
 ---
