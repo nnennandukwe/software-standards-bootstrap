@@ -1,8 +1,9 @@
-# Primary engineering topic taxonomy
+# Engineering category taxonomy
 
-Assign exactly one primary topic to every rule and generated Agent Skill. The topic should explain the main engineering risk, obligation, or outcome—not merely the file type, evidence source, or tool involved.
+Assign exactly one category to every accepted artifact. The category explains
+the engineering concern, not the file type, evidence source, or tool involved.
 
-| Topic | Use when the primary concern is |
+| Category | Use when the primary concern is |
 |---|---|
 | `architecture` | Component boundaries, dependency direction, layering, or system structure |
 | `compatibility` | Supported versions, platforms, protocols, public interfaces, or backward compatibility |
@@ -13,22 +14,26 @@ Assign exactly one primary topic to every rule and generated Agent Skill. The to
 | `maintainability` | Keeping code understandable, consistent, and safe to modify over time |
 | `operability` | Deployment, configuration, observation, diagnosis, or production operation |
 | `performance` | Latency, throughput, memory, storage, or computational efficiency |
-| `quality` | A broad engineering-quality concern for which no narrower topic is dominant |
+| `quality` | A broad engineering-quality concern for which no narrower category is dominant |
 | `reliability` | Availability, resilience, fault tolerance, recovery, or repeatable service behavior |
 | `security` | Confidentiality, integrity, authentication, authorization, or vulnerability prevention |
 | `testability` | Making behavior practical to verify through controlled, observable tests |
 
 ## Selection rules
 
-1. Choose the topic that best explains why a developer must follow the rule or workflow.
-2. Prefer the narrowest accurate topic. Use `quality` only when no narrower topic fits.
-3. Do not assign multiple topics. If several concerns apply, choose the dominant one and explain the tradeoff in the assessment.
-4. Keep topic independent from:
+1. Choose the category that best explains the artifact's engineering concern.
+2. Prefer the narrowest accurate category. Use `quality` only when no narrower category fits.
+3. Do not assign multiple categories.
+4. Keep category independent from:
    - `lenses`, which select language, framework, task, or base context;
    - `directive`, which records behavioral modality;
-   - `classification`, which records whether proof is guidance or deterministic;
-   - `importance`, which comes from the score;
+   - artifact kind, which records whether the output is a rule, recipe, skill,
+     or automation proposal;
+   - `derivation`, which records extracted or inferred evidence;
    - `confidence`, which records evidence certainty; and
    - `scopes`, which identify affected paths.
 
-For an Agent Skill, classify the workflow's primary engineering outcome rather than the mechanics it uses. A release procedure may be `reliability` or `operability`; it is not automatically `developer-experience` merely because a developer runs it.
+For an Agent Skill, classify the workflow's engineering outcome rather than
+the mechanics it uses. A recovery procedure may be `reliability` or
+`operability`; it is not automatically `developer-experience` because a
+developer runs it.

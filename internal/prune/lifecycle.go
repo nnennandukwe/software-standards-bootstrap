@@ -99,6 +99,7 @@ type renderedEventPayload struct {
 	Path          string `json:"path"`
 	Changed       bool   `json:"changed"`
 	DryRun        bool   `json:"dry_run"`
+	Exists        bool   `json:"exists"`
 	SourceDigest  string `json:"source_digest"`
 	ContentDigest string `json:"content_digest"`
 	OutputDigest  string `json:"output_digest"`

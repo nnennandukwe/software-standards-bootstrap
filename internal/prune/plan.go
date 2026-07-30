@@ -1,12 +1,18 @@
 package prune
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/rulepack"
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/workspace"
 )
 
 const applicationPlanSchema = "ssb.dev/prune-application-plan/v1"
+const actionableReportPath = ".software-standards/report.md"
 
 // FileState identifies exact governed bytes and mode, or explicit absence.
 type FileState struct {
@@ -134,6 +140,14 @@ func buildApplicationPlan(
 			write(supporting.TargetPath, supporting.SHA256, supporting.Mode)
 		}
 	}
+	reportChange, _, err := actionableReportChange(review, approval)
+	if err != nil {
+		return applicationPlan{}, err
+	}
+	if reportChange != nil {
+		changes[reportChange.Path] = *reportChange
+		poststate[reportChange.Path] = reportChange.Poststate
+	}
 
 	paths := make([]string, 0, len(changes))
 	for itemPath := range changes {
@@ -151,7 +165,6 @@ func buildApplicationPlan(
 	}
 	sort.Strings(poststatePaths)
 	folded := make(map[string]string, len(poststate))
-	rules := 0
 	for _, itemPath := range poststatePaths {
 		foldedPath := strings.ToLower(itemPath)
 		if prior, collision := folded[foldedPath]; collision && prior != itemPath {
@@ -162,12 +175,6 @@ func buildApplicationPlan(
 			)
 		}
 		folded[foldedPath] = itemPath
-		if kind, _, ok := artifactIdentity(itemPath); ok && kind == ArtifactRule {
-			rules++
-		}
-	}
-	if rules == 0 {
-		return applicationPlan{}, fmt.Errorf("application would remove every rule; retain or replace at least one rule")
 	}
 	orderedPoststate := make([]plannedFile, 0, len(poststatePaths))
 	for _, itemPath := range poststatePaths {
@@ -193,6 +200,100 @@ func buildApplicationPlan(
 	}
 	plan.PlanDigest = planDigest
 	return plan, nil
+}
+
+func actionableReportChange(
+	review Review,
+	approval ApprovalPayload,
+) (*Change, []byte, error) {
+	if review.RepoRoot == "" {
+		return nil, nil, nil
+	}
+	approved := make(map[string]struct{}, len(approval.Approved))
+	for _, id := range approval.Approved {
+		approved[id] = struct{}{}
+	}
+	removedIDs := make(map[string]struct{})
+	for _, action := range review.Proposal.Actions {
+		if _, ok := approved[action.ID]; !ok || action.Disposition == DispositionKeep {
+			continue
+		}
+		for _, source := range action.Sources {
+			removedIDs[source.ID] = struct{}{}
+		}
+		if action.Target == nil {
+			continue
+		}
+		retainsManifestEntry := false
+		for _, source := range action.Sources {
+			if source.Kind == action.Target.Kind &&
+				source.ID == action.Target.ID &&
+				source.Path == action.Target.TargetPath {
+				retainsManifestEntry = true
+				break
+			}
+		}
+		if !retainsManifestEntry {
+			return nil, nil, fmt.Errorf(
+				"action %s changes the canonical artifact id or path; create a new actionable pack so report.md can record fresh provenance, confidence, and utility",
+				action.ID,
+			)
+		}
+		delete(removedIDs, action.Target.ID)
+	}
+	if len(removedIDs) == 0 {
+		return nil, nil, nil
+	}
+
+	repo, err := workspace.Open(context.Background(), review.RepoRoot)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open repository for report manifest update: %w", err)
+	}
+	reviewBaseline, err := repo.AtCommit(context.Background(), review.Context.BaselineCommit)
+	if err != nil {
+		return nil, nil, fmt.Errorf(
+			"open actionable report at review baseline %s: %w",
+			review.Context.BaselineCommit,
+			err,
+		)
+	}
+	reportData, err := reviewBaseline.ReadBaselineFile(context.Background(), actionableReportPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read actionable report at review baseline: %w", err)
+	}
+	reportEntry, exists, err := reviewBaseline.EntryAtBaseline(context.Background(), actionableReportPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !exists || reportEntry.Kind != "blob" ||
+		(reportEntry.Mode != "100644" && reportEntry.Mode != "100755") {
+		return nil, nil, fmt.Errorf("actionable report is not a tracked regular file")
+	}
+	updated, err := rulepack.RemoveManifestArtifacts(reportData, removedIDs)
+	if err != nil {
+		return nil, nil, fmt.Errorf("update actionable report manifest: %w", err)
+	}
+	if bytes.Equal(updated, reportData) {
+		return nil, nil, fmt.Errorf(
+			"report.md does not list the approved artifact removal; refresh the review from a valid actionable pack",
+		)
+	}
+	change := &Change{
+		ActionID: "report-manifest",
+		Path:     actionableReportPath,
+		Kind:     "write",
+		Prestate: FileState{
+			Exists: true,
+			SHA256: digestBytes(reportData),
+			Mode:   reportEntry.Mode,
+		},
+		Poststate: FileState{
+			Exists: true,
+			SHA256: digestBytes(updated),
+			Mode:   reportEntry.Mode,
+		},
+	}
+	return change, updated, nil
 }
 
 func recordedApprovalEvent(review Review) (Event, error) {

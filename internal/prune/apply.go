@@ -487,6 +487,7 @@ func validateCandidate(
 	repo *workspace.Repository,
 	target CandidateRef,
 	content []byte,
+	manifestByID map[string]rulepack.ManifestArtifact,
 ) error {
 	switch target.Kind {
 	case ArtifactRule:
@@ -495,9 +496,21 @@ func validateCandidate(
 			return fmt.Errorf("candidate %s violates the rule contract: %s", target.SourcePath, diagnostics[0].Message)
 		}
 	case ArtifactSkill:
-		_, diagnostics := rulepack.ValidateCandidateSkill(target.TargetPath, target.ID, content)
+		skill, diagnostics := rulepack.ValidateCandidateSkill(target.TargetPath, target.ID, content)
 		if len(diagnostics) != 0 {
 			return fmt.Errorf("candidate %s violates the Agent Skill contract: %s", target.SourcePath, diagnostics[0].Message)
+		}
+		manifest, exists := manifestByID[target.ID]
+		if !exists || manifest.Kind != ArtifactSkill {
+			return fmt.Errorf("candidate %s has no matching skill entry in report.md", target.SourcePath)
+		}
+		if skill.Category != manifest.Category {
+			return fmt.Errorf(
+				"candidate %s changes metadata.category from %s to %s; create a new actionable pack so report.md can record fresh skill provenance",
+				target.SourcePath,
+				manifest.Category,
+				skill.Category,
+			)
 		}
 	default:
 		return fmt.Errorf("candidate %s has unsupported kind %s", target.SourcePath, target.Kind)
@@ -513,10 +526,44 @@ func buildCandidateOperations(
 	approval ApprovalPayload,
 ) (map[string]operation, error) {
 	candidates := candidateInputsForApproval(review, approval)
+	_, reportContent, err := actionableReportChange(review, approval)
+	if err != nil {
+		return nil, err
+	}
+	manifestByID := make(map[string]rulepack.ManifestArtifact)
+	needsSkillManifest := false
+	for _, candidate := range candidates {
+		if candidate.target != nil && candidate.target.Kind == ArtifactSkill {
+			needsSkillManifest = true
+			break
+		}
+	}
+	if needsSkillManifest {
+		pack, diagnostics, err := rulepack.ValidateRetainedPack(ctx, repo)
+		if err != nil {
+			return nil, fmt.Errorf("validate retained actionable pack: %w", err)
+		}
+		if len(diagnostics) != 0 {
+			return nil, fmt.Errorf("retained actionable pack is invalid: %s", diagnostics[0].Message)
+		}
+		for _, artifact := range pack.Report.Artifacts {
+			manifestByID[artifact.ID] = artifact
+		}
+	}
 	operations := make(map[string]operation, len(plan.Changes))
 	for _, change := range plan.Changes {
 		item := operation{Change: change}
 		if change.Poststate.Exists {
+			if change.Path == actionableReportPath {
+				if len(reportContent) == 0 ||
+					digestBytes(reportContent) != change.Poststate.SHA256 {
+					return nil, fmt.Errorf("application plan report manifest content does not match its poststate")
+				}
+				item.Content = reportContent
+				item.Mode = candidateMode(change.Poststate.Mode)
+				operations[change.Path] = item
+				continue
+			}
 			candidate, exists := candidates[change.Path]
 			if !exists {
 				return nil, fmt.Errorf("application plan lacks candidate input for %s", change.Path)
@@ -532,7 +579,7 @@ func buildCandidateOperations(
 				)
 			}
 			if candidate.target != nil {
-				if err := validateCandidate(ctx, repo, *candidate.target, content); err != nil {
+				if err := validateCandidate(ctx, repo, *candidate.target, content, manifestByID); err != nil {
 					return nil, err
 				}
 			}
@@ -613,7 +660,6 @@ func validateResultingGraph(
 		}
 		final[itemPath] = finalArtifact{kind: kind, content: operation.Content}
 	}
-	skills := make(map[string]struct{})
 	for itemPath, artifact := range final {
 		if artifact.kind != ArtifactSkill {
 			continue
@@ -622,7 +668,6 @@ func validateResultingGraph(
 		if _, diagnostics := rulepack.ValidateCandidateSkill(itemPath, id, artifact.content); len(diagnostics) != 0 {
 			return fmt.Errorf("resulting skill %s violates the Agent Skill contract: %s", itemPath, diagnostics[0].Message)
 		}
-		skills[id] = struct{}{}
 	}
 	for itemPath, artifact := range final {
 		if artifact.kind != ArtifactRule {
@@ -638,11 +683,6 @@ func validateResultingGraph(
 		_, pathID, _ := artifactIdentity(itemPath)
 		if rule.ID != pathID {
 			return fmt.Errorf("resulting rule %s declares id %s", itemPath, rule.ID)
-		}
-		for _, skillID := range rule.RelatedSkillIDs {
-			if _, exists := skills[skillID]; !exists {
-				return fmt.Errorf("resulting rule %s references missing skill %s", itemPath, skillID)
-			}
 		}
 	}
 	return nil
@@ -1508,7 +1548,7 @@ func planOperationPoststates(plan applicationPlan) map[string]string {
 
 func safeApplicationTarget(repoRoot, relative string) error {
 	if !validApplicationPath(relative) {
-		return fmt.Errorf("application target %s is not a canonical rule or skill path", relative)
+		return fmt.Errorf("application target %s is not a canonical actionable artifact or report path", relative)
 	}
 	target, err := resolvePortablePath(repoRoot, relative)
 	if err != nil {
@@ -1540,6 +1580,9 @@ func safeApplicationTarget(repoRoot, relative string) error {
 }
 
 func validApplicationPath(relative string) bool {
+	if relative == actionableReportPath {
+		return true
+	}
 	if _, _, ok := artifactIdentity(relative); ok {
 		return true
 	}

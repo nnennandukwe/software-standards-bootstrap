@@ -79,11 +79,15 @@ preflight for the exact accepted decision set before it can record an event.
 Approval is a single event that lists every action as approved or rejected and
 binds the exact proposal digest. Dependencies must be approved together.
 Unable-to-determine cannot be approved. Approval is not recorded when its
-decisions cannot produce a safe application plan, including when they would
-remove every rule. Application refuses a changed `HEAD`,
-tracked/staged drift, changed sources, changed candidates, path collisions, and
-a result with no rules. It writes an application recovery journal before any
-file operation.
+decisions cannot produce a safe application plan. Removing an artifact also
+removes its accepted index entry and inbound relationships from
+`.software-standards/report.md` in the same plan. A valid skill-only or
+zero-artifact result is allowed. Replacement actions that change a canonical
+artifact ID or path are rejected because lifecycle review cannot invent fresh
+provenance, confidence, or utility for the new manifest entry. Application
+refuses a changed `HEAD`, tracked/staged drift, changed sources, changed
+candidates, and path collisions. It writes an application recovery journal
+before any file operation.
 
 Dry run and write derive the same canonical application plan. Each operation
 contains the exact prestate and poststate, including presence, digest, and

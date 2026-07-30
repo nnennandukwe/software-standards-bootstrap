@@ -6,6 +6,10 @@ All notable changes are documented here. The project follows semantic versioning
 
 ### Added
 
+- Added the actionable report, semantic rule, verification recipe, portable
+  Agent Skill, and automation proposal contracts.
+- Added exact inventory replay, confidence and utility gates, cross-artifact
+  relationships, and zero-artifact/automation-only behavior.
 - Added the governed `ssb prune` lifecycle-review protocol with pinned local
   capability profiles, explicit provenance, complete rule/skill inventory,
   evidence-backed semantic proposals, digest-bound approval, dry-run-first
@@ -20,18 +24,17 @@ All notable changes are documented here. The project follows semantic versioning
   for diagnostic use, and reports complete candidate/scanned/remaining
   accounting.
 - Git blob batching now uses the measured 512-entry, 4 MiB policy.
-- Added `ssb.dev/rule/v2` activation lenses, behavioral directives, and
-  explicit full/partial proof coverage while retaining v1 read compatibility.
+- Rewrote `ssb.dev/rule/v2` as a semantic-rule contract with local derivation
+  and exact evidence, removing pre-release compatibility and command/check
+  metadata.
 - Changed the managed `AGENTS.md` section into a progressive router with
-  scoped base standing orders, contextual rule links, and mapped-command
-  disclosure.
+  base semantic rules, contextual rule and recipe links, Agent Skill indexes,
+  and no automation proposals.
 - Advanced `ssb validate --format json` to response schema 2 and include the
   normalized pack only for valid results.
 - Added existing-pack progressive selection to the portable Agent Skill.
-- Advanced the portable skill metadata version to `0.2.0` for the v2
-  generation and existing-pack selection contract.
-- Advanced the portable skill metadata version to `0.3.0` for governed
-  lifecycle review.
+- Advanced the portable skill metadata version to `0.4.0` for actionable
+  candidate routing and existing-pack selection.
 
 ## [0.1.0] - 2026-07-23
 
@@ -43,7 +46,7 @@ All notable changes are documented here. The project follows semantic versioning
 - Proposed ADR generation from retained artifacts.
 - Portable `software-standards-bootstrap` Agent Skill.
 - Mandatory structural-pattern discovery and benchmark acceptance coverage.
-- Required primary-topic metadata for rules and skills, with AGENTS and ADR projection.
+- Evidence-backed engineering categorization for generated artifacts.
 - Cross-platform CI and release provenance configuration.
 - Public benchmark evidence for Cobra, Flask, Django, and Next.js across Codex
   and Claude Code consumer workflows.

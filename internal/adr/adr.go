@@ -1,5 +1,5 @@
 // Package adr creates one Proposed architecture decision record from the
-// developer-retained rule and skill source files.
+// developer-retained semantic rules, verification recipes, and Agent Skills.
 package adr
 
 import (
@@ -18,10 +18,11 @@ import (
 )
 
 var (
-	ErrAmbiguousDirectory = errors.New("multiple ADR directories found")
-	ErrUnsafeTarget       = errors.New("unsafe ADR target")
-	ErrCollision          = errors.New("ADR target already exists")
-	numberedADRPattern    = regexp.MustCompile(`^([0-9]+)-.+\.md$`)
+	ErrAmbiguousDirectory   = errors.New("multiple ADR directories found")
+	ErrUnsafeTarget         = errors.New("unsafe ADR target")
+	ErrCollision            = errors.New("ADR target already exists")
+	ErrNoAdoptableArtifacts = errors.New("no adoptable artifacts")
+	numberedADRPattern      = regexp.MustCompile(`^([0-9]+)-.+\.md$`)
 )
 
 // Options controls directory selection and dry-run behavior.
@@ -41,6 +42,12 @@ type Result struct {
 // Create chooses the repository's existing ADR convention or defaults to
 // docs/adr. It uses exclusive creation and never overwrites an existing file.
 func Create(ctx context.Context, repo *workspace.Repository, pack rulepack.Pack, options Options) (Result, error) {
+	if len(pack.Rules) == 0 && len(pack.Recipes) == 0 && len(pack.Skills) == 0 {
+		return Result{}, fmt.Errorf(
+			"%w: retain at least one semantic rule, verification recipe, or Agent Skill before creating an ADR",
+			ErrNoAdoptableArtifacts,
+		)
+	}
 	relativeDir, absoluteDir, err := resolveDirectory(ctx, repo, options.Directory)
 	if err != nil {
 		return Result{}, err
@@ -49,7 +56,7 @@ func Create(ctx context.Context, repo *workspace.Repository, pack rulepack.Pack,
 	if err != nil {
 		return Result{}, err
 	}
-	fileName := fmt.Sprintf("%0*d-agentic-rules.md", width, number)
+	fileName := fmt.Sprintf("%0*d-actionable-standards.md", width, number)
 	relativePath := filepath.ToSlash(filepath.Join(relativeDir, fileName))
 	if relativeDir == "." {
 		relativePath = fileName
@@ -242,78 +249,119 @@ func nextNumber(directory string) (int, int, error) {
 
 func render(pack rulepack.Pack, number int) []byte {
 	rules := append([]rulepack.Rule(nil), pack.Rules...)
+	recipes := append([]rulepack.VerificationRecipe(nil), pack.Recipes...)
+	skills := append([]rulepack.Skill(nil), pack.Skills...)
 	sort.Slice(rules, func(i, j int) bool { return rules[i].ID < rules[j].ID })
-	referencedSkills := make(map[string]struct{})
-	for _, rule := range rules {
-		for _, skillID := range rule.RelatedSkillIDs {
-			referencedSkills[skillID] = struct{}{}
-		}
-	}
-	skills := make([]rulepack.Skill, 0)
-	for _, skill := range pack.Skills {
-		if _, retained := referencedSkills[skill.ID]; retained {
-			skills = append(skills, skill)
-		}
-	}
+	sort.Slice(recipes, func(i, j int) bool { return recipes[i].ID < recipes[j].ID })
 	sort.Slice(skills, func(i, j int) bool { return skills[i].ID < skills[j].ID })
+	manifest := make(map[string]rulepack.ManifestArtifact, len(pack.Report.Artifacts))
+	for _, artifact := range pack.Report.Artifacts {
+		manifest[artifact.ID] = artifact
+	}
 
 	var output strings.Builder
-	fmt.Fprintf(&output, "# ADR %04d: Adopt agentic repository rules\n\n", number)
+	fmt.Fprintf(&output, "# ADR %04d: Adopt actionable repository standards\n\n", number)
 	output.WriteString("- Status: Proposed\n")
 	fmt.Fprintf(&output, "- Baseline commit: `%s`\n", pack.BaselineCommit)
-	fmt.Fprintf(&output, "- Assessment: `%s`\n\n", pack.AssessmentPath)
+	fmt.Fprintf(&output, "- Report: `%s`\n\n", pack.ReportPath)
 	output.WriteString("## Context\n\n")
-	output.WriteString("The repository was inspected at the pinned baseline above. The developer retained the following evidence-backed source files after review. This record does not claim that cited verification commands were executed.\n\n")
-	output.WriteString("## Proposed decision\n")
+	output.WriteString("The repository was inspected at the pinned baseline above. The developer retained the following evidence-backed actionable artifacts after review. Verification recipes are recorded here but were not executed by SSB.\n")
+	if len(rules) != 0 {
+		output.WriteString("\n## Semantic rules\n")
+	}
 	for _, rule := range rules {
+		metadata := manifest[rule.ID]
 		fmt.Fprintf(&output, "\n### %s (`%s`)\n\n", rule.Title, rule.ID)
 		fmt.Fprintf(&output, "- Source: `%s`\n", rule.SourcePath)
 		fmt.Fprintf(&output, "- Scope: %s\n", markdownCodeList(rule.Scopes))
-		fmt.Fprintf(&output, "- Primary topic: `%s`\n", rule.Topic)
-		if rule.Schema == rulepack.SchemaVersionV2 {
-			fmt.Fprintf(&output, "- Lenses: %s\n", markdownLensList(rule.Lenses))
-			fmt.Fprintf(&output, "- Directive: `%s`\n", rule.Directive)
-		}
-		fmt.Fprintf(&output, "- Classification: `%s`\n", rule.Classification)
-		fmt.Fprintf(&output, "- Importance: `%s` (%d/100, `%s`)\n", rule.Importance, rule.Score.Total, rule.Score.Method)
-		fmt.Fprintf(&output, "- Confidence: `%s`\n", rule.Confidence)
-		command := strings.TrimSpace(rule.Verification.Command)
-		if command != "" {
-			fmt.Fprintf(&output, "- Existing verification: `%s` (mapped, not executed)\n", command)
-			if rule.Schema == rulepack.SchemaVersionV2 {
-				fmt.Fprintf(&output, "- Verification coverage: `%s`\n", rule.Verification.Coverage)
-				fmt.Fprintf(&output, "- Proves when the mapped command passes: %s\n", strings.TrimSpace(rule.Verification.Proves))
-			}
-		} else {
-			fmt.Fprintf(&output, "- Proof gap: %s\n", strings.TrimSpace(rule.Verification.ProofGap))
-		}
-		output.WriteString("- Evidence:\n")
-		for _, evidence := range rule.Evidence {
-			fmt.Fprintf(&output, "  - `%s:%s` (`%s`)\n", evidence.Path, evidence.Lines, evidence.ExcerptSHA256)
-		}
-		if len(rule.RelatedSkillIDs) != 0 {
-			fmt.Fprintf(&output, "- Related skills: %s\n", markdownCodeList(rule.RelatedSkillIDs))
-		}
+		fmt.Fprintf(&output, "- Lenses: %s\n", markdownLensList(rule.Lenses))
+		fmt.Fprintf(&output, "- Directive: `%s`\n", rule.Directive)
+		writeAdoptionMetadata(&output, rule.Category, rule.Derivation, rule.Evidence, metadata)
 		output.WriteString("\n")
 		output.WriteString(rule.Body)
 		if !strings.HasSuffix(rule.Body, "\n") {
 			output.WriteString("\n")
 		}
 	}
+	if len(recipes) != 0 {
+		output.WriteString("\n## Verification recipes\n")
+		for _, recipe := range recipes {
+			metadata := manifest[recipe.ID]
+			fmt.Fprintf(&output, "\n### %s (`%s`)\n\n", recipe.Title, recipe.ID)
+			fmt.Fprintf(&output, "- Source: `%s`\n", recipe.SourcePath)
+			fmt.Fprintf(&output, "- Scope: %s\n", markdownCodeList(recipe.Scopes))
+			fmt.Fprintf(&output, "- Lenses: %s\n", markdownLensList(recipe.Lenses))
+			fmt.Fprintf(&output, "- When: %s\n", strings.TrimSpace(recipe.When))
+			writeAdoptionMetadata(&output, recipe.Category, recipe.Derivation, recipe.Evidence, metadata)
+		}
+	}
 	if len(skills) != 0 {
-		output.WriteString("\n## Retained procedural skills\n")
+		output.WriteString("\n## Agent Skills\n")
 		for _, skill := range skills {
-			fmt.Fprintf(&output, "\n- `%s`\n", skill.ID)
-			fmt.Fprintf(&output, "  - Primary topic: `%s`\n", skill.Topic)
-			fmt.Fprintf(&output, "  - Source: `%s`\n", skill.SourcePath)
-			fmt.Fprintf(&output, "  - Description: %s\n", skill.Description)
+			metadata := manifest[skill.ID]
+			fmt.Fprintf(&output, "\n### %s (`%s`)\n\n", titleFromID(skill.ID), skill.ID)
+			fmt.Fprintf(&output, "- Source: `%s`\n", skill.SourcePath)
+			fmt.Fprintf(&output, "- Description: %s\n", strings.TrimSpace(skill.Description))
+			fmt.Fprintf(&output, "- Scope: %s\n", markdownCodeList(metadata.Scopes))
+			fmt.Fprintf(&output, "- Lenses: %s\n", markdownLensList(metadata.Lenses))
+			writeAdoptionMetadata(&output, skill.Category, metadata.Derivation, metadata.Evidence, metadata)
 		}
 	}
 	output.WriteString("\n## Consequences\n\n")
-	output.WriteString("- `AGENTS.md` is a derived projection; rule and skill source files remain editable.\n")
-	output.WriteString("- Guidance remains distinct from deterministic proof, and cited checks remain repository-owned.\n")
+	output.WriteString("- `AGENTS.md` is a derived projection; the report and canonical artifact source files remain editable.\n")
+	output.WriteString("- Verification recipes remain deliberately invoked repository procedures; this record does not claim their commands passed.\n")
 	output.WriteString("- The developer-created pull request and its merge constitute adoption; this ADR remains Proposed until then.\n")
 	return []byte(output.String())
+}
+
+func writeAdoptionMetadata(
+	output *strings.Builder,
+	category string,
+	derivation string,
+	evidence []rulepack.Evidence,
+	metadata rulepack.ManifestArtifact,
+) {
+	fmt.Fprintf(output, "- Category: `%s`\n", category)
+	fmt.Fprintf(output, "- Derivation: `%s`\n", derivation)
+	fmt.Fprintf(output, "- Confidence: `%s`\n", metadata.Confidence)
+	fmt.Fprintf(
+		output,
+		"- Utility: `%s` (%d/100, `%s`)\n",
+		utilityBand(metadata.Utility.Total),
+		metadata.Utility.Total,
+		metadata.Utility.Method,
+	)
+	fmt.Fprintf(output, "- Evidence: %s\n", markdownEvidenceList(evidence))
+}
+
+func markdownEvidenceList(evidence []rulepack.Evidence) string {
+	values := make([]string, 0, len(evidence))
+	for _, item := range evidence {
+		values = append(
+			values,
+			fmt.Sprintf("`%s:%s` (`%s`)", item.Path, item.Lines, item.Role),
+		)
+	}
+	return strings.Join(values, ", ")
+}
+
+func utilityBand(total int) string {
+	switch {
+	case total >= 80:
+		return "very-high"
+	case total >= 65:
+		return "high"
+	default:
+		return "medium"
+	}
+}
+
+func titleFromID(id string) string {
+	title := strings.ReplaceAll(id, "-", " ")
+	if title != "" {
+		title = strings.ToUpper(title[:1]) + title[1:]
+	}
+	return title
 }
 
 func markdownCodeList(values []string) string {

@@ -22,9 +22,9 @@ const Version = "ssb-inventory-v2"
 
 // Limits bound repository resource use during inspection.
 type Limits struct {
-	MaxCandidateFiles int   `json:"max_candidate_files"`
-	MaxCandidateBytes int64 `json:"max_candidate_bytes"`
-	MaxFileBytes      int64 `json:"max_file_bytes"`
+	MaxCandidateFiles int   `yaml:"max_candidate_files" json:"max_candidate_files"`
+	MaxCandidateBytes int64 `yaml:"max_candidate_bytes" json:"max_candidate_bytes"`
+	MaxFileBytes      int64 `yaml:"max_file_bytes" json:"max_file_bytes"`
 }
 
 // DefaultLimits cover the pinned public benchmark corpus with at least twenty
@@ -40,44 +40,44 @@ func DefaultLimits() Limits {
 
 // Exclusions counts tracked entries that were deliberately not read.
 type Exclusions struct {
-	Binary     int `json:"binary"`
-	Generated  int `json:"generated"`
-	Oversized  int `json:"oversized"`
-	SecretLike int `json:"secret_like"`
-	Symlink    int `json:"symlink"`
-	Submodule  int `json:"submodule"`
-	VendorTree int `json:"vendor_or_generated_tree"`
-	NonRegular int `json:"non_regular"`
+	Binary     int `yaml:"binary" json:"binary"`
+	Generated  int `yaml:"generated" json:"generated"`
+	Oversized  int `yaml:"oversized" json:"oversized"`
+	SecretLike int `yaml:"secret_like" json:"secret_like"`
+	Symlink    int `yaml:"symlink" json:"symlink"`
+	Submodule  int `yaml:"submodule" json:"submodule"`
+	VendorTree int `yaml:"vendor_or_generated_tree" json:"vendor_or_generated_tree"`
+	NonRegular int `yaml:"non_regular" json:"non_regular"`
 }
 
 // File is a safe, tracked text blob available for targeted semantic reads.
 type File struct {
-	Path     string `json:"path"`
-	BlobOID  string `json:"blob_oid"`
-	Bytes    int64  `json:"bytes"`
-	Lines    int    `json:"lines"`
-	Language string `json:"language,omitempty"`
-	SHA256   string `json:"sha256"`
+	Path     string `yaml:"path" json:"path"`
+	BlobOID  string `yaml:"blob_oid" json:"blob_oid"`
+	Bytes    int64  `yaml:"bytes" json:"bytes"`
+	Lines    int    `yaml:"lines" json:"lines"`
+	Language string `yaml:"language,omitempty" json:"language,omitempty"`
+	SHA256   string `yaml:"sha256" json:"sha256"`
 }
 
 // Report is stable for a given commit and set of limits.
 type Report struct {
-	SchemaVersion           int        `json:"schema_version"`
-	InventoryVersion        string     `json:"inventory_version"`
-	BaselineCommit          string     `json:"baseline_commit"`
-	Limits                  Limits     `json:"limits"`
-	CandidateFiles          int        `json:"candidate_files"`
-	CandidateBytes          int64      `json:"candidate_bytes"`
-	ScannedFiles            int        `json:"scanned_files"`
-	ScannedBytes            int64      `json:"scanned_bytes"`
-	IndexedFiles            int        `json:"indexed_files"`
-	IndexedBytes            int64      `json:"indexed_bytes"`
-	Files                   []File     `json:"files"`
-	Excluded                Exclusions `json:"excluded"`
-	Truncated               bool       `json:"truncated"`
-	TruncationReason        string     `json:"truncation_reason,omitempty"`
-	RemainingCandidateFiles int        `json:"remaining_candidate_files"`
-	RemainingCandidateBytes int64      `json:"remaining_candidate_bytes"`
+	SchemaVersion           int        `yaml:"schema_version" json:"schema_version"`
+	InventoryVersion        string     `yaml:"inventory_version" json:"inventory_version"`
+	BaselineCommit          string     `yaml:"baseline_commit" json:"baseline_commit"`
+	Limits                  Limits     `yaml:"limits" json:"limits"`
+	CandidateFiles          int        `yaml:"candidate_files" json:"candidate_files"`
+	CandidateBytes          int64      `yaml:"candidate_bytes" json:"candidate_bytes"`
+	ScannedFiles            int        `yaml:"scanned_files" json:"scanned_files"`
+	ScannedBytes            int64      `yaml:"scanned_bytes" json:"scanned_bytes"`
+	IndexedFiles            int        `yaml:"indexed_files" json:"indexed_files"`
+	IndexedBytes            int64      `yaml:"indexed_bytes" json:"indexed_bytes"`
+	Files                   []File     `yaml:"files" json:"files"`
+	Excluded                Exclusions `yaml:"excluded" json:"excluded"`
+	Truncated               bool       `yaml:"truncated" json:"truncated"`
+	TruncationReason        string     `yaml:"truncation_reason,omitempty" json:"truncation_reason,omitempty"`
+	RemainingCandidateFiles int        `yaml:"remaining_candidate_files" json:"remaining_candidate_files"`
+	RemainingCandidateBytes int64      `yaml:"remaining_candidate_bytes" json:"remaining_candidate_bytes"`
 }
 
 type treeEntry struct {
@@ -145,6 +145,14 @@ func Scan(ctx context.Context, repo *workspace.Repository, limits Limits) (Repor
 // the adopted standards pack required by prune review.
 func ScanForPrune(ctx context.Context, repo *workspace.Repository, limits Limits) (Report, error) {
 	return scan(ctx, repo, limits, defaultBatchPolicy, repo.VerifyPruneSnapshot)
+}
+
+// ScanAtBaseline rebuilds deterministic coverage accounting for an explicit
+// commit-backed repository view. It is used to validate a recorded report,
+// including a historical ancestor, and therefore does not reinterpret current
+// worktree state as part of the recorded baseline.
+func ScanAtBaseline(ctx context.Context, repo *workspace.Repository, limits Limits) (Report, error) {
+	return scan(ctx, repo, limits, defaultBatchPolicy, func(context.Context) error { return nil })
 }
 
 func scan(

@@ -6,62 +6,84 @@ import (
 	"testing"
 )
 
-func TestAgentSkillRequiresStructuralPatternDiscovery(t *testing.T) {
+func TestAgentSkillRequiresActionableCandidateRouting(t *testing.T) {
 	root := repositoryRoot(t)
-	skill := readText(t, filepath.Join(root, "skills", "software-standards-bootstrap", "SKILL.md"))
+	skill := normalizedText(t, filepath.Join(
+		root,
+		"skills",
+		"software-standards-bootstrap",
+		"SKILL.md",
+	))
 
-	const referenceLink = "[the structural-pattern workflow](references/structural-patterns.md)"
-	if !strings.Contains(skill, referenceLink) {
-		t.Errorf("Agent Skill missing mandatory structural-pattern reference %q", referenceLink)
+	for _, required := range []string{
+		"outside planning, implementation, or verification work",
+		"Review existing commands, invocation, triggers, and automatic enforcement",
+		"already handled completely and automatically",
+		"exactly one primary destination",
+		"implementation condition → semantic rule",
+		"deliberately invoked existing command → verification recipe",
+		"multi-step workflow with decisions, edits, setup, branching, or recovery → Agent Skill",
+		"valuable proposed automatic check → automation proposal",
+		"below `medium` confidence",
+		"total below 45",
+		"Review each semantic name",
+		"Write accepted artifacts and then the final report manifest",
+		"Do not persist rejected candidates, rejection reasons, or rejection counts",
+	} {
+		if !strings.Contains(skill, required) {
+			t.Errorf("Agent Skill missing candidate-routing contract %q", required)
+		}
 	}
-	if !strings.Contains(skill, "Complete the structural-pattern pass before scoring or writing candidates.") {
-		t.Error("Agent Skill does not require structural discovery before candidate scoring")
-	}
+}
 
-	workflow := readText(t, filepath.Join(
+func TestAgentSkillRequiresStructuralAndExistingCheckReview(t *testing.T) {
+	root := repositoryRoot(t)
+	skill := normalizedText(t, filepath.Join(
+		root,
+		"skills",
+		"software-standards-bootstrap",
+		"SKILL.md",
+	))
+	workflow := normalizedText(t, filepath.Join(
 		root,
 		"skills",
 		"software-standards-bootstrap",
 		"references",
 		"structural-patterns.md",
 	))
-	workflow = strings.Join(strings.Fields(workflow), " ")
+
+	for _, required := range []string{
+		"dependency boundaries",
+		"parallel implementations",
+		"platform seams",
+		"compatibility surfaces",
+		"source/test/documentation symmetry",
+		"existing automatic enforcement",
+	} {
+		if !strings.Contains(skill, required) {
+			t.Errorf("Agent Skill missing discovery contract %q", required)
+		}
+	}
 	for _, required := range []string{
 		"Package and dependency boundaries",
 		"Parallel implementation families",
 		"Platform and configuration seams",
 		"Public compatibility surfaces",
 		"Source, test, and documentation symmetry",
-		"narrow the scope",
-		"three consistent occurrences across at least two files",
-		"ordinary ecosystem convention",
-		"Structural pattern review",
+		"three consistent occurrences across two files",
+		"ordinary ecosystem conventions",
+		"verification recipe",
+		"automation proposal",
 	} {
 		if !strings.Contains(workflow, required) {
-			t.Errorf("structural-pattern workflow missing contract %q", required)
+			t.Errorf("structural workflow missing %q", required)
 		}
 	}
 }
 
-func TestDocumentationCarriesStructuralPatternAcceptance(t *testing.T) {
+func TestSchemaReferenceDefinesAllActionableContracts(t *testing.T) {
 	root := repositoryRoot(t)
-	documents := map[string]string{
-		"README":     readText(t, filepath.Join(root, "README.md")),
-		"smoke test": readText(t, filepath.Join(root, "docs", "agent-smoke-tests.md")),
-		"benchmark":  readText(t, filepath.Join(root, "docs", "benchmarks.md")),
-	}
-
-	for document, content := range documents {
-		if !strings.Contains(content, "structural-pattern review") {
-			t.Errorf("%s documentation missing structural-pattern review acceptance", document)
-		}
-	}
-}
-
-func TestAgentSkillRequiresPrimaryTopicMetadata(t *testing.T) {
-	root := repositoryRoot(t)
-	skill := readText(t, filepath.Join(root, "skills", "software-standards-bootstrap", "SKILL.md"))
-	schema := readText(t, filepath.Join(
+	schema := normalizedText(t, filepath.Join(
 		root,
 		"skills",
 		"software-standards-bootstrap",
@@ -70,15 +92,25 @@ func TestAgentSkillRequiresPrimaryTopicMetadata(t *testing.T) {
 	))
 
 	for _, required := range []string{
-		"assign exactly one primary topic",
-		"`quality` only when no narrower topic fits",
-		"`metadata.topic`",
+		"ssb.dev/report/v1",
+		"ssb.dev/rule/v2",
+		"ssb.dev/verification/v1",
+		"ssb.dev/automation/v1",
+		"metadata.category",
+		"ssb-utility-v1",
+		"related_artifacts",
+		"role: declares",
+		"role: enforces",
+		"source_evidence",
+		"planning",
+		"implementation",
+		"verification",
 	} {
-		if !strings.Contains(skill, required) {
-			t.Errorf("Agent Skill missing primary-topic contract %q", required)
+		if !strings.Contains(schema, required) {
+			t.Errorf("actionable schema reference missing %q", required)
 		}
 	}
-	for _, topic := range []string{
+	for _, category := range []string{
 		"architecture",
 		"compatibility",
 		"compliance",
@@ -93,108 +125,100 @@ func TestAgentSkillRequiresPrimaryTopicMetadata(t *testing.T) {
 		"security",
 		"testability",
 	} {
-		if !strings.Contains(schema, topic) {
-			t.Errorf("rule schema missing supported primary topic %q", topic)
+		if !strings.Contains(schema, category) {
+			t.Errorf("actionable schema reference missing category %q", category)
 		}
 	}
 }
 
-func TestAgentSkillSupportsExistingPackProgressiveSelection(t *testing.T) {
+func TestAgentSkillSupportsActionablePackConsumptionAndMaintenance(t *testing.T) {
 	root := repositoryRoot(t)
-	skill := readText(t, filepath.Join(root, "skills", "software-standards-bootstrap", "SKILL.md"))
-	skill = strings.Join(strings.Fields(skill), " ")
+	skill := normalizedText(t, filepath.Join(
+		root,
+		"skills",
+		"software-standards-bootstrap",
+		"SKILL.md",
+	))
 
 	for _, required := range []string{
 		"existing-pack consumption mode",
 		"Reviewed-pack maintenance mode",
 		"Requested-ADR mode",
-		"do not run `ssb inspect`, `ssb validate`, or `ssb render`",
-		"reconcile each canonical source ID and its selection metadata against every managed-index occurrence",
-		"expect one contextual rule to occur under each of its lens values",
-		"stopping as stale",
-		"base rule active when its path scope matches",
-		"every represented lens dimension",
-		"report the active rule IDs",
-		"Legacy v1 rules have no directive",
-		"mapped, not executed",
+		"Do not run `ssb inspect`, `ssb validate`, or `ssb render`",
+		"no active guidance",
+		"Automation proposals are not active policy",
+		"every represented lens dimension matches",
+		"Report active artifact IDs",
+		"Run recipe commands only when",
 		"ssb validate --repo . --format text",
+		"ssb render --repo . --dry-run",
 		"ssb adr --repo . --dry-run",
+		"automation-only pack has nothing adoptable",
 	} {
 		if !strings.Contains(skill, required) {
-			t.Errorf("Agent Skill missing existing-pack contract %q", required)
+			t.Errorf("Agent Skill missing consumption or maintenance contract %q", required)
 		}
 	}
 }
 
-func TestRuleSchemaReferenceDefinesV2ActivationAndProofContract(t *testing.T) {
+func TestPublicDocumentationUsesOnlyActionableContracts(t *testing.T) {
 	root := repositoryRoot(t)
-	schema := readText(t, filepath.Join(
-		root,
-		"skills",
-		"software-standards-bootstrap",
-		"references",
-		"rule-schema.md",
-	))
+	documents := []string{
+		"README.md",
+		"CHANGELOG.md",
+		"CONTEXT.md",
+		"CONTRIBUTING.md",
+		"docs/architecture.md",
+		"docs/rule-format.md",
+		"docs/agent-smoke-tests.md",
+		"docs/benchmarks.md",
+		"docs/verification.md",
+		"skills/software-standards-bootstrap/SKILL.md",
+		"skills/software-standards-bootstrap/references/rule-schema.md",
+		"skills/software-standards-bootstrap/references/evidence-workflow.md",
+		"skills/software-standards-bootstrap/references/structural-patterns.md",
+		"skills/software-standards-bootstrap/references/categories.md",
+	}
 
-	for _, required := range []string{
-		"ssb.dev/rule/v2",
-		"kind: language",
-		"kind: framework",
-		"kind: task",
-		"directive: always",
-		"coverage: full",
-		"mapped, not executed",
-		"implementation",
-		"review",
-		"testing",
-		"security",
-		"documentation",
-		"release",
-	} {
-		if !strings.Contains(schema, required) {
-			t.Errorf("rule schema missing v2 contract %q", required)
+	for _, relative := range documents {
+		content := readText(t, filepath.Join(root, filepath.FromSlash(relative)))
+		for _, forbidden := range []string{
+			".software-standards/assessment.md",
+			"ssb.dev/rule/v1",
+			"ssb-score-v1",
+			"topic:",
+			"metadata.topic",
+			"proof_gap:",
+			"related_skills:",
+		} {
+			if strings.Contains(content, forbidden) {
+				t.Errorf("%s retains removed contract %q", relative, forbidden)
+			}
 		}
 	}
 }
 
-func TestSmokeTestsDefineHostAgnosticProgressiveSelectionConformance(t *testing.T) {
+func TestSmokeAcceptanceCoversAllArtifactKinds(t *testing.T) {
 	root := repositoryRoot(t)
-	smokeTests := readText(t, filepath.Join(root, "docs", "agent-smoke-tests.md"))
-	smokeTests = strings.Join(strings.Fields(smokeTests), " ")
+	smoke := normalizedText(t, filepath.Join(root, "docs", "agent-smoke-tests.md"))
 
 	for _, required := range []string{
 		"Agent-host behavioral conformance tests",
-		"not part of normal developer usage",
-		"conforming agent host",
-		"Run this suite once for every host compatibility claim",
-		"Existing-pack progressive-selection matrix",
+		"semantic rule, verification recipe, Agent Skill, or automation proposal",
+		"`planning`",
 		"`implementation`",
-		"`review`",
-		"`testing`",
-		"`security`",
-		"reports the active rule IDs",
-		"does not read irrelevant contextual rule bodies",
-		"never reports a mapped verification command as executed or passed",
-		"| Host/version | Skill exposure method |",
-		"reference adapters",
+		"`verification`",
+		"reports active artifact IDs",
+		"does not treat automation proposals as active",
+		"70% developer keep or edit-and-keep across all final artifact kinds",
 	} {
-		if !strings.Contains(smokeTests, required) {
-			t.Errorf("agent-host conformance tests missing contract %q", required)
+		if !strings.Contains(smoke, required) {
+			t.Errorf("smoke-test contract missing %q", required)
 		}
 	}
 }
 
-func TestDocumentationCarriesPrimaryTopicAcceptance(t *testing.T) {
-	root := repositoryRoot(t)
-	documents := map[string]string{
-		"README":     readText(t, filepath.Join(root, "README.md")),
-		"smoke test": readText(t, filepath.Join(root, "docs", "agent-smoke-tests.md")),
-		"benchmark":  readText(t, filepath.Join(root, "docs", "benchmarks.md")),
-	}
-
-	for document, content := range documents {
-		if !strings.Contains(content, "primary topic") {
-			t.Errorf("%s documentation missing primary topic acceptance", document)
-		}
-	}
+func normalizedText(t *testing.T, path string) string {
+	t.Helper()
+	return strings.Join(strings.Fields(readText(t, path)), " ")
 }

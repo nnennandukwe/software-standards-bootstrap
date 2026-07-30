@@ -24,13 +24,19 @@ Do not install dependencies or execute repository code.
 
 Then run the Agent Skill workflow described in [agent-smoke-tests.md](agent-smoke-tests.md). Keep proposal files uncommitted. Record:
 
+Keep proposal generation, developer retention, rendering, ADR creation, and
+release evidence as separate recorded states. Do not infer a later state from
+an earlier artifact.
+
 - consumer and version;
 - operating system;
 - exact pin;
 - inventory schema, candidate/scanned/indexed counts and bytes, exclusions, and
   confirmation of complete coverage;
-- candidate scores, classifications, and primary topics;
-- structural-pattern review coverage and candidate dispositions;
+- counts for every emitted rule, verification recipe, Agent Skill, and
+  automation proposal;
+- confidence, utility, and category for each emitted artifact;
+- structural-pattern and existing-check review coverage;
 - evidence resolution result;
 - keep/edit-and-keep/defer/reject judgment;
 - complete changed-path list; and
@@ -38,15 +44,21 @@ Then run the Agent Skill workflow described in [agent-smoke-tests.md](agent-smok
 
 ## Acceptance
 
-- 100% of emitted rules have resolvable evidence.
-- The structural-pattern review records all five required dimensions and dispositions for every plausible candidate.
-- At least 70% of high and very-high candidates are judged “keep” or “edit and keep.”
+- 100% of emitted artifacts have resolvable evidence.
+- The structural-pattern review covers all five required dimensions and the
+  existing-command and automatic-enforcement review.
+- Every accepted candidate has exactly one actionable artifact kind.
+- At least 70% of all final artifacts are judged “keep” or “edit and keep.”
 - Inventory v2 completes all four pinned repositories under its defaults.
 - Any truncated run blocks proposal generation and is not benchmark acceptance.
 - Procedural candidates become Agent Skills.
-- Existing commands are mapped without execution.
-- Every retained rule and procedural skill uses one supported primary topic, and generated `AGENTS.md` and ADR output preserve it.
-- Rule edits and deletions propagate to `AGENTS.md` and the ADR.
+- Existing deliberately invoked commands become recipes without execution.
+- Proposed checks remain automation proposals and never enter `AGENTS.md` or
+  the ADR.
+- Every artifact uses one supported category, and projection/ADR output
+  preserves the applicable category.
+- Artifact edits and deletions, together with report updates, propagate to
+  `AGENTS.md` and the ADR.
 - Codex and Claude Code both finish the workflow through their documented skill locations.
 
 The benchmark pins are evaluation inputs, not runtime dependencies. `ssb` never clones or contacts these repositories.
@@ -59,6 +71,10 @@ Each record separates a generated proposal from developer acceptance and
 discloses truncation, evidence resolution, structural dispositions, changed
 paths, and forbidden-action checks.
 
-Those records used `ssb-inventory-v1` and remain immutable historical evidence.
-They are not inventory-v2 release acceptance. The v2 consumer refresh must be
-recorded separately before release.
+Those files remain immutable historical evidence for their recorded contract.
+They are not actionable-artifact acceptance. Record a fresh blind pass over all
+four pins separately.
+
+The [2026-07-29 actionable gate record](benchmarks/results/2026-07-29-actionable/README.md)
+captures a fresh complete inventory pass over all four pins. Proposal
+generation and developer retention remain explicitly open in that ledger.

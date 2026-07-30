@@ -2,54 +2,56 @@
 
 ## Canonical bytes
 
-Evidence is tied to the `baseline_commit` returned by `ssb inspect`. Hash the exact bytes from the inclusive one-based line range, preserving `LF` or `CRLF` endings. Do not hash copied prose, normalized whitespace, worktree-only edits, or model summaries.
+Evidence is tied to the report's `baseline_commit`. Hash exact bytes from the
+inclusive one-based line range, preserving line endings. Do not hash copied
+prose, normalized whitespace, worktree-only edits, or model summaries.
 
-`ssb validate` reads the same range from the pinned Git blob and reports the expected digest when a hash is wrong.
+`ssb validate` reads the same range from the pinned Git blob and reports the
+expected digest when a hash is stale. It also rebuilds the recorded complete
+inventory from the pinned baseline and limits.
 
-## Authority
+## Roles and derivation
 
-Mark `authoritative: true` only when the repository itself treats the cited location as normative, such as a maintained architecture decision, contribution contract, security requirement, or configuration that owns the behavior. Repetition alone is not authority.
+Use evidence roles literally:
 
-Without an authoritative source, require three consistent occurrences across at least two files. Similar-looking code with different state or risk boundaries is not consistent evidence.
+- `declares`: an explicit repository-maintained obligation;
+- `demonstrates`: a concrete implementation occurrence supporting an inferred
+  invariant; and
+- `enforces`: a repository mechanism that actively checks a condition.
 
-## Existing proof
+An `extracted` artifact needs at least one `declares` or `enforces` citation.
+An `inferred` artifact needs at least three distinct `demonstrates` citations
+across at least two files. Similar-looking code with different state or risk
+boundaries is not consistent evidence.
 
-An existing command is deterministic evidence only for the bounded property it checks. Cite the repository location that defines the command. Do not run it and do not claim it passed.
+The inventory eligibility boundary also applies during validation. Do not cite
+binary, oversized, secret-like, generated/vendor, symlink, submodule, or other
+excluded paths.
 
-Examples:
+## Existing commands
 
-- a linter configuration can prove the encoded lint rule when the linter is run elsewhere;
-- a test command can prove only its encoded assertions;
-- a green build does not prove every integration or production interaction; and
-- prose guidance without a checker remains guidance with a proof gap.
+Inspect existing commands, their invocation sites and triggers, and the exact
+condition they enforce. Never run a command during generation and never claim
+that it passed.
 
-For rule v2, write the bounded property into `verification.proves`. Use
-`coverage: full` only when the existing check proves the complete rule. Use
-`coverage: partial` when the command proves only part of otherwise semantic
-guidance. A command is always mapped, not executed by `ssb`.
+- If an existing automatic mechanism completely handles the condition, emit
+  nothing.
+- If developer value comes from deliberately invoking an existing command,
+  emit a verification recipe with exact `enforces` evidence.
+- If value comes from a semantic implementation condition, emit a semantic
+  rule without command metadata.
+- If an automatic check would be valuable but does not exist, emit an
+  automation proposal rather than inventing a command or checker.
 
 ## Preferred examples and counterexamples
 
-Use repository examples only when their role is supported by evidence:
+Point to a preferred example only when authority or repeated evidence
+establishes it as the shape to follow. Point to a counterexample only when
+repository authority identifies it as deprecated, unsafe, or intentionally
+avoided. Cite locations rather than copying large blocks into `AGENTS.md`.
 
-- point to a preferred example when an authoritative source or repeated
-  pattern establishes it as the shape to follow;
-- point to a counterexample only when repository authority identifies the
-  pattern as deprecated, unsafe, or intentionally avoided; and
-- cite the exact evidence location in the rule instead of copying a large code
-  block into `AGENTS.md`.
+## Rejected candidates
 
-Do not invent examples, infer that old code is bad merely because it differs,
-or turn an incidental occurrence into a gold-standard pattern.
-
-## Assessment-only candidates
-
-Keep a candidate in `.software-standards/assessment.md` when:
-
-- its score is below 25;
-- evidence does not meet the authority/occurrence threshold;
-- scope is unclear;
-- classification depends on unverified behavior; or
-- the recommendation is repository context rather than durable guidance.
-
-Record why it was not emitted. Do not manufacture evidence to fill a rule count.
+Reject and discard candidates whose evidence threshold is unmet, scope is
+unclear, confidence is below medium, utility is below 45, or destination is not
+one of the four artifact kinds. Do not persist the candidate, reason, or count.

@@ -57,12 +57,12 @@ func TestREADMEAndAgentSkillMatchTheExecutableCommandContract(t *testing.T) {
 			t.Errorf("Agent Skill missing executable command %q", command)
 		}
 	}
-	if !strings.Contains(skill, "Do not run `ssb adr` as part of the initial generation workflow.") {
+	if !strings.Contains(skill, "Stop before the ADR.") {
 		t.Error("Agent Skill does not preserve the human review gate before ADR generation")
 	}
 	for _, required := range []string{
-		"Never pass `--allow-partial`",
-		"Do not create proposal files from incomplete inventory coverage",
+		"Never pass `--allow-partial`.",
+		"Stop on any failure, including exit `4`",
 	} {
 		if !strings.Contains(skill, required) {
 			t.Errorf("Agent Skill missing incomplete-coverage gate %q", required)

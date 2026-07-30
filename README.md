@@ -1,20 +1,25 @@
 # Software Standards Bootstrap
 
-Software Standards Bootstrap (`ssb`) generates three kinds of AI-facing guidance for an existing Git repository:
+Software Standards Bootstrap (`ssb`) generates four actionable artifact kinds
+for an existing Git repository:
 
-1. **Coding-convention rules** that explain how code should be structured, implemented, tested, reviewed, and maintained.
-2. **Agent Skills** that give AI coding tools step-by-step instructions for repository-specific engineering workflows.
-3. **An optimized root `AGENTS.md`** that routes AI coding tools to the rules and related skills relevant to their current files and task.
+1. **Semantic rules** for evidence-backed implementation conditions.
+2. **Verification recipes** for deliberately invoked existing commands.
+3. **Agent Skills** for multi-step engineering workflows.
+4. **Automation proposals** for valuable checks that do not yet exist.
 
-Together, these files give future AI-assisted work repository-specific context for planning changes, generating code, testing, maintenance, code review, and release work.
+A required run report indexes accepted artifacts. A derived root `AGENTS.md`
+routes future coding agents to active rules, recipes, and skills.
 
 Run `ssb` in a repository whose engineering conventions are not yet documented for AI tools. A compatible coding agent analyzes the committed repository and proposes these files. Developers review, edit, delete, or approve them before adoption.
 
-The coding agent performs the semantic analysis. The `ssb` CLI pins the input commit, builds a safe inventory, validates the generated evidence, renders `AGENTS.md`, and creates an optional Proposed ADR.
+The coding agent performs semantic analysis. The offline `ssb` CLI pins the
+input commit, builds and replays a safe inventory, validates schemas and exact
+evidence, renders `AGENTS.md`, and creates an optional Proposed ADR.
 
 ## What it generates
 
-### Coding-convention rules
+### Semantic rules
 
 Each proposed rule is stored at:
 
@@ -22,9 +27,12 @@ Each proposed rule is stored at:
 .software-standards/rules/<rule-id>.md
 ```
 
-Rules tell future AI tools what to `always`, `never`, or `prefer`, and when to ask a developer before proceeding. They can cover code structure, architectural boundaries, implementation patterns, testing, review, security, documentation, and release work.
+Rules tell future AI tools what to `always`, `never`, or `prefer`, and when to
+ask a developer before proceeding.
 
-Every rule records where it applies, the exact repository evidence supporting it, the commit that was analyzed, and whether an existing repository check verifies all or part of it.
+Every rule carries its engineering category, activation lenses, path scopes,
+derivation, exact repository evidence, and actionable body. Commands and check
+metadata never live in a semantic rule.
 
 For example:
 
@@ -32,9 +40,26 @@ For example:
 
 The generated rule would cite the repository files and line ranges that establish that boundary.
 
-`ssb` does not turn generic best practices into repository rules. A rule needs an authoritative repository source or a consistent pattern repeated across the repository. Findings without enough evidence remain in the assessment.
+`ssb` does not turn generic best practices into repository rules. Extracted
+rules need repository authority or enforcement. Inferred rules need three
+supporting occurrences across at least two files. Rejected candidates are
+discarded.
 
-Before proposing rules, the agent performs a structural-pattern review of dependency boundaries, parallel implementations, platform seams, compatibility surfaces, and source/test/documentation symmetry. Every retained rule also names one primary topic, such as architecture, correctness, maintainability, security, or testability, so reviewers can see the engineering concern it protects.
+Before proposing artifacts, the agent reviews dependency boundaries, parallel
+implementations, platform seams, compatibility surfaces,
+source/test/documentation symmetry, and existing automatic enforcement.
+
+### Verification recipes
+
+Existing commands that deliver value when deliberately invoked are recorded at:
+
+```text
+.software-standards/verification/<recipe-id>.yaml
+```
+
+A recipe states when it applies, its ordered commands, exact `enforces`
+evidence, and the expected successful result. `ssb` records but never executes
+recipe commands.
 
 ### Agent Skills
 
@@ -44,32 +69,50 @@ Multi-step procedures are generated as reusable Agent Skills:
 .agents/skills/<skill-name>/SKILL.md
 ```
 
-A skill can tell an AI coding tool how to plan a cross-boundary change, update generated code, modify a schema and its dependents, or follow an existing review or release workflow.
+A skill can tell an AI coding tool how to plan a cross-boundary change, update
+generated code, modify a schema and its dependents, or recover a multi-step
+engineering workflow.
 
-Rules define constraints. Skills define procedures.
+Rules define semantic conditions. Recipes record existing commands. Skills
+define procedures.
+
+### Automation proposals
+
+Valuable automatic checks that do not exist are described at:
+
+```text
+.software-standards/automation/<proposal-id>.yaml
+```
+
+These are reviewable designs, not implemented checks or active standards.
 
 ### Optimized `AGENTS.md`
 
 `ssb` renders the proposed guidance into a managed section in the repository's root `AGENTS.md`.
 
-Base rules become standing orders. Contextual rules are routed by affected path, language, framework, and task. Rules reference procedural skills when needed. This gives an AI tool the relevant repository guidance without loading every rule for every task.
+Base rules become standing orders. Contextual rules and recipes are links.
+Primary Agent Skills are indexed by activation context. Automation proposals
+are omitted because they are not active behavior.
 
-The rule and skill files are the editable sources. `AGENTS.md` is generated from them.
+The report and canonical artifact files are editable sources. `AGENTS.md` is
+derived.
 
-### Assessment and ADR
+### Report and ADR
 
-The initial workflow also creates:
+Every pack requires:
 
 ```text
-.software-standards/assessment.md
+.software-standards/report.md
 ```
 
-The assessment records what was analyzed, what became a rule or skill, and which findings remained assessment-only.
+The report records the complete inventory, accepted artifact index, confidence,
+utility, relationships, run-wide limitations, and accepted-output summaries.
+It contains no rejected candidates or reasons. A zero-artifact report is valid.
 
 After developer review, `ssb` can create an optional ADR:
 
 ```text
-docs/adr/NNNN-agentic-rules.md
+docs/adr/NNNN-actionable-standards.md
 ```
 
 The ADR remains `Proposed` until the developer-created pull request is merged.
@@ -82,20 +125,18 @@ Once reviewed and merged, compatible AI coding tools can use the generated files
 |---|---|
 | Planning | Architectural boundaries, affected components, required workflows, approval points, and constraints |
 | Code generation | Coding conventions, preferred patterns, prohibited patterns, file scopes, and implementation guidance |
-| Testing | Repository-specific testing expectations and existing verification commands |
+| Testing | Repository-specific verification recipes and expected successful results |
 | Code review | The repository's correctness, maintainability, security, compatibility, and review requirements |
 | Maintenance | Established patterns for changing code without breaking repository structure or conventions |
-| Release work | Relevant release rules, procedures, checks, and ask-first boundaries |
 
 ## Human review and deterministic guardrails
 
-Generation creates an uncommitted proposal. Developers decide which rules and skills become part of the repository through normal Git review.
+Generation creates an uncommitted proposal. Developers decide which artifacts
+become part of the repository through normal Git review.
 
-A rule is **guidance** when repository evidence supports the instruction but no existing command fully enforces it.
-
-A rule is **deterministic** only when the repository already contains a command that fully checks it. `ssb` records where the command is defined and what it proves when it passes.
-
-`ssb` does not generate a checker, run the mapped command, or claim that it passed. Partial checks are recorded as partial coverage rather than complete enforcement.
+Semantic rules, command recipes, procedures, and proposed automation stay
+separate. `ssb` does not execute a recipe, implement a proposed checker, or
+claim that any external check passed.
 
 ## Who it is for
 
@@ -155,14 +196,16 @@ From the clean target repository, ask the coding agent:
 
 ```text
 Use the software-standards-bootstrap skill to analyze this repository
-and generate evidence-backed coding rules, Agent Skills, and AGENTS.md guidance.
+and generate evidence-backed actionable artifacts and AGENTS.md guidance.
 ```
 
 The agent runs the inventory, analyzes repository evidence, writes the proposal, validates it, renders `AGENTS.md`, and reports every changed or untracked path.
 
 ### 4. Review and rerender
 
-Review the assessment, every proposed rule and skill, and the generated `AGENTS.md` section. Do not edit the managed `AGENTS.md` section directly. Edit or delete the rule and skill source files, then rerun validation and rendering.
+Review the report, every canonical artifact, and the generated `AGENTS.md`
+section. Do not edit the managed section directly. Edit canonical sources and
+the report together, then rerun validation and rendering.
 
 ```bash
 ssb validate --repo .
@@ -194,14 +237,15 @@ ssb prune    <inspect|validate|approve|apply|recover|status|verify> [options]
 ```
 
 - `inspect` creates a safe inventory of one committed repository snapshot.
-- `validate` checks proposed rules, evidence, scopes, proof mappings, and related skills.
-- `render` updates only the managed Software Standards Bootstrap section of root `AGENTS.md`.
-- `adr` creates one new Proposed ADR from the rules and skills that survived review.
+- `validate` checks the report, all four artifact schemas, inventory, evidence,
+  confidence, utility, scopes, and relationships.
+- `render` updates only the managed Software Standards Bootstrap section of root `AGENTS.md`, removing that section when no rule, recipe, or skill is active.
+- `adr` creates one new Proposed ADR from retained rules, recipes, and skills.
 
 `inspect` supports `--max-candidate-files` and `--max-candidate-bytes`. `--allow-partial` permits diagnostic output from an incomplete inventory, but that output cannot be used to generate a proposal. Exit code `4`: inventory coverage incomplete.
 
 - `0`: success
-- `1`: rule-pack or prune-proposal validation failure
+- `1`: actionable-pack or prune-proposal validation failure
 - `2`: usage or repository precondition failure
 - `3`: unexpected internal failure
 - `4`: inventory coverage incomplete
@@ -241,7 +285,7 @@ The `ssb` CLI:
 
 - does not call an AI model;
 - does not make network requests or send telemetry;
-- does not execute repository code, tests, hooks, or mapped verification commands;
+- does not execute repository code, tests, hooks, or recipe commands;
 - does not stage, commit, branch, push, or open pull requests;
 - reads inspection input from the committed Git tree rather than worktree files;
 - stops proposal generation when inventory coverage is incomplete;
@@ -249,6 +293,8 @@ The `ssb` CLI:
 - pins prune capability evidence and preserves unknown provenance as unknown;
 - keeps prune application dry-run by default and journals approved writes for
   recovery;
+- binds artifact removals and their `report.md` index updates into one
+  recoverable plan;
 - rejects portable-path escapes and case-fold collisions before mutation; and
 - binds verification to the exact application, governed poststate, rerender,
   and external check receipts.
@@ -256,7 +302,7 @@ The `ssb` CLI:
 ## Detailed documentation
 
 - [Rule format](docs/rule-format.md)
-- [Topic taxonomy](skills/software-standards-bootstrap/references/topics.md)
+- [Category taxonomy](skills/software-standards-bootstrap/references/categories.md)
 - [Architecture and trust boundaries](docs/architecture.md)
 - [Agent workflow tests](docs/agent-smoke-tests.md)
 - [Governed prune protocol](docs/prune.md)

@@ -1,77 +1,81 @@
 ---
 name: software-standards-bootstrap
-description: Generate an evidence-backed repository rules pack from a clean Git snapshot, or load the relevant subset of an existing pack for the current language, framework, task, and path. Use when a developer wants to extract or apply repository-specific coding standards, conventions, checks, or agent guidance.
+description: Generate an evidence-backed actionable standards pack from a clean Git snapshot, or load the relevant rules, verification recipes, and Agent Skills from an existing pack. Use when a developer wants to extract or apply repository-specific engineering standards.
 license: Apache-2.0
 compatibility: Requires the ssb CLI, Git 2.39 or newer, a commit-backed branch, and host access to read and write the target repository.
 metadata:
   project: software-standards-bootstrap
-  schema: ssb.dev/rule/v2
-  topic: developer-experience
-  version: 0.3.0
+  schema: ssb.dev/report/v1
+  category: developer-experience
+  version: 0.4.0
 ---
 
 # Software Standards Bootstrap
 
-Generate or consume a repository-specific proposal. Do not use a generic rules catalog. Do not execute repository code or verification commands merely because a rule cites them. Do not stage, commit, branch, push, open a pull request, or activate rules in another system.
+Generate or consume repository-specific actionable artifacts. The host agent
+makes semantic judgments. The `ssb` CLI validates schemas, exact evidence,
+inventory, confidence, utility, relationships, projection, and ADR output.
 
-Read [the rule schema](references/rule-schema.md), [the topic taxonomy](references/topics.md), [the evidence workflow](references/evidence-workflow.md), and [the structural-pattern workflow](references/structural-patterns.md) before writing generation proposal files. Read [the governed lifecycle review](references/prune-review.md) before writing a prune proposal.
+Do not use a generic rules catalog. Do not execute repository code or recipe
+commands merely because they are recorded. Do not implement an automation
+proposal. Do not stage, commit, branch, push, open a pull request, or activate
+artifacts in another system.
+
+Before generating artifacts, read [the actionable schemas](references/rule-schema.md),
+[the category taxonomy](references/categories.md),
+[the evidence workflow](references/evidence-workflow.md), and
+[the structural-pattern workflow](references/structural-patterns.md). Read
+[the governed lifecycle review](references/prune-review.md) before writing a
+prune proposal.
 
 ## Choose the mode
 
-If `.software-standards/rules/` does not exist, use generation mode. When it
-does exist, route the developer's request before acting:
+If `.software-standards/report.md` does not exist, use generation mode. When it
+does exist:
 
 - use reviewed-pack maintenance mode only for an explicit request to validate
   or rerender developer-edited sources;
-- use requested-ADR mode only after the developer explicitly asks for the
-  adoption record;
-- use governed lifecycle review mode only when the developer explicitly asks
-  to assess an adopted pack for stale, redundant, contradictory, or
-  unsupported rules or skills;
-- stop on a regeneration request and explain that the existing pack must be
-  reviewed and removed deliberately; never overwrite it; or
+- use requested-ADR mode only after an explicit request for the adoption record;
+- use governed lifecycle review mode only for an explicit adopted-pack review;
+- stop on regeneration and explain that the existing pack must be reviewed and
+  removed deliberately; never overwrite it; or
 - otherwise use existing-pack consumption mode.
 
 ### Existing-pack consumption mode
 
-In consumption mode, do not run `ssb inspect`, `ssb validate`, or `ssb render`,
-and do not rewrite the pack. Read the Software Standards Bootstrap managed
-section in root `AGENTS.md`. If the file or managed section is missing,
-malformed, or points to a rule source that does not exist, stop and report the
-pack as undiscoverable instead of guessing at selection metadata. Otherwise:
+Do not run `ssb inspect`, `ssb validate`, or `ssb render`, and do not rewrite
+the pack.
 
-1. enumerate `.software-standards/rules/*.md` and read only each file's YAML
-   frontmatter;
-2. reconcile each canonical source ID and its selection metadata against every
-   managed-index occurrence, stopping as stale if either side has a missing
-   entry or the canonical frontmatter disagrees with the index; expect one
-   contextual rule to occur under each of its lens values;
-3. identify the affected repository-relative paths;
-4. identify the request task as `implementation`, `review`, `testing`,
-   `security`, `documentation`, or `release`;
-5. identify languages and frameworks only from the request and repository
-   evidence already available;
-6. mark a base rule active when its path scope matches;
-7. mark a contextual rule active when its path scope matches and every represented lens dimension matches, treating multiple values within one dimension as alternatives; and
-8. when context is uncertain, load the potentially relevant rule instead of
-   excluding it.
+1. Read `.software-standards/report.md` and its accepted artifact index.
+2. If the pack contains no rule, verification recipe, or Agent Skill, report
+   that it has no active guidance. Automation proposals are not active policy.
+3. Otherwise read the managed Software Standards Bootstrap section in root
+   `AGENTS.md`. Stop as stale if it is missing, malformed, or disagrees with
+   the report or canonical sources.
+4. Identify affected repository-relative paths and classify the request as
+   `planning`, `implementation`, or `verification`.
+5. Identify languages and frameworks only from the request and repository
+   evidence already available.
+6. Select base rules whose scopes match. Select contextual rules, recipes, and
+   skills only when scopes match and every represented lens dimension matches;
+   values within one dimension are alternatives.
+7. When a dimension or affected path is uncertain, load the potentially
+   relevant artifact instead of excluding it.
+8. Read the complete canonical source for every active semantic rule and Agent
+   Skill. Recipes remain links to existing commands with explicit use
+   conditions and expected results.
 
-Only after selection, read the complete canonical source for every active rule,
-including base rules; do not rely on an inline managed copy. Before applying
-them, report the active rule IDs. Legacy v1 rules have no directive, so apply
-their canonical bodies as written without inventing one. Treat every cited
-command as mapped, not executed: do not claim it passed, and run it only when
-the developer's request and the host's permissions independently authorize
-execution.
+Report active artifact IDs before applying them. Follow semantic rules and
+procedural skills as applicable. Run recipe commands only when the developer's
+request and host permissions independently authorize execution; never infer a
+passing result from the recipe. Ignore automation proposals unless the
+developer explicitly asks to review proposed check designs.
 
-Stop after fulfilling the current request. Consumption mode never changes the
-standards pack or its projection.
+Consumption mode never changes the standards pack or projection.
 
 ### Reviewed-pack maintenance mode
 
-Use this mode only when the developer explicitly asks to validate or rerender
-sources they have reviewed, edited, or deleted. Do not run `ssb inspect` and do
-not edit rule or skill sources. Run:
+Do not run `ssb inspect` and do not edit canonical sources. Run:
 
 ```bash
 ssb validate --repo . --format text
@@ -79,14 +83,14 @@ ssb render --repo . --dry-run
 ssb render --repo .
 ```
 
-Stop on validation diagnostics without rendering. Otherwise, report every
-changed and untracked path and restate that mapped commands were not executed.
-Do not create an ADR unless it was separately and explicitly requested.
+Stop on validation diagnostics without rendering. Otherwise report every
+changed and untracked path. State that recipe commands were not executed and
+automation proposals were not implemented. Do not create an ADR unless
+separately requested.
 
 ### Requested-ADR mode
 
-Use this mode only after developer review and an explicit ADR request. Do not
-run `ssb inspect`, rewrite source files, or infer adoption. Preview and create:
+Only after developer review and an explicit request, run:
 
 ```bash
 ssb adr --repo . --dry-run
@@ -94,35 +98,27 @@ ssb adr --repo .
 ```
 
 If ADR conventions are ambiguous, stop and request the intended `--adr-dir`.
-The ADR remains `Proposed`.
+An empty or automation-only pack has nothing adoptable and must not create an
+ADR. The ADR remains `Proposed`.
 
 ### Governed lifecycle review mode
 
-Use this mode only for an explicit lifecycle-review request. `prune` is a
-working concept, not permission to delete. Follow
+Use this mode only for an explicit lifecycle-review request. `prune` is not
+permission to delete. Follow
 [the governed lifecycle review contract](references/prune-review.md).
 
-For a skill with tracked supporting files, accept actionable provenance only
-when the manifest declares the exact bytes and origin of `SKILL.md` and every
-supporting file. Treat a partial bundle declaration as unknown provenance.
-
-Require the developer to identify the local point-in-time capability profile
-and optional provenance declaration. Never select an implicit latest model,
-query an online registry, or treat release notes as conformance proof. Run:
+Require a local point-in-time capability profile and optional provenance
+declaration. Never select an implicit latest model, query an online registry,
+or treat release notes as conformance proof. Run:
 
 ```bash
 ssb prune inspect --repo . --review <id> --capabilities <profile> [--provenance <manifest>]
 ```
 
-Never use partial inventory for a prune proposal. Read `context.json`; evaluate
-rules and skills separately and together; then write only `proposal.yaml` and
-complete candidate files inside that review bundle. Do not edit canonical
-rules, skills, `AGENTS.md`, or ADRs.
-
-Treat profile, provenance, and receipt arguments as paths relative to the
-process working directory unless they are absolute. If a skill-only review
-will explicitly rerender, complete that separate transition before
-verification; do not add rendered output after verification.
+Never use partial inventory. Read `context.json`; evaluate canonical artifacts
+separately and together; then write only `proposal.yaml` and complete candidate
+files inside the review bundle. Do not edit canonical sources, `AGENTS.md`, or
+ADRs.
 
 Validate without approving:
 
@@ -132,125 +128,145 @@ ssb prune status --repo . --review <id>
 ```
 
 Report every disposition, rationale, evidence reference or structured evidence
-gap, confidence band, and unresolved question. Every
-`unable-to-determine` action must name the exact artifact and missing evidence;
-an unresolved question alone is invalid. Stop for human review. Do not run `approve`, `apply`,
-`render`, `adr`, or `verify` on the developer's behalf unless the developer
-separately and explicitly requests that exact transition. Application remains a dry run unless `--write` is explicitly authorized.
+gap, confidence band, and unresolved question. Stop for human review. Do not
+run `approve`, `apply`, `render`, `adr`, or `verify` unless the developer
+separately requests that exact transition.
+Application remains a dry run unless `--write` is explicitly authorized.
 
 ## Generation mode
 
 ### 1. Establish the immutable input
 
-From the target repository, run:
+Run:
 
 ```bash
 ssb inspect --repo . --format json
 ```
 
-Never pass `--allow-partial` during this workflow. Stop if the command fails,
-including exit `4` for incomplete coverage, and report its recovery guidance
-verbatim. Do not create proposal files from incomplete inventory coverage. Do
-not bypass a dirty, detached, unborn, non-Git, existing-pack, or missing-baseline
-precondition.
-
-Record:
-
-- `baseline_commit`;
-- candidate, scanned, indexed, and remaining counts and bytes;
-- confirmation that `truncated` is false;
-- excluded-category counts; and
-- the safe tracked files available for targeted reads.
+Never pass `--allow-partial`. Stop on any failure, including exit `4`, and
+report recovery guidance verbatim. Record the exact `baseline_commit`, the
+complete schema 2 inventory response, confirmation that `truncated` is false,
+and the safe tracked paths available for semantic reads.
 
 ### 2. Perform targeted semantic reads
 
-Read only inventory-listed paths, selecting exact sections relevant to repository conventions, architecture, risk, and existing checks. Never execute repository files, hooks, build scripts, tests, linters, formatters, package managers, or verification commands.
+Read only inventory-listed paths. Never execute repository files, hooks, build
+scripts, tests, linters, formatters, package managers, or existing commands.
 
-Perform both an authority-and-risk pass and the structural-pattern workflow. Complete the structural-pattern pass before scoring or writing candidates. Do not reject a structural candidate only because no repository policy states it explicitly: three consistent occurrences across at least two files are an alternative evidence threshold. Narrow an otherwise useful candidate to the evidence-backed scope instead of manufacturing a repository-wide rule.
+Review:
 
-Distinguish:
+- explicit repository obligations and engineering risks;
+- dependency boundaries, parallel implementations and families, platform seams,
+  compatibility surfaces, and source/test/documentation symmetry;
+- existing commands, where invocation is defined, their triggers, and the
+  exact condition they enforce; and
+- existing automatic enforcement that already handles a condition completely.
 
-- repository context that belongs only in the assessment;
-- durable declarative guidance that can become a rule;
-- genuinely procedural work that belongs in an Agent Skill; and
-- existing deterministic checks that can be cited but were not executed.
+For every candidate, collect exact one-based line ranges and hashes from the
+pinned Git blobs. Narrow scope when the evidence supports only one package,
+family, seam, or surface.
 
-If an explicitly diagnostic partial inventory is supplied from outside this
-workflow, disclose it and stop. Do not score candidates or write proposal
-sources from it.
+### 3. Route and evaluate candidates
 
-### 3. Write editable proposal sources
+Before presenting final candidates:
 
-Create:
+1. Reject anything outside planning, implementation, or verification work.
+2. Classify derivation as `extracted` or `inferred` and collect exact evidence.
+3. Review existing commands, invocation, triggers, and automatic enforcement.
+4. Emit nothing when the condition is already handled completely and
+   automatically.
+5. Route remaining value to exactly one primary destination:
+   - implementation condition → semantic rule;
+   - deliberately invoked existing command → verification recipe;
+   - multi-step workflow with decisions, edits, setup, branching, or recovery
+     → Agent Skill;
+   - valuable proposed automatic check → automation proposal;
+   - otherwise → reject and discard.
+6. Reject and discard candidates below `medium` confidence.
+7. Score every remaining candidate with `ssb-utility-v1`; reject and discard a
+   total below 45.
+8. Review each semantic name. A rule name must express a falsifiable goal and
+   include a mechanism only when that mechanism is the repository contract.
+9. Write accepted artifacts and then the final report manifest.
+
+Do not persist rejected candidates, rejection reasons, or rejection counts.
+Do not split a compound observation unless semantic clarity requires it.
+
+### 4. Write the actionable pack
+
+Create only accepted outputs:
 
 ```text
-.software-standards/assessment.md
+.software-standards/report.md
 .software-standards/rules/<rule-id>.md
+.software-standards/verification/<recipe-id>.yaml
 .agents/skills/<skill-id>/SKILL.md
+.software-standards/automation/<proposal-id>.yaml
 ```
 
-The assessment must name the baseline, complete inventory limits, repository context, evidence reviewed, the completed structural pattern review, candidates retained, candidates kept assessment-only, primary-topic rationale, and classification rationale.
+Every accepted artifact has a globally unique stable kebab-case ID, one
+category, activation lenses, repository-relative scopes, derivation, exact
+evidence, `medium` or `high` confidence, and utility of at least 45.
 
-Use the dynamic number of candidates supported by evidence. Do not impose a five-rule or other fixed cap. Keep candidates below 25 in the assessment.
+Evidence roles are:
 
-Every emitted rule must:
+- `declares`: an explicit repository-maintained obligation;
+- `demonstrates`: an implementation occurrence supporting an inferred
+  invariant; and
+- `enforces`: a repository mechanism that actively checks a condition.
 
-- conform to `ssb.dev/rule/v2`;
-- assign exactly one primary topic from the controlled taxonomy;
-- declare one base lens or one or more language, framework, and task lenses;
-- declare an `always`, `ask-first`, `never`, or `prefer` directive;
-- use `ssb-score-v1` with visible factor arithmetic;
-- have one authoritative source or three consistent occurrences across two files;
-- cite exact one-based line ranges and SHA-256 hashes of the exact baseline bytes;
-- use repository-relative scopes;
-- declare honest confidence;
-- classify `deterministic` only when an existing command and its defining source are cited;
-- record full verification coverage and the bounded property proved for a deterministic rule;
-- record partial verification coverage and the bounded property proved when guidance cites a check; and
-- record a proof gap when guidance has no existing deterministic check.
+An `extracted` artifact needs at least one `declares` or `enforces` citation.
+An `inferred` artifact needs at least three distinct `demonstrates` citations
+across at least two files.
 
-Choose the topic that best explains the rule's engineering risk or change obligation. Use `quality` only when no narrower topic fits. Topic is independent of classification, importance, confidence, and scope.
+`ssb-utility-v1` is additive: marginal value 0–30, risk reduction 0–25,
+actionability 0–20, applicability 0–15, and earlier feedback 0–10. Bands are
+80–100 very-high, 65–79 high, and 45–64 medium.
 
-Use evidence-backed preferred examples and counterexamples when the repository
-contains them. Cite their exact locations in the rule body and evidence; never
-invent an example or label ordinary legacy code as a counterexample without
-repository evidence.
+Semantic rules contain only category, lenses, directive, scopes, derivation,
+evidence, and an actionable body. They contain no commands or proof metadata.
 
-Create a portable Agent Skill only for a procedural workflow. Use core Agent Skills frontmatter and set `metadata.topic` to the workflow's one primary engineering outcome. Do not add consumer-specific fields to the portable source.
+Verification recipes contain ordered existing commands, exact `enforces`
+evidence references, when they apply, and expected successful results. They
+contain no branching, edits, or semantic judgment.
 
-If a target already exists, stop instead of overwriting developer work.
+Agent Skills use portable frontmatter with `metadata.category`. The report
+stores their SSB lenses, scopes, derivation, evidence, confidence, utility, and
+relationships.
 
-### 4. Validate before projection
+Automation proposals describe a condition, suggested check, trigger, and
+expected success and failure. They are designs, not implemented checks or
+adopted standards.
+
+The report records the exact complete inventory, accepted artifact index,
+confidence, utility, relationships, limitations, and accepted-output
+summaries. Native artifacts own their category, lenses, scopes, derivation,
+and evidence. The report duplicates those fields only for Agent Skills. A
+zero-artifact report is valid.
+
+If any target exists, stop instead of overwriting developer work.
+
+### 5. Validate and project
 
 Run:
 
 ```bash
 ssb validate --repo . --format text
-```
-
-If validation fails, keep the uncommitted source files, report each file-specific diagnostic, correct only proposal sources, and rerun validation. Do not render or create an ADR while diagnostics remain.
-
-Then preview:
-
-```bash
 ssb render --repo . --dry-run
-```
-
-Review the bounded section and run:
-
-```bash
 ssb render --repo .
 ```
 
-Do not edit inside the managed `AGENTS.md` section. Edit or delete rule source files and rerun instead.
+Stop on diagnostics before projection. Do not edit the managed `AGENTS.md`
+section. Edit canonical sources and the report together, then rerun.
 
-The managed section is a progressive router: it inlines base standing orders
-and links contextual rules by language, framework, and task. Confirm that a
-contextual rule body appears only in its canonical source file.
+The projection inlines base semantic rules, links contextual rules and recipes,
+indexes primary Agent Skills, and omits automation proposals. An empty or
+automation-only pack does not create or rewrite an unprojected `AGENTS.md`, but
+removes a stale generated managed section when one exists.
 
-### 5. Disclose the complete uncommitted result
+### 6. Disclose the complete uncommitted result
 
-Run a read-only status query that includes all untracked paths:
+Run:
 
 ```bash
 git --no-optional-locks status --short --untracked-files=all
@@ -258,23 +274,11 @@ git --no-optional-locks status --short --untracked-files=all
 
 List every changed and untracked path. State explicitly:
 
-- no repository code or cited verification command was executed;
+- no repository code or recipe command was executed;
+- no automation proposal was implemented;
 - no Git mutation was performed;
-- `AGENTS.md` is derived;
-- rule and skill files are the editable sources; and
-- the developer should edit or delete sources and rerun validation/rendering.
+- `AGENTS.md` is derived; and
+- the report and canonical artifact files are the editable sources.
 
-### 6. Stop before the ADR
-
-Do not run `ssb adr` as part of the initial generation workflow.
-
-Wait for the developer to review retained files and explicitly request the ADR. After that request, preview and then create it:
-
-```bash
-ssb adr --repo . --dry-run
-ssb adr --repo .
-```
-
-If multiple ADR conventions exist, report the ambiguity and use `--adr-dir PATH` only after the developer identifies the intended directory.
-
-The ADR must remain `Proposed`. The developer-created pull request and its merge constitute adoption.
+Stop before the ADR. The developer-created pull request and its merge are the
+adoption decision.

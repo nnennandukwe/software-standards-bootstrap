@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/cli"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/prune"
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/render"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/rulepack"
 	"go.yaml.in/yaml/v4"
 )
@@ -300,7 +302,7 @@ func TestReviewAwareRenderAndADRValidateTransitionBeforeWriting(t *testing.T) {
 		},
 		{
 			command: []string{"adr", "--repo", repo, "--review", "missing-review"},
-			target:  filepath.Join(repo, "docs", "adr", "0001-agentic-rules.md"),
+			target:  filepath.Join(repo, "docs", "adr", "0001-actionable-standards.md"),
 		},
 	} {
 		var stdout bytes.Buffer
@@ -335,9 +337,36 @@ func TestReviewAwareRenderAndADRValidateRetainedHistoricalRules(t *testing.T) {
 		"rules",
 		"retain-history.md",
 	), retainedRule)
+	reportPath := filepath.Join(repo, ".software-standards", "report.md")
+	reportData, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reportData = []byte(strings.Replace(
+		string(reportData),
+		"---\n# Software standards report",
+		`  - id: retain-history
+    kind: rule
+    path: .software-standards/rules/retain-history.md
+    confidence: high
+    utility:
+      method: ssb-utility-v1
+      total: 70
+      factors:
+        marginal_value: 20
+        risk_reduction: 15
+        actionability: 15
+        applicability: 10
+        earlier_feedback: 10
+---
+# Software standards report`,
+		1,
+	))
+	if err := os.WriteFile(reportPath, reportData, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	git(t, repo, "add", ".software-standards")
 	git(t, repo, "commit", "-m", "adopt two rules")
-	adoptedBaseline := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
 
 	profileDir := t.TempDir()
 	capabilityEvidence := filepath.Join(profileDir, "host-run.json")
@@ -430,12 +459,6 @@ artifacts:
 	candidatePath := filepath.Join(reviewRoot, filepath.FromSlash(candidateRelative))
 	candidate := strings.Replace(
 		string(updatedRule),
-		"baseline_commit: "+evidenceBaseline,
-		"baseline_commit: "+adoptedBaseline,
-		1,
-	)
-	candidate = strings.Replace(
-		candidate,
 		"Run the repository verification command before merging.",
 		"Run the repository verification command before merging any changed rule.",
 		1,
@@ -760,7 +783,7 @@ actions:
 	}
 }
 
-func TestValidateUsesExitOneForRulePackFailuresAndNeverWrites(t *testing.T) {
+func TestValidateUsesExitOneForActionablePackFailuresAndNeverWrites(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
 	writeValidPack(t, repo, baseline)
 	before := git(t, repo, "status", "--porcelain=v1", "-z")
@@ -791,7 +814,7 @@ func TestValidateUsesExitOneForRulePackFailuresAndNeverWrites(t *testing.T) {
 	if validResponse.SchemaVersion != 2 || !validResponse.Valid || validResponse.RuleCount != 1 ||
 		validResponse.Pack == nil || validResponse.Pack.BaselineCommit != baseline ||
 		len(validResponse.Pack.Rules) != 1 ||
-		validResponse.Pack.Rules[0].Schema != rulepack.SchemaVersionV1 ||
+		validResponse.Pack.Rules[0].Schema != rulepack.RuleSchema ||
 		validResponse.Pack.Rules[0].ID != "verify-before-merge" ||
 		validResponse.Pack.Rules[0].SourcePath == "" ||
 		!strings.Contains(validResponse.Pack.Rules[0].Body, "Run the repository verification command") {
@@ -831,9 +854,9 @@ func TestValidateUsesExitOneForRulePackFailuresAndNeverWrites(t *testing.T) {
 	}
 }
 
-func TestValidateJSONExportsRuleV2InterchangeFields(t *testing.T) {
+func TestValidateJSONExportsActionableInterchangeFields(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
-	writeValidPackV2(t, repo, baseline)
+	writeValidPack(t, repo, baseline)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -845,14 +868,20 @@ func TestValidateJSONExportsRuleV2InterchangeFields(t *testing.T) {
 		SchemaVersion int  `json:"schema_version"`
 		Valid         bool `json:"valid"`
 		Pack          *struct {
+			Report struct {
+				Schema    string `json:"schema"`
+				Artifacts []struct {
+					Confidence string           `json:"confidence"`
+					Utility    rulepack.Utility `json:"utility"`
+				} `json:"artifacts"`
+			} `json:"report"`
 			Rules []struct {
-				Schema       string          `json:"schema"`
-				Lenses       []rulepack.Lens `json:"lenses"`
-				Directive    string          `json:"directive"`
-				Verification struct {
-					Coverage string `json:"coverage"`
-					Proves   string `json:"proves"`
-				} `json:"verification"`
+				Schema     string              `json:"schema"`
+				Category   string              `json:"category"`
+				Lenses     []rulepack.Lens     `json:"lenses"`
+				Directive  string              `json:"directive"`
+				Derivation string              `json:"derivation"`
+				Evidence   []rulepack.Evidence `json:"evidence"`
 			} `json:"rules"`
 		} `json:"pack"`
 	}
@@ -860,15 +889,31 @@ func TestValidateJSONExportsRuleV2InterchangeFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	if response.SchemaVersion != 2 || !response.Valid || response.Pack == nil ||
+		response.Pack.Report.Schema != rulepack.ReportSchema ||
+		len(response.Pack.Report.Artifacts) != 1 ||
+		response.Pack.Report.Artifacts[0].Confidence != "high" ||
+		response.Pack.Report.Artifacts[0].Utility.Method != rulepack.UtilityMethod ||
 		len(response.Pack.Rules) != 1 ||
-		response.Pack.Rules[0].Schema != rulepack.SchemaVersionV2 ||
-		len(response.Pack.Rules[0].Lenses) != 2 ||
-		response.Pack.Rules[0].Lenses[0] != (rulepack.Lens{Kind: "language", Value: "go"}) ||
-		response.Pack.Rules[0].Lenses[1] != (rulepack.Lens{Kind: "task", Value: "review"}) ||
+		response.Pack.Rules[0].Schema != rulepack.RuleSchema ||
+		response.Pack.Rules[0].Category != "correctness" ||
+		len(response.Pack.Rules[0].Lenses) != 1 ||
+		response.Pack.Rules[0].Lenses[0] != (rulepack.Lens{Kind: "base"}) ||
 		response.Pack.Rules[0].Directive != "always" ||
-		response.Pack.Rules[0].Verification.Coverage != "full" ||
-		response.Pack.Rules[0].Verification.Proves != "The retained Go assertions when the command passes." {
-		t.Fatalf("unexpected v2 interchange response: %#v", response)
+		response.Pack.Rules[0].Derivation != "extracted" ||
+		len(response.Pack.Rules[0].Evidence) != 1 ||
+		response.Pack.Rules[0].Evidence[0].Role != "declares" {
+		t.Fatalf("unexpected actionable interchange response: %#v", response)
+	}
+	if strings.Contains(stdout.String(), `"topic"`) ||
+		strings.Contains(stdout.String(), `"classification"`) ||
+		strings.Contains(stdout.String(), `"verification":`) ||
+		strings.Contains(stdout.String(), `"score":`) {
+		t.Fatalf("normalized JSON retained removed rule fields:\n%s", stdout.String())
+	}
+	for _, required := range []string{`"rules": [`, `"verification_recipes": []`, `"skills": [`, `"automation_proposals": []`} {
+		if !strings.Contains(stdout.String(), required) {
+			t.Fatalf("normalized JSON omitted artifact array %s:\n%s", required, stdout.String())
+		}
 	}
 }
 
@@ -890,20 +935,112 @@ func TestRenderDryRunAndValidationFailureHaveNoFilesystemEffects(t *testing.T) {
 		t.Fatalf("dry-run created AGENTS.md: %v", err)
 	}
 
-	rulePath := filepath.Join(repo, ".software-standards", "rules", "verify-before-merge.md")
-	rule, err := os.ReadFile(rulePath)
+	reportPath := filepath.Join(repo, ".software-standards", "report.md")
+	report, err := os.ReadFile(reportPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, rulePath, strings.Replace(string(rule), "total: 70", "total: 71", 1))
+	writeFile(t, reportPath, strings.Replace(string(report), "total: 70", "total: 71", 1))
 	stdout.Reset()
 	stderr.Reset()
 	code = cli.Run([]string{"render", "--repo", repo}, &stdout, &stderr)
-	if code != 1 || !strings.Contains(stderr.String(), "score total 71 does not equal factor sum 70") {
+	if code != 1 || !strings.Contains(stderr.String(), "utility total 71 does not equal factor sum 70") {
 		t.Fatalf("invalid render response: exit=%d stderr=%q", code, stderr.String())
 	}
 	if _, err := os.Lstat(filepath.Join(repo, "AGENTS.md")); !os.IsNotExist(err) {
 		t.Fatalf("invalid render created AGENTS.md: %v", err)
+	}
+}
+
+func TestRenderDryRunReportsNoWriteForZeroArtifactPack(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidPack(t, repo, baseline)
+	removeAllArtifactsFromPack(t, repo)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{"render", "--repo", repo, "--dry-run"}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("zero-artifact dry run failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "AGENTS.md would not be changed") ||
+		!strings.Contains(stdout.String(), "no active semantic rule, verification recipe, or Agent Skill") ||
+		strings.Contains(stdout.String(), "proposed AGENTS.md") {
+		t.Fatalf("zero-artifact dry run response is unclear:\n%s", stdout.String())
+	}
+	if _, err := os.Lstat(filepath.Join(repo, "AGENTS.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("zero-artifact dry run created AGENTS.md: %v", err)
+	}
+}
+
+func TestRenderExplainsZeroArtifactProjectionRemoval(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidPack(t, repo, baseline)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := cli.Run([]string{"render", "--repo", repo}, &stdout, &stderr); code != 0 {
+		t.Fatalf("initial render failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	agentsPath := filepath.Join(repo, "AGENTS.md")
+	before, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removeAllArtifactsFromPack(t, repo)
+
+	stdout.Reset()
+	stderr.Reset()
+	code := cli.Run([]string{"render", "--repo", repo, "--dry-run"}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("removal dry run failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "would remove its managed Software Standards Bootstrap section") {
+		t.Fatalf("removal dry run is unclear:\n%s", stdout.String())
+	}
+	afterDryRun, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(afterDryRun, before) {
+		t.Fatal("removal dry run changed AGENTS.md")
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = cli.Run([]string{"render", "--repo", repo}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("projection removal failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Removed the managed Software Standards Bootstrap section") {
+		t.Fatalf("projection removal response is unclear:\n%s", stdout.String())
+	}
+	afterRemoval, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(afterRemoval), render.StartMarker) {
+		t.Fatalf("managed section remains:\n%s", afterRemoval)
+	}
+}
+
+func TestRenderDryRunReportsAlreadyCurrentForActivePack(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidPack(t, repo, baseline)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := cli.Run([]string{"render", "--repo", repo}, &stdout, &stderr); code != 0 {
+		t.Fatalf("initial render failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code := cli.Run([]string{"render", "--repo", repo, "--dry-run"}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("stable dry run failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "AGENTS.md is already current") ||
+		strings.Contains(stdout.String(), "no active semantic rule") {
+		t.Fatalf("stable active-pack response is misleading:\n%s", stdout.String())
 	}
 }
 
@@ -928,7 +1065,7 @@ func TestRenderWritesOnlyAgentsAndReportsDriftAsPrecondition(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 	code = cli.Run([]string{"render", "--repo", repo}, &stdout, &stderr)
-	if code != 2 || !strings.Contains(stderr.String(), "edit or delete rule source files") {
+	if code != 2 || !strings.Contains(stderr.String(), "edit canonical artifact sources") {
 		t.Fatalf("drift response: exit=%d stderr=%q", code, stderr.String())
 	}
 	after, err := os.ReadFile(agentsPath)
@@ -950,7 +1087,7 @@ func TestADRValidatesThenCreatesExactlyOneNewProposedRecord(t *testing.T) {
 	if code != 0 || stderr.Len() != 0 {
 		t.Fatalf("ADR dry-run failed: exit=%d stderr=%q", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "docs/adr/0001-agentic-rules.md") ||
+	if !strings.Contains(stdout.String(), "docs/adr/0001-actionable-standards.md") ||
 		!strings.Contains(stdout.String(), "Status: Proposed") {
 		t.Fatalf("ADR dry-run output is incomplete:\n%s", stdout.String())
 	}
@@ -964,10 +1101,10 @@ func TestADRValidatesThenCreatesExactlyOneNewProposedRecord(t *testing.T) {
 	if code != 0 || stderr.Len() != 0 {
 		t.Fatalf("ADR creation failed: exit=%d stderr=%q", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "Created docs/adr/0001-agentic-rules.md") {
+	if !strings.Contains(stdout.String(), "Created docs/adr/0001-actionable-standards.md") {
 		t.Fatalf("ADR output did not disclose path: %q", stdout.String())
 	}
-	record, err := os.ReadFile(filepath.Join(repo, "docs", "adr", "0001-agentic-rules.md"))
+	record, err := os.ReadFile(filepath.Join(repo, "docs", "adr", "0001-actionable-standards.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1017,88 +1154,113 @@ func evidenceRepository(t *testing.T) (string, string) {
 
 func writeValidPack(t *testing.T, repo, baseline string) {
 	t.Helper()
-	writeFile(t, filepath.Join(repo, ".software-standards", "assessment.md"), "# Assessment\n")
-	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "verify-before-merge.md"), fmt.Sprintf(`---
-schema: ssb.dev/rule/v1
-id: verify-before-merge
-title: Verify before merge
-topic: correctness
-scopes:
-  - "**/*.go"
-classification: deterministic
-importance: high
-score:
-  method: ssb-score-v1
-  total: 70
-  factors:
-    prevalence: 15
-    consistency: 15
-    authority: 15
-    risk: 15
-    applicability: 10
-confidence: high
+	makefileOID := strings.TrimSpace(git(t, repo, "rev-parse", baseline+":Makefile"))
+	mainOID := strings.TrimSpace(git(t, repo, "rev-parse", baseline+":main.go"))
+	writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), fmt.Sprintf(`---
+schema: ssb.dev/report/v1
 baseline_commit: %s
-evidence:
-  - path: main.go
-    lines: 1-1
-    excerpt_sha256: %s
-    authoritative: true
-verification:
-  command: go test ./...
-  source:
-    path: Makefile
-    lines: 1-2
-    excerpt_sha256: %s
+inventory:
+  schema_version: 2
+  inventory_version: ssb-inventory-v2
+  baseline_commit: %s
+  limits:
+    max_candidate_files: 40000
+    max_candidate_bytes: 134217728
+    max_file_bytes: 1048576
+  candidate_files: 2
+  candidate_bytes: 52
+  scanned_files: 2
+  scanned_bytes: 52
+  indexed_files: 2
+  indexed_bytes: 52
+  files:
+    - path: Makefile
+      blob_oid: "%s"
+      bytes: 23
+      lines: 2
+      sha256: %s
+    - path: main.go
+      blob_oid: "%s"
+      bytes: 29
+      lines: 3
+      language: Go
+      sha256: %s
+  excluded:
+    binary: 0
+    generated: 0
+    oversized: 0
+    secret_like: 0
+    symlink: 0
+    submodule: 0
+    vendor_or_generated_tree: 0
+    non_regular: 0
+  truncated: false
+  remaining_candidate_files: 0
+  remaining_candidate_bytes: 0
+artifacts:
+  - id: verify-before-merge
+    kind: rule
+    path: .software-standards/rules/verify-before-merge.md
+    confidence: high
+    utility:
+      method: ssb-utility-v1
+      total: 70
+      factors:
+        marginal_value: 20
+        risk_reduction: 15
+        actionability: 15
+        applicability: 10
+        earlier_feedback: 10
 ---
-Run the repository verification command before merging.
-`, baseline, excerptHash("package main\n"), excerptHash("verify:\n\tgo test ./...\n")))
-}
+# Software standards report
 
-func writeValidPackV2(t *testing.T, repo, baseline string) {
-	t.Helper()
-	writeFile(t, filepath.Join(repo, ".software-standards", "assessment.md"), "# Assessment\n")
+Inventory coverage was complete and the retained artifact is listed above.
+`,
+		baseline,
+		baseline,
+		makefileOID,
+		excerptHash("verify:\n\tgo test ./...\n"),
+		mainOID,
+		excerptHash("package main\n\nfunc main() {}\n"),
+	))
 	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "verify-before-merge.md"), fmt.Sprintf(`---
 schema: ssb.dev/rule/v2
 id: verify-before-merge
 title: Verify before merge
-topic: correctness
+category: correctness
 lenses:
-  - kind: language
-    value: go
-  - kind: task
-    value: review
+  - kind: base
 directive: always
 scopes:
   - "**/*.go"
-classification: deterministic
-importance: high
-score:
-  method: ssb-score-v1
-  total: 70
-  factors:
-    prevalence: 15
-    consistency: 15
-    authority: 15
-    risk: 15
-    applicability: 10
-confidence: high
-baseline_commit: %s
+derivation: extracted
 evidence:
-  - path: main.go
+  - role: declares
+    path: main.go
     lines: 1-1
     excerpt_sha256: %s
-    authoritative: true
-verification:
-  command: go test ./...
-  source:
-    path: Makefile
-    lines: 1-2
-    excerpt_sha256: %s
-  coverage: full
-  proves: The retained Go assertions when the command passes.
 ---
 Run the repository verification command before merging.
-`, baseline, excerptHash("package main\n"), excerptHash("verify:\n\tgo test ./...\n")))
+`, excerptHash("package main\n")))
+}
+
+func removeAllArtifactsFromPack(t *testing.T, repo string) {
+	t.Helper()
+	reportPath := filepath.Join(repo, ".software-standards", "report.md")
+	report, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifactsStart := strings.Index(string(report), "artifacts:\n")
+	bodyStart := strings.Index(string(report), "---\n# Software standards report")
+	if artifactsStart < 0 || bodyStart < 0 || bodyStart <= artifactsStart {
+		t.Fatalf("unexpected report fixture:\n%s", report)
+	}
+	emptyReport := string(report[:artifactsStart]) + "artifacts: []\n" + string(report[bodyStart:])
+	writeFile(t, reportPath, emptyReport)
+	if err := os.Remove(filepath.Join(repo, ".software-standards", "rules", "verify-before-merge.md")); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func excerptHash(excerpt string) string {
