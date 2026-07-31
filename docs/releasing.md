@@ -66,7 +66,7 @@ isolated directory:
 release_root=$(mktemp -d) || exit 1
 gh release download v0.1.1 --repo nnennandukwe/software-standards-bootstrap --dir "$release_root"
 (cd "$release_root" && shasum -a 256 --check checksums.txt)
-SSB_RELEASE_ARCHIVE_DIR="$release_root" go test ./internal/releaseconfig -run '^TestGeneratedReleaseArchivesContainCompleteSkill$'
+SSB_RELEASE_ARCHIVE_DIR="$release_root" SSB_RELEASE_SOURCE_REF=v0.1.1 go test ./internal/releaseconfig -run '^TestGeneratedReleaseArchivesContainCompleteSkill$'
 for archive in "$release_root"/ssb_v0.1.1_*.tar.gz "$release_root"/ssb_v0.1.1_*.zip; do
   gh attestation verify "$archive" --repo nnennandukwe/software-standards-bootstrap
 done

@@ -103,7 +103,7 @@ func TestReleaseRunbookRequiresPinnedConfigurationPreflight(t *testing.T) {
 		"make verify-release-archives",
 		"./install.sh --version v0.1.1 --install-dir \"$install_root/bin\"",
 		"\"$install_root/bin/ssb\" --help",
-		"SSB_RELEASE_ARCHIVE_DIR=\"$release_root\" go test ./internal/releaseconfig -run '^TestGeneratedReleaseArchivesContainCompleteSkill$'",
+		"SSB_RELEASE_ARCHIVE_DIR=\"$release_root\" SSB_RELEASE_SOURCE_REF=v0.1.1 go test ./internal/releaseconfig -run '^TestGeneratedReleaseArchivesContainCompleteSkill$'",
 	} {
 		if !strings.Contains(releasing, required) {
 			t.Errorf("release runbook missing %q", required)
