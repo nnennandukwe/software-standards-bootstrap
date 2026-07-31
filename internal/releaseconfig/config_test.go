@@ -100,14 +100,32 @@ func TestReleaseRunbookRequiresPinnedConfigurationPreflight(t *testing.T) {
 	for _, required := range []string{
 		"go run github.com/goreleaser/goreleaser/v2@v2.17.0 check",
 		"go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12",
-		"./install.sh --version v0.1.0 --install-dir \"$install_root/bin\"",
+		"make verify-release-archives",
+		"./install.sh --version v0.1.1 --install-dir \"$install_root/bin\"",
 		"\"$install_root/bin/ssb\" --help",
+		"SSB_RELEASE_ARCHIVE_DIR=\"$release_root\" go test ./internal/releaseconfig -run '^TestGeneratedReleaseArchivesContainCompleteSkill$'",
 	} {
 		if !strings.Contains(releasing, required) {
 			t.Errorf("release runbook missing %q", required)
 		}
 		if !strings.Contains(verification, required) {
 			t.Errorf("verification contract missing %q", required)
+		}
+	}
+}
+
+func TestV011ReleaseNotesKeepHistoricalArchiveGapExplicit(t *testing.T) {
+	root := repositoryRoot(t)
+	changelog := strings.Join(strings.Fields(readText(t, filepath.Join(root, "CHANGELOG.md"))), " ")
+
+	for _, required := range []string{
+		"## [0.1.1] - 2026-07-31",
+		"v0.1.0 archives omitted the root `SKILL.md`",
+		"complete Agent Skill",
+		"creator attribution",
+	} {
+		if !strings.Contains(changelog, required) {
+			t.Errorf("v0.1.1 release notes missing %q", required)
 		}
 	}
 }

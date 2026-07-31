@@ -17,6 +17,7 @@ go build ./cmd/ssb
 go tool govulncheck ./...
 go run github.com/goreleaser/goreleaser/v2@v2.17.0 check
 go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+make verify-release-archives
 make verify
 ```
 
@@ -77,7 +78,22 @@ isolated destination:
 
 ```bash
 install_root=$(mktemp -d) || exit 1
-./install.sh --version v0.1.0 --install-dir "$install_root/bin"
+./install.sh --version v0.1.1 --install-dir "$install_root/bin"
 "$install_root/bin/ssb" --help
 rm -rf "$install_root"
 ```
+
+Verify the published archive contents against the tagged source separately
+from checksums, SBOMs, and attestations:
+
+```bash
+release_root=$(mktemp -d) || exit 1
+gh release download v0.1.1 --repo nnennandukwe/software-standards-bootstrap --dir "$release_root"
+SSB_RELEASE_ARCHIVE_DIR="$release_root" go test ./internal/releaseconfig -run '^TestGeneratedReleaseArchivesContainCompleteSkill$'
+rm -rf "$release_root"
+```
+
+This archive gate requires all six target archives and byte-for-byte copies of
+every regular file beneath `skills/software-standards-bootstrap`. The v0.1.0
+archives remain historical incomplete-skill artifacts because they omit the
+root `SKILL.md`.

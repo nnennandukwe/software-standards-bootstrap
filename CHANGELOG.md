@@ -4,13 +4,27 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## Unreleased
 
+## [0.1.1] - 2026-07-31
+
 ### Added
 
 - A checksum-verifying `install.sh` for macOS and Linux, with latest-release
   discovery, exact-version and install-directory options, and explicit
   repository-local Agent Skill installation from the matching release tag.
-- Complete Agent Skill packaging in future release archives; v0.1.0 archives
-  omitted the root `SKILL.md` while including its reference files.
+- An actual-archive release gate that checks all six platform and architecture
+  targets for a complete Agent Skill matching the tagged source.
+- Source, author, and Apache-2.0 creator attribution in the bundled Agent Skill.
+
+### Fixed
+
+- Complete Agent Skill packaging in release archives. The v0.1.0 archives
+  omitted the root `SKILL.md` while including its reference files; v0.1.1
+  includes both the entrypoint and every reference file.
+
+### Documentation
+
+- Clarified that retaining an automation proposal preserves a design for
+  separate review and does not authorize implementation or activation.
 
 ## [0.1.0] - 2026-07-31
 
