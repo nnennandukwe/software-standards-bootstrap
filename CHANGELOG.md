@@ -4,6 +4,14 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## Unreleased
 
+### Added
+
+- A checksum-verifying `install.ps1` for Windows, matching the `install.sh`
+  guarantees: architecture and release-tag validation before any download,
+  SHA-256 verification before the binary reaches its destination, refusal to
+  replace an existing Agent Skill, and no partial binary left behind on
+  failure or interruption.
+
 ## [0.1.1] - 2026-07-31
 
 ### Added

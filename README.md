@@ -52,9 +52,39 @@ Pin both the CLI and Codex skill to v0.1.0:
 curl -fsSL https://raw.githubusercontent.com/nnennandukwe/software-standards-bootstrap/main/install.sh | sh -s -- --version v0.1.0 --skill-dir .agents/skills
 ```
 
-Use `--install-dir /path/to/bin` to choose another binary directory. Windows
-users can download the matching `.zip` from the
-[published releases](https://github.com/nnennandukwe/software-standards-bootstrap/releases).
+Use `--install-dir /path/to/bin` to choose another binary directory.
+
+On Windows, use the PowerShell installer. Download it, read it, then run it:
+
+```powershell
+irm https://raw.githubusercontent.com/nnennandukwe/software-standards-bootstrap/main/install.ps1 -OutFile install.ps1
+# Review install.ps1, then:
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+& "$env:USERPROFILE\.local\bin\ssb.exe" --help
+Remove-Item .\install.ps1
+```
+
+The `-ExecutionPolicy Bypass` argument applies to that one invocation only,
+and is needed because the default policy on Windows client editions blocks
+downloaded scripts.
+
+`install.ps1` takes the same options as `install.sh`, spelled as PowerShell
+parameters, and `-Help` prints them:
+
+```powershell
+# Codex
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -SkillDir .agents\skills
+
+# Claude Code
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -SkillDir .claude\skills
+
+# Pin both the CLI and skill to a release
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Version v0.1.0 -SkillDir .agents\skills
+```
+
+The matching `.zip` is also available from the
+[published releases](https://github.com/nnennandukwe/software-standards-bootstrap/releases)
+for a manual install.
 
 With Go 1.26.5 installed, the CLI alone can also be installed from source:
 

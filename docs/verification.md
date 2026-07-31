@@ -83,6 +83,20 @@ install_root=$(mktemp -d) || exit 1
 rm -rf "$install_root"
 ```
 
+On Windows, exercise the PowerShell installer the same way:
+
+```powershell
+$installRoot = Join-Path $env:TEMP ([System.IO.Path]::GetRandomFileName())
+.\install.ps1 -Version v0.1.1 -InstallDir "$installRoot\bin"
+& "$installRoot\bin\ssb.exe" --help
+Remove-Item -LiteralPath $installRoot -Recurse -Force
+```
+
+Installer scripts are served from `main` and shipped inside each release
+archive. They are outside the attestation boundary, so both installers must
+enforce the same guarantees and are verified by running them, not by
+attestation.
+
 Verify the published archive contents against the tagged source separately
 from checksums, SBOMs, and attestations:
 
