@@ -131,6 +131,12 @@ Valuable automatic checks that do not exist are described at:
 
 These are reviewable designs, not implemented checks or active standards.
 
+Keeping an automation proposal preserves it for separate design review. It is
+not included in `AGENTS.md` or the adoption ADR. Adopting or merging the
+standards pack does not authorize its implementation or activation.
+Implementing or activating the proposed check requires a separate reviewed
+change.
+
 ### Optimized `AGENTS.md`
 
 `ssb` renders the proposed guidance into a managed section in the repository's root `AGENTS.md`.
