@@ -2,7 +2,7 @@
 
 All notable changes are documented here. The project follows semantic versioning.
 
-## [0.1.0] - unreleased
+## [0.1.0] - 2026-07-31
 
 First public release. Set the release date in this heading when the signed tag
 is created. Earlier pre-release iterations of the rule, inventory, and
