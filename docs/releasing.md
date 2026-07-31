@@ -4,14 +4,24 @@
 
 - All four behavior slices are reviewed on `main`.
 - `go test ./...`, `go test -race ./...`, `go vet ./...`, `go build ./cmd/ssb`, and `go tool govulncheck ./...` pass on Go 1.26.5.
+- The pinned release-configuration preflight below passes.
 - CI has built and tested macOS, Linux, and Windows.
 - Pinned public benchmark results meet the evidence and retention thresholds.
-- Codex and Claude Code smoke-test records identify exact consumer versions and fixture commits.
+- At least one agent-host smoke-test record identifies its exact consumer version and fixture commits.
 - GitHub immutable releases are enabled for future releases.
-- `CHANGELOG.md` contains the release notes.
+- `CHANGELOG.md` contains the release notes, and the version heading carries the
+  tag date instead of `unreleased`.
 - The portable skill's `metadata.version` matches the contract being released.
 
 Do not tag a release from an unreviewed working tree.
+
+Validate the workflow and GoReleaser configuration with the exact tool versions
+used for this release contract:
+
+```bash
+go run github.com/goreleaser/goreleaser/v2@v2.17.0 check
+go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+```
 
 ## Tag and workflow
 

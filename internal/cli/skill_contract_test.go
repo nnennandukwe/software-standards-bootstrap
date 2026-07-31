@@ -210,7 +210,9 @@ func TestSmokeAcceptanceCoversAllArtifactKinds(t *testing.T) {
 		"`verification`",
 		"reports active artifact IDs",
 		"does not treat automation proposals as active",
-		"70% developer keep or edit-and-keep across all final artifact kinds",
+		"divide its keep plus edit-and-keep decisions by every final artifact emitted before developer review",
+		"Defer and reject decisions remain in that denominator",
+		"exact fraction must meet the threshold without rounding",
 	} {
 		if !strings.Contains(smoke, required) {
 			t.Errorf("smoke-test contract missing %q", required)

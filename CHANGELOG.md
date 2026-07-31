@@ -2,51 +2,39 @@
 
 All notable changes are documented here. The project follows semantic versioning.
 
-## [Unreleased]
+## [0.1.0] - unreleased
+
+First public release. Set the release date in this heading when the signed tag
+is created. Earlier pre-release iterations of the rule, inventory, and
+projection contracts were never published, so this section describes the
+shipping contract in full rather than a delta.
 
 ### Added
 
-- Added the actionable report, semantic rule, verification recipe, portable
-  Agent Skill, and automation proposal contracts.
-- Added exact inventory replay, confidence and utility gates, cross-artifact
-  relationships, and zero-artifact/automation-only behavior.
-- Added the governed `ssb prune` lifecycle-review protocol with pinned local
-  capability profiles, explicit provenance, complete rule/skill inventory,
+- Git-safe `inspect` inventory with stable text and JSON output, measured
+  inventory-v2 work budgets of 40,000 candidate files, 128 MiB total, and a
+  fixed 1 MiB per file, and 512-entry / 4 MiB Git blob batching.
+- Exit `4` on incomplete inventory coverage unless explicitly allowed for
+  diagnostic use, with complete candidate, scanned, and remaining accounting.
+- The `ssb.dev/report/v1` actionable report, `ssb.dev/rule/v2` semantic rule,
+  verification recipe, portable Agent Skill, and automation proposal contracts.
+- Strict evidence-backed pack validation, exact inventory replay, confidence
+  and utility gates, cross-artifact relationships, and zero-artifact and
+  automation-only behavior.
+- `ssb validate --format json` response schema 2, which includes the normalized
+  pack only for valid results.
+- Drift-detecting bounded `AGENTS.md` rendering as a progressive router with
+  inlined base semantic rules, contextual rule and recipe links, Agent Skill
+  indexes, and no automation proposals.
+- Proposed ADR generation from retained artifacts, on explicit request only.
+- Mandatory structural-pattern discovery and evidence-backed engineering
+  categorization for generated artifacts.
+- The portable `software-standards-bootstrap` Agent Skill at metadata version
+  `0.4.0`, covering actionable candidate routing and existing-pack progressive
+  selection.
+- The governed `ssb prune` lifecycle-review protocol with pinned local
+  capability profiles, explicit provenance, complete rule and skill inventory,
   evidence-backed semantic proposals, digest-bound approval, dry-run-first
-  application and recovery, separate rerender/ADR states, and external
+  application and recovery, separate rerender and ADR states, and external
   content-addressed verification receipts.
-
-### Changed
-
-- Replaced arbitrary indexed-output caps with measured inventory-v2 candidate
-  work budgets: 40,000 files, 128 MiB total, and a fixed 1 MiB per file.
-- Incomplete inventory coverage now returns exit `4` unless explicitly allowed
-  for diagnostic use, and reports complete candidate/scanned/remaining
-  accounting.
-- Git blob batching now uses the measured 512-entry, 4 MiB policy.
-- Rewrote `ssb.dev/rule/v2` as a semantic-rule contract with local derivation
-  and exact evidence, removing pre-release compatibility and command/check
-  metadata.
-- Changed the managed `AGENTS.md` section into a progressive router with
-  base semantic rules, contextual rule and recipe links, Agent Skill indexes,
-  and no automation proposals.
-- Advanced `ssb validate --format json` to response schema 2 and include the
-  normalized pack only for valid results.
-- Added existing-pack progressive selection to the portable Agent Skill.
-- Advanced the portable skill metadata version to `0.4.0` for actionable
-  candidate routing and existing-pack selection.
-
-## [0.1.0] - 2026-07-23
-
-### Added
-
-- Git-safe `inspect` inventory with stable text and JSON output.
-- Strict evidence-backed rule-pack validation.
-- Drift-detecting bounded `AGENTS.md` rendering.
-- Proposed ADR generation from retained artifacts.
-- Portable `software-standards-bootstrap` Agent Skill.
-- Mandatory structural-pattern discovery and benchmark acceptance coverage.
-- Evidence-backed engineering categorization for generated artifacts.
 - Cross-platform CI and release provenance configuration.
-- Public benchmark evidence for Cobra, Flask, Django, and Next.js across Codex
-  and Claude Code consumer workflows.

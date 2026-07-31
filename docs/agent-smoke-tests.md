@@ -70,7 +70,11 @@ For every row, verify the host:
 ## Acceptance
 
 Require 100% resolvable evidence and at least 70% developer keep or
-edit-and-keep across all final artifact kinds.
+edit-and-keep across final artifact kinds, measured per fixture rather than
+pooled across fixtures. For each fixture, divide its keep plus edit-and-keep
+decisions by every final artifact emitted before developer review. Defer and
+reject decisions remain in that denominator, and the exact fraction must meet
+the threshold without rounding.
 
 Record the host, version, fixture pin, inventory, artifact counts by kind,
 evidence result, developer decisions, complete changed paths, and forbidden

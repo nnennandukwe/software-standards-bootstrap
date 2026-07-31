@@ -16,7 +16,7 @@ Changes to the canonical CLI, schema, scoring method, trust boundary, or adoptio
 
 ## Releases
 
-Maintainers cut releases from reviewed tags after CI, race tests, vet, vulnerability scanning, cross-platform builds, fixture evaluation, and recorded Codex/Claude smoke tests. Release assets include checksums, SBOMs, and attestations.
+Maintainers cut releases from reviewed tags after CI, race tests, vet, vulnerability scanning, cross-platform builds, fixture evaluation, and a recorded smoke test on at least one agent host. Release assets include checksums, SBOMs, and attestations.
 
 ## Roles
 

@@ -48,7 +48,12 @@ an earlier artifact.
 - The structural-pattern review covers all five required dimensions and the
   existing-command and automatic-enforcement review.
 - Every accepted candidate has exactly one actionable artifact kind.
-- At least 70% of all final artifacts are judged “keep” or “edit and keep.”
+- At least 70% of final artifacts are judged “keep” or “edit and keep” in each
+  pinned repository independently. A pooled cross-repository average is not
+  acceptance, because it lets a strong fixture mask a weak one. The denominator
+  is every final artifact emitted for that fixture before developer review;
+  deferred and rejected artifacts remain in the denominator, and the exact
+  fraction must meet the threshold without rounding.
 - Inventory v2 completes all four pinned repositories under its defaults.
 - Any truncated run blocks proposal generation and is not benchmark acceptance.
 - Procedural candidates become Agent Skills.
@@ -59,7 +64,8 @@ an earlier artifact.
   preserves the applicable category.
 - Artifact edits and deletions, together with report updates, propagate to
   `AGENTS.md` and the ADR.
-- Codex and Claude Code both finish the workflow through their documented skill locations.
+- At least one conforming agent host finishes the workflow through its
+  documented skill location, recorded with its exact version.
 
 The benchmark pins are evaluation inputs, not runtime dependencies. `ssb` never clones or contacts these repositories.
 

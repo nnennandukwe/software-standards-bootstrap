@@ -52,4 +52,4 @@ Keep changes behavior-closed. Include:
 - documentation or Agent Skill parity updates; and
 - residual manual acceptance gaps.
 
-Do not claim Codex, Claude Code, release, or public-benchmark acceptance without a recorded run against the exact version and commit.
+Do not claim agent-host, release, or public-benchmark acceptance without a recorded run against the exact host version and commit.
