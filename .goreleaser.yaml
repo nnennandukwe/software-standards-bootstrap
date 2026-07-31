@@ -38,8 +38,10 @@ archives:
       - LICENSE
       - NOTICE
       - README.md
+      - install.sh
       - docs/architecture.md
       - docs/rule-format.md
+      - skills/software-standards-bootstrap/SKILL.md
       - skills/software-standards-bootstrap/**/*
 
 checksum:

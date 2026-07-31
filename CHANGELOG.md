@@ -2,6 +2,16 @@
 
 All notable changes are documented here. The project follows semantic versioning.
 
+## Unreleased
+
+### Added
+
+- A checksum-verifying `install.sh` for macOS and Linux, with latest-release
+  discovery, exact-version and install-directory options, and explicit
+  repository-local Agent Skill installation from the matching release tag.
+- Complete Agent Skill packaging in future release archives; v0.1.0 archives
+  omitted the root `SKILL.md` while including its reference files.
+
 ## [0.1.0] - 2026-07-31
 
 First public release. Set the release date in this heading when the signed tag
