@@ -1,0 +1,23 @@
+schema: ssb.dev/verification/v1
+id: verify-go-changes
+title: Verify Go changes
+category: testability
+lenses:
+  - kind: task
+    value: verification
+scopes:
+  - "**/*.go"
+  - "**/go.mod"
+  - "go.work"
+derivation: extracted
+evidence:
+  - ref: oss-test-target
+    role: enforces
+    path: Makefile
+    lines: 80-87
+    excerpt_sha256: sha256:808e98de68668e437b5490f65f4b249d631e0728f0903194fb1424dade81a6ad
+when: Before handing off a change to Go code or module metadata.
+steps:
+  - run: make test-oss
+    source_evidence: oss-test-target
+    expected_result: The OSS Go test target completes successfully after preparing the libhoop mapping and WASM artifact.

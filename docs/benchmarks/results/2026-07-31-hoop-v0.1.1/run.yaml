@@ -1,0 +1,80 @@
+experiment:
+  id: 2026-07-31-hoop-v0.1.1
+  date: 2026-07-31
+  status: raw-proposal
+  branch: experiment/hoop-ssb-v0.1.1-proposal
+  proposal_root: proposal
+
+target:
+  repository: hoophq/hoop
+  url: https://github.com/hoophq/hoop
+  commit: 3e0091b89fdaa3912f4f8e7b33fbb3104e47d71e
+  pinned_tree: https://github.com/hoophq/hoop/tree/3e0091b89fdaa3912f4f8e7b33fbb3104e47d71e
+  baseline_agent_artifacts:
+    root_agents_md: false
+    agents_directory: false
+    software_standards_directory: false
+    qodo_directory: false
+    claude_directory: true
+
+ssb:
+  version: v0.1.1
+  tag_commit: 6de797c3669194c19dbfe78575b65c320a51b9b7
+  release: https://github.com/nnennandukwe/software-standards-bootstrap/releases/tag/v0.1.1
+  release_asset: ssb_v0.1.1_darwin_arm64.tar.gz
+  archive_sha256: d54a6af6feb1bf3d644dbe72ec745218a49b10cd88bf9a0e58e55557abb071e3
+  sbom_sha256: 769307c256e4ec873e538bd1bf98f1cedce4dafb9634ba4b61e1efa4039ca501
+  checksums_sha256: 989e7645235470707e5957fa661b5c96fabb00c781458a94eb2cddf1d8ecf12f
+  installed_binary_sha256: 3e8a8f245469827527d61ad424f26654312b6f9f3abb912d57ffaa750eaf9819
+  provenance_attestation: verified
+  installer:
+    source: release archive install.sh
+    version_argument: v0.1.1
+    install_dir: isolated temporary directory
+    skill_dir: .agents/skills
+  generator: release-installed software-standards-bootstrap Agent Skill executed by Codex
+  evaluator_skill:
+    installed_path: .agents/skills/software-standards-bootstrap
+    matched_release_bundle: true
+    disposition: evaluator input only; excluded from the proposal snapshot and accepted artifact index
+
+inventory:
+  schema_version: 2
+  inventory_version: ssb-inventory-v2
+  complete: true
+  truncated: false
+  candidate_files: 2285
+  candidate_bytes: 21798146
+  indexed_files: 2239
+  indexed_bytes: 13968340
+
+proposal:
+  artifact_count: 11
+  semantic_rules: 5
+  verification_recipes: 3
+  agent_skills: 2
+  automation_proposals: 1
+  generated_agents_md: true
+  generated_adr: false
+
+verification:
+  ssb_validate: pass
+  diagnostics: 0
+  ssb_render_dry_run: pass
+  ssb_render: pass
+  canonical_replay:
+    fresh_target_checkout: true
+    validate: pass
+    rendered_agents_md_byte_identical: true
+  semantic_spot_check:
+    result: pass
+    edits_made_during_check: false
+    coverage: every generated artifact, evidence citation, recorded command source, and AGENTS.md projection
+
+execution_boundaries:
+  target_commands_executed: []
+  target_builds_tests_linters_formatters_hooks_package_managers_migrations_executed: false
+  qodo_configured_or_run: false
+  hoop_upstream_mutated: false
+  pull_request_opened: false
+  hoop_approval_or_adoption_claimed: false

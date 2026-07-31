@@ -1,0 +1,24 @@
+schema: ssb.dev/verification/v1
+id: verify-react-webapp
+title: Verify React webapp changes
+category: testability
+lenses:
+  - kind: task
+    value: verification
+scopes:
+  - "webapp_v2/**/*"
+derivation: extracted
+evidence:
+  - ref: react-package-scripts
+    role: enforces
+    path: webapp_v2/package.json
+    lines: 6-12
+    excerpt_sha256: sha256:04ae86251a063d3a357a1b09ce2cfb02b713896a23ba9a848afcb9e22d5319de
+when: Before handing off a change beneath webapp_v2.
+steps:
+  - run: cd webapp_v2 && npm run lint
+    source_evidence: react-package-scripts
+    expected_result: ESLint completes without errors.
+  - run: cd webapp_v2 && npm run build
+    source_evidence: react-package-scripts
+    expected_result: Vite produces the production webapp build without errors.
