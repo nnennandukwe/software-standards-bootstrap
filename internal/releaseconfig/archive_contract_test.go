@@ -63,7 +63,8 @@ func TestReleaseArchiveContractRejectsIncompleteSkillBundles(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			archives := t.TempDir()
-			writeReleaseArchiveMatrix(t, root, archives, test.missingTarget, test.missingPath, test.extraPath)
+			expected := expectedSkillFilesAtRef(t, root, "HEAD")
+			writeReleaseArchiveMatrix(t, expected, archives, test.missingTarget, test.missingPath, test.extraPath)
 
 			err := verifyReleaseArchives(root, archives, "HEAD")
 			if err == nil {
@@ -98,7 +99,7 @@ func TestReleaseArchiveContractPinsExpectedSkillToSourceRef(t *testing.T) {
 		t.Fatal(err)
 	}
 	archives := t.TempDir()
-	writeReleaseArchiveMatrix(t, root, archives, "", "", "")
+	writeReleaseArchiveMatrix(t, expectedWorkingSkillFiles(t, root), archives, "", "", "")
 
 	err := verifyReleaseArchives(root, archives, "v1.0.0")
 	if err == nil {
@@ -180,9 +181,8 @@ func runGitCommand(t *testing.T, directory string, args ...string) {
 	}
 }
 
-func writeReleaseArchiveMatrix(t *testing.T, root, archives, missingTarget, missingPath, extraPath string) {
+func writeReleaseArchiveMatrix(t *testing.T, expected map[string][]byte, archives, missingTarget, missingPath, extraPath string) {
 	t.Helper()
-	expected := expectedSkillFiles(t, root)
 	for target, extension := range releaseArchiveTargets {
 		if target == missingTarget {
 			continue
@@ -206,9 +206,18 @@ func writeReleaseArchiveMatrix(t *testing.T, root, archives, missingTarget, miss
 	}
 }
 
-func expectedSkillFiles(t *testing.T, root string) map[string][]byte {
+func expectedWorkingSkillFiles(t *testing.T, root string) map[string][]byte {
 	t.Helper()
 	expected, err := readWorkingSkillFiles(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return expected
+}
+
+func expectedSkillFilesAtRef(t *testing.T, root, sourceRef string) map[string][]byte {
+	t.Helper()
+	expected, err := readExpectedSkillFiles(root, sourceRef)
 	if err != nil {
 		t.Fatal(err)
 	}
