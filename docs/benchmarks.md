@@ -84,3 +84,9 @@ four pins separately.
 The [2026-07-29 actionable gate record](benchmarks/results/2026-07-29-actionable/README.md)
 captures a fresh complete inventory pass over all four pins. Proposal
 generation and developer retention remain explicitly open in that ledger.
+
+The [2026-07-31 actionable host acceptance](benchmarks/results/2026-07-31-actionable/README.md)
+records a fresh isolated Codex CLI 0.145.0 pass through proposal generation,
+per-artifact developer retention, rendering, edit/delete propagation, and
+requested `Proposed` ADR creation on all four pins. Release tagging and
+publication remain separate gates.
