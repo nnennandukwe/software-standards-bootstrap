@@ -37,6 +37,7 @@ func TestReleaseArchiveContractRejectsIncompleteSkillBundles(t *testing.T) {
 		name          string
 		missingTarget string
 		missingPath   string
+		extraPath     string
 		want          string
 	}{
 		{
@@ -54,10 +55,15 @@ func TestReleaseArchiveContractRejectsIncompleteSkillBundles(t *testing.T) {
 			missingTarget: "windows_arm64",
 			want:          "missing target windows_arm64",
 		},
+		{
+			name:      "extra skill file",
+			extraPath: bundledSkillDirectory + "/references/stale.md",
+			want:      "darwin_amd64 contains unexpected " + bundledSkillDirectory + "/references/stale.md",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			archives := t.TempDir()
-			writeReleaseArchiveMatrix(t, root, archives, test.missingTarget, test.missingPath)
+			writeReleaseArchiveMatrix(t, root, archives, test.missingTarget, test.missingPath, test.extraPath)
 
 			err := verifyReleaseArchives(root, archives, "HEAD")
 			if err == nil {
@@ -92,7 +98,7 @@ func TestReleaseArchiveContractPinsExpectedSkillToSourceRef(t *testing.T) {
 		t.Fatal(err)
 	}
 	archives := t.TempDir()
-	writeReleaseArchiveMatrix(t, root, archives, "", "")
+	writeReleaseArchiveMatrix(t, root, archives, "", "", "")
 
 	err := verifyReleaseArchives(root, archives, "v1.0.0")
 	if err == nil {
@@ -153,6 +159,14 @@ func verifyReleaseArchives(root, archives, sourceRef string) error {
 				return fmt.Errorf("release archive %s contains %s that does not match source ref %s", target, name, sourceRef)
 			}
 		}
+		for name := range actual {
+			if !strings.HasPrefix(name, bundledSkillDirectory+"/") {
+				continue
+			}
+			if _, found := expected[name]; !found {
+				return fmt.Errorf("release archive %s contains unexpected %s; rebuild from the exact source ref %s", target, name, sourceRef)
+			}
+		}
 	}
 	return nil
 }
@@ -166,7 +180,7 @@ func runGitCommand(t *testing.T, directory string, args ...string) {
 	}
 }
 
-func writeReleaseArchiveMatrix(t *testing.T, root, archives, missingTarget, missingPath string) {
+func writeReleaseArchiveMatrix(t *testing.T, root, archives, missingTarget, missingPath, extraPath string) {
 	t.Helper()
 	expected := expectedSkillFiles(t, root)
 	for target, extension := range releaseArchiveTargets {
@@ -179,6 +193,9 @@ func writeReleaseArchiveMatrix(t *testing.T, root, archives, missingTarget, miss
 				continue
 			}
 			entries = append(entries, archiveEntry{name: name, data: data, mode: 0o644})
+		}
+		if extraPath != "" && target == "darwin_amd64" {
+			entries = append(entries, archiveEntry{name: extraPath, data: []byte("stale\n"), mode: 0o644})
 		}
 		archive := filepath.Join(archives, "ssb_v9.9.9_"+target+extension)
 		if extension == ".zip" {
