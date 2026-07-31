@@ -17,6 +17,51 @@ The coding agent performs semantic analysis. The offline `ssb` CLI pins the
 input commit, builds and replays a safe inventory, validates schemas and exact
 evidence, renders `AGENTS.md`, and creates an optional Proposed ADR.
 
+## Install
+
+On macOS or Linux, install the latest published CLI release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nnennandukwe/software-standards-bootstrap/main/install.sh | sh
+"$HOME/.local/bin/ssb" --help
+```
+
+The installer detects the operating system and architecture, downloads the
+matching release archive, verifies its SHA-256 checksum, and installs the
+binary. It installs the binary into `~/.local/bin` by default and prints the
+exact `PATH` command when that directory is not already available.
+
+To install the CLI and expose the bootstrap skill in the current repository,
+run the command for your coding agent from that repository's root:
+
+```bash
+# Codex
+curl -fsSL https://raw.githubusercontent.com/nnennandukwe/software-standards-bootstrap/main/install.sh | sh -s -- --skill-dir .agents/skills
+
+# Claude Code
+curl -fsSL https://raw.githubusercontent.com/nnennandukwe/software-standards-bootstrap/main/install.sh | sh -s -- --skill-dir .claude/skills
+```
+
+With `--skill-dir`, the installer checks out the same release tag as the CLI
+and copies its `software-standards-bootstrap` skill into the requested host
+directory. It stops without replacing an existing skill.
+
+Pin both the CLI and Codex skill to v0.1.0:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nnennandukwe/software-standards-bootstrap/main/install.sh | sh -s -- --version v0.1.0 --skill-dir .agents/skills
+```
+
+Use `--install-dir /path/to/bin` to choose another binary directory. Windows
+users can download the matching `.zip` from the
+[published releases](https://github.com/nnennandukwe/software-standards-bootstrap/releases).
+
+With Go 1.26.5 installed, the CLI alone can also be installed from source:
+
+```bash
+go install github.com/nnennandukwe/software-standards-bootstrap/cmd/ssb@v0.1.0
+```
+
 ## What it generates
 
 ### Semantic rules
@@ -155,42 +200,23 @@ It does not provide a generic rules catalog, invent standards without repository
 ### Requirements
 
 - Git 2.39 or newer
+- `curl` when using `install.sh` on macOS or Linux
 - A repository with at least one commit on an attached branch
 - No tracked or staged working-tree changes
-- Go 1.26.5 when building `ssb` from source
-- `GOBIN` or `$(go env GOPATH)/bin` on `PATH`
 - A compatible coding agent that can use the bundled Agent Skill
+
+Go 1.26.5 is required only when building `ssb` from source.
 
 Untracked files are allowed during inspection.
 
-### 1. Install the CLI
+### 1. Install the CLI and expose the bootstrap skill
 
-```bash
-git clone https://github.com/nnennandukwe/software-standards-bootstrap.git
-cd software-standards-bootstrap
-go install ./cmd/ssb
-ssb --help
-```
+From the target repository's root, run the Codex or Claude Code command under
+[Install](#install). Run `"$HOME/.local/bin/ssb" --help` to verify the default
+CLI installation before continuing. If the installer prints a `PATH` command,
+run it in the current shell before using `ssb` directly.
 
-### 2. Expose the bootstrap skill
-
-From this checkout, copy the bundled skill into the target repository.
-
-For Codex:
-
-```bash
-mkdir -p /path/to/repository/.agents/skills
-cp -R skills/software-standards-bootstrap /path/to/repository/.agents/skills/
-```
-
-For Claude Code:
-
-```bash
-mkdir -p /path/to/repository/.claude/skills
-cp -R skills/software-standards-bootstrap /path/to/repository/.claude/skills/
-```
-
-### 3. Generate the proposal
+### 2. Generate the proposal
 
 From the clean target repository, ask the coding agent:
 
@@ -201,7 +227,7 @@ and generate evidence-backed actionable artifacts and AGENTS.md guidance.
 
 The agent runs the inventory, analyzes repository evidence, writes the proposal, validates it, renders `AGENTS.md`, and reports every changed or untracked path.
 
-### 4. Review and rerender
+### 3. Review and rerender
 
 Review the report, every canonical artifact, and the generated `AGENTS.md`
 section. Do not edit the managed section directly. Edit canonical sources and
@@ -215,7 +241,7 @@ ssb render --repo .
 
 Review the complete uncommitted diff before creating a pull request.
 
-### 5. Create an optional ADR
+### 4. Create an optional ADR
 
 Only after reviewing the retained proposal:
 

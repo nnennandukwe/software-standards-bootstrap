@@ -82,6 +82,7 @@ func TestReleaseConfigurationKeepsToolchainTargetsAndAttestationGates(t *testing
 		"- arm64",
 		"algorithm: sha256",
 		"artifacts: archive",
+		"skills/software-standards-bootstrap/SKILL.md",
 		"draft: true",
 		"replace_existing_artifacts: false",
 	} {
@@ -99,12 +100,49 @@ func TestReleaseRunbookRequiresPinnedConfigurationPreflight(t *testing.T) {
 	for _, required := range []string{
 		"go run github.com/goreleaser/goreleaser/v2@v2.17.0 check",
 		"go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12",
+		"./install.sh --version v0.1.0 --install-dir \"$install_root/bin\"",
+		"\"$install_root/bin/ssb\" --help",
 	} {
 		if !strings.Contains(releasing, required) {
 			t.Errorf("release runbook missing %q", required)
 		}
 		if !strings.Contains(verification, required) {
 			t.Errorf("verification contract missing %q", required)
+		}
+	}
+}
+
+func TestInstallerIsPackagedAndDocumentedBeforeProductDetail(t *testing.T) {
+	root := repositoryRoot(t)
+	config := readText(t, filepath.Join(root, ".goreleaser.yaml"))
+	readme := readText(t, filepath.Join(root, "README.md"))
+
+	if !strings.Contains(config, "      - install.sh") {
+		t.Error("GoReleaser archive does not include install.sh")
+	}
+
+	installHeading := strings.Index(readme, "## Install")
+	productDetailHeading := strings.Index(readme, "## What it generates")
+	if installHeading < 0 {
+		t.Fatal("README does not contain an Install section")
+	}
+	if productDetailHeading < 0 {
+		t.Fatal("README does not contain the product-detail section")
+	}
+	if installHeading > productDetailHeading {
+		t.Error("README hides installation below product detail")
+	}
+
+	for _, required := range []string{
+		"curl -fsSL https://raw.githubusercontent.com/nnennandukwe/software-standards-bootstrap/main/install.sh | sh",
+		"sh -s -- --skill-dir .agents/skills",
+		"\"$HOME/.local/bin/ssb\" --help",
+		"sh -s -- --version v0.1.0",
+		"installs the binary into `~/.local/bin`",
+		"verifies its SHA-256 checksum",
+	} {
+		if !strings.Contains(readme, required) {
+			t.Errorf("README installer section missing %q", required)
 		}
 	}
 }

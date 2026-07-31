@@ -71,3 +71,13 @@ for this actionable-artifact cutover.
 Do not mark a release complete until the source commit, hosted checks, signed
 tag, archives, checksums, SBOMs, attestations, and clean installation are each
 verified independently. Pending evidence remains pending.
+
+Verify the public installer separately from the release workflow in an
+isolated destination:
+
+```bash
+install_root=$(mktemp -d) || exit 1
+./install.sh --version v0.1.0 --install-dir "$install_root/bin"
+"$install_root/bin/ssb" --help
+rm -rf "$install_root"
+```

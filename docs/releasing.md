@@ -47,6 +47,16 @@ Every third-party action is pinned to a full commit SHA. GoReleaser and Syft ver
 
 ## Verify the published release
 
+From the repository checkout, exercise the public installer against an isolated
+destination:
+
+```bash
+install_root=$(mktemp -d) || exit 1
+./install.sh --version v0.1.0 --install-dir "$install_root/bin"
+"$install_root/bin/ssb" --help
+rm -rf "$install_root"
+```
+
 In a clean directory:
 
 ```bash
