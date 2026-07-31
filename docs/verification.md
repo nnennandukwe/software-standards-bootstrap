@@ -15,6 +15,8 @@ go test -race ./...
 go vet ./...
 go build ./cmd/ssb
 go tool govulncheck ./...
+go run github.com/goreleaser/goreleaser/v2@v2.17.0 check
+go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 make verify
 ```
 
@@ -52,7 +54,12 @@ Tests cover:
 Run the blind pinned-fixture workflow in [benchmarks.md](benchmarks.md). Record
 every emitted rule, verification recipe, Agent Skill, and automation proposal.
 Require complete inventory, resolvable evidence, and at least 70% developer
-keep or edit-and-keep across all final artifacts.
+keep or edit-and-keep across final artifacts in each pinned repository
+independently. One conforming agent host satisfies the consumer gate; record
+its exact version. A pooled cross-repository average is not acceptance. Use
+every final artifact emitted before developer review as that fixture's
+denominator; deferred and rejected artifacts remain in it, and the exact
+fraction must meet the threshold without rounding.
 
 Historical result files under
 [`docs/benchmarks/results/2026-07-23/`](benchmarks/results/2026-07-23/README.md)

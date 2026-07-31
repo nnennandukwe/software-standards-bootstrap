@@ -94,7 +94,7 @@ No findings.
 ## Residual release risks
 
 - A GitHub release has not yet been published and installed from its archive.
-- Public benchmark and Codex/Claude acceptance records require external consumer runs at release time.
+- Public benchmark and agent-host acceptance records require an external consumer run before tagging.
 - Windows and Linux binaries are cross-built locally and configured in CI; execution on hosted Windows/Linux runners begins after the repository is pushed.
 
 Summary: 0 open findings.

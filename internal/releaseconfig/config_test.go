@@ -91,6 +91,24 @@ func TestReleaseConfigurationKeepsToolchainTargetsAndAttestationGates(t *testing
 	}
 }
 
+func TestReleaseRunbookRequiresPinnedConfigurationPreflight(t *testing.T) {
+	root := repositoryRoot(t)
+	releasing := readText(t, filepath.Join(root, "docs", "releasing.md"))
+	verification := readText(t, filepath.Join(root, "docs", "verification.md"))
+
+	for _, required := range []string{
+		"go run github.com/goreleaser/goreleaser/v2@v2.17.0 check",
+		"go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12",
+	} {
+		if !strings.Contains(releasing, required) {
+			t.Errorf("release runbook missing %q", required)
+		}
+		if !strings.Contains(verification, required) {
+			t.Errorf("verification contract missing %q", required)
+		}
+	}
+}
+
 func repositoryRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
