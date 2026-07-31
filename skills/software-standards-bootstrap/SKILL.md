@@ -282,3 +282,5 @@ List every changed and untracked path. State explicitly:
 
 Stop before the ADR. The developer-created pull request and its merge are the
 adoption decision.
+
+<!-- Source: https://github.com/nnennandukwe/software-standards-bootstrap · Author: Nnenna Ndukwe · Apache-2.0 -->

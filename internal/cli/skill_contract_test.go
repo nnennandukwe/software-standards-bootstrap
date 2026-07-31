@@ -161,6 +161,37 @@ func TestAgentSkillSupportsActionablePackConsumptionAndMaintenance(t *testing.T)
 	}
 }
 
+func TestReadmeKeepsAutomationImplementationReviewSeparate(t *testing.T) {
+	root := repositoryRoot(t)
+	readme := normalizedText(t, filepath.Join(root, "README.md"))
+
+	for _, required := range []string{
+		"Keeping an automation proposal preserves it for separate design review.",
+		"It is not included in `AGENTS.md` or the adoption ADR.",
+		"Adopting or merging the standards pack does not authorize its implementation or activation.",
+		"Implementing or activating the proposed check requires a separate reviewed change.",
+	} {
+		if !strings.Contains(readme, required) {
+			t.Errorf("README missing automation review boundary %q", required)
+		}
+	}
+}
+
+func TestBundledSkillCarriesCreatorAttribution(t *testing.T) {
+	root := repositoryRoot(t)
+	skill := strings.TrimSpace(readText(t, filepath.Join(
+		root,
+		"skills",
+		"software-standards-bootstrap",
+		"SKILL.md",
+	)))
+	want := "<!-- Source: https://github.com/nnennandukwe/software-standards-bootstrap · Author: Nnenna Ndukwe · Apache-2.0 -->"
+
+	if !strings.HasSuffix(skill, want) {
+		t.Errorf("bundled Agent Skill must end with creator attribution %q", want)
+	}
+}
+
 func TestPublicDocumentationUsesOnlyActionableContracts(t *testing.T) {
 	root := repositoryRoot(t)
 	documents := []string{

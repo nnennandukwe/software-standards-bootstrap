@@ -47,6 +47,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Verify complete Agent Skill in every release archive
+        run: go test ./internal/releaseconfig -run '^TestGeneratedReleaseArchivesContainCompleteSkill$'
+        env:
+          SSB_RELEASE_ARCHIVE_DIR: dist
+          SSB_RELEASE_SOURCE_REF: ${{ github.ref_name }}
+
       - name: Attest archive provenance from the SHA-256 manifest
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
