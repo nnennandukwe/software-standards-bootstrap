@@ -56,7 +56,6 @@ $targetTemp = $null
 $skillTemp = $null
 $skillTarget = $null
 $skillInstalled = $false
-$installed = $false
 $exitCode = 0
 
 function Show-Usage {
@@ -310,13 +309,20 @@ try {
         $skillInstalled = $true
     }
 
+    # File.Move has no overwrite overload on .NET Framework, and deleting the
+    # target first would leave no ssb.exe at all if the move then failed.
+    # File.Replace swaps the directory entry in one step; it needs an existing
+    # destination on the same volume, which $targetTemp is by construction. It
+    # also succeeds while the old binary is running, where Delete fails
+    # outright. A fresh install has nothing to replace and nothing to lose, so
+    # it moves directly.
     if (Test-Path -LiteralPath $target -PathType Leaf) {
-        [System.IO.File]::Delete($target)
+        [System.IO.File]::Replace($targetTemp, $target, [NullString]::Value)
+    } else {
+        [System.IO.File]::Move($targetTemp, $target)
     }
-    [System.IO.File]::Move($targetTemp, $target)
     $targetTemp = $null
     $skillInstalled = $false
-    $installed = $true
 
     Write-Output "Installed ssb $Version to $target"
     if ($skillTarget) {
@@ -334,11 +340,11 @@ try {
     [Console]::Error.WriteLine("install.ps1: $($_.Exception.Message)")
     $exitCode = 1
 } finally {
-    # Runs on a thrown failure and on Ctrl-C, matching install.sh's
-    # trap cleanup 0 HUP INT TERM.
-    if (-not $installed) {
-        Invoke-Cleanup
-    }
+    # Runs on success, on a thrown failure, and on Ctrl-C, matching install.sh's
+    # trap cleanup 0 HUP INT TERM. A completed install has already cleared
+    # $targetTemp and $skillTemp and reset $skillInstalled, so on the success
+    # path this removes the download directory and nothing else.
+    Invoke-Cleanup
 }
 
 exit $exitCode

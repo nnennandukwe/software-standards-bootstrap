@@ -202,6 +202,38 @@ func TestInstallPowerShellScriptRejectsChecksumMismatchBeforeReplacingBinary(t *
 	}
 }
 
+func TestInstallPowerShellScriptReplacesAnExistingBinary(t *testing.T) {
+	fixture := newPowerShellInstallerFixture(t, "v1.2.3", true)
+	if err := os.MkdirAll(fixture.installDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(fixture.installDir, "ssb.exe")
+	if err := os.WriteFile(target, []byte("existing binary\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := fixture.run("-Version", "v1.2.3", "-InstallDir", fixture.installDir)
+	if err != nil {
+		t.Fatalf("install.ps1 failed to upgrade an existing binary: %v\n%s", err, output)
+	}
+	installed, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(installed, fixture.expectedBinary) {
+		t.Fatalf("existing binary was not replaced with the release binary")
+	}
+	// A staged copy or a rollback backup left behind would put an extra entry
+	// on the user's PATH.
+	entries, readErr := os.ReadDir(fixture.installDir)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(entries) != 1 || entries[0].Name() != "ssb.exe" {
+		t.Fatalf("install directory = %v, want only ssb.exe", entries)
+	}
+}
+
 // A checksums.txt carrying a blank or single-token line is still well formed.
 // The entry for this asset has to be selected without tripping over them.
 func TestInstallPowerShellScriptSelectsTheAssetEntryAmongUnrelatedLines(t *testing.T) {
@@ -472,6 +504,17 @@ var (
 	fakeExecutableDir   string
 	fakeExecutables     = map[string]string{}
 )
+
+// The shared fake-executable directory is package-level state with no owning
+// test, so nothing removes it via t.TempDir; without this it survives every
+// run.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if fakeExecutableDir != "" {
+		os.RemoveAll(fakeExecutableDir)
+	}
+	os.Exit(code)
+}
 
 // Each fake costs a Go compile, so build one copy per distinct source and share
 // it across every fixture rather than rebuilding per test.
