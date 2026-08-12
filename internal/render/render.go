@@ -193,7 +193,7 @@ func buildSection(pack rulepack.Pack) ([]byte, string, string, error) {
 		body.WriteString("Generated from `.software-standards/report.md` and its accepted artifacts by `ssb render`. Edit canonical sources and the report index together, then rerun the command.\n\n")
 	}
 	fmt.Fprintf(&body, "Baseline: `%s`\n\n", pack.BaselineCommit)
-	body.WriteString("SSB did not stage, commit, push, open a pull request, execute any command, or activate another system. Recipe presence and expected results are not execution evidence.\n")
+	body.WriteString("SSB did not stage, commit, push, open a pull request, execute any displayed recipe command, or activate another system. Recipe presence and expected results are not execution evidence.\n")
 
 	if pack.Layout == rulepack.LayoutManifest && hasOrientationContent(pack.Orientation) {
 		writeOrientation(&body, pack.Orientation, manifest, titles)
@@ -527,10 +527,14 @@ func markdownText(value string) string {
 
 func markdownLink(label, relative string) string {
 	segments := strings.Split(relative, "/")
+	repositoryRelativePrefix := ""
+	if strings.Contains(segments[0], ":") {
+		repositoryRelativePrefix = "./"
+	}
 	for index, segment := range segments {
 		segments[index] = url.PathEscape(segment)
 	}
-	return "[" + markdownText(label) + "](" + strings.Join(segments, "/") + ")"
+	return "[" + markdownText(label) + "](" + repositoryRelativePrefix + strings.Join(segments, "/") + ")"
 }
 
 func inlineCode(value string) string {

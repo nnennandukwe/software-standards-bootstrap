@@ -157,6 +157,28 @@ func TestValidateRejectsInvalidVerificationVersionsAndWorkingDirectories(t *test
 	}
 }
 
+func TestValidateReportsOnlyStrictDecodeFailureForMalformedVerification(t *testing.T) {
+	for _, schema := range []string{rulepack.VerificationSchemaV1, rulepack.VerificationSchemaV2} {
+		t.Run(schema, func(t *testing.T) {
+			workingDirectory := ""
+			if schema == rulepack.VerificationSchemaV2 {
+				workingDirectory = "    working_directory: .\n"
+			}
+			repo, _ := verificationPackRepository(t, schema, fmt.Sprintf(`  - run: go test ./...
+%s    source_evidence: make-verify
+    expected_results: The tests exit successfully.
+`, workingDirectory))
+
+			_, diagnostics := validatePack(t, repo)
+			if len(diagnostics) != 1 ||
+				!strings.Contains(diagnostics[0].Message, "expected_results") ||
+				diagnostics[0].Recovery == "" {
+				t.Fatalf("malformed %s diagnostics = %#v, want one actionable strict-decode failure", schema, diagnostics)
+			}
+		})
+	}
+}
+
 func validVerificationStep(workingDirectory string) string {
 	return fmt.Sprintf(`  - run: go test ./...
 %s    source_evidence: make-verify

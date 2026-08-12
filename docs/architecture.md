@@ -186,8 +186,8 @@ Optional `.software-standards/orientation.yaml` uses
 area, prerequisite, document, relationship, and task-guidance context backed
 by exact `declares` or `enforces` evidence. Paths resolve against the pinned
 baseline. Orientation is normalized with the pack but is not a manifest
-artifact, actionable-artifact count, or ADR source. An unreferenced canonical
-orientation file is rejected rather than inferred.
+artifact, actionable-artifact count, or ADR source. In the manifest layout, an
+unreferenced canonical orientation file is rejected rather than inferred.
 
 Verification decoding is version-specific and private to `rulepack`.
 `ssb.dev/verification/v2` requires a `working_directory` for every ordered
@@ -247,9 +247,9 @@ recipe, and skill IDs in declared order. Automation proposals remain absent.
 
 The lifecycle copy distinguishes a derived unmerged proposal from review and
 merge adoption. It states that file presence is not adoption proof, and that
-SSB did not stage, commit, push, open a pull request, execute commands, or
-activate another system. Recipe presence and expected results are not execution
-evidence.
+SSB did not stage, commit, push, open a pull request, execute any displayed
+recipe command, or activate another system. Recipe presence and expected
+results are not execution evidence.
 
 An empty, orientation-only, or automation-only pack does not create or rewrite
 an unprojected `AGENTS.md`; if a generated managed section remains from an

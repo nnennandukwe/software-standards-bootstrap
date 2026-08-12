@@ -31,7 +31,7 @@ func TestApplyProjectsActionFirstRulesInertCommandsAndScannableSkills(t *testing
 		"An unmerged generated change is a proposal",
 		"review and merge are the adoption decision",
 		"File presence alone does not prove adoption",
-		"did not stage, commit, push, open a pull request, execute any command, or activate another system",
+		"did not stage, commit, push, open a pull request, execute any displayed recipe command, or activate another system",
 		"Recipe presence and expected results are not execution evidence",
 		"### How routing works",
 		"### Standing orders",
@@ -60,6 +60,7 @@ func TestApplyProjectsActionFirstRulesInertCommandsAndScannableSkills(t *testing
 	}
 	for _, forbidden := range []string{
 		"Contextual body must stay canonical.",
+		"execute any command",
 		"automate-check",
 		"coverage",
 		"classification",
@@ -91,6 +92,28 @@ func TestApplyProjectsActionFirstRulesInertCommandsAndScannableSkills(t *testing
 	metadata := strings.Index(content, "- Applies to: `**/*.go`")
 	if body < 0 || metadata < 0 || body > metadata {
 		t.Fatalf("base rule is not action-first:\n%s", content)
+	}
+}
+
+func TestApplyKeepsOrientationDocumentLinksRepositoryRelative(t *testing.T) {
+	repo := committedRepository(t)
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack := actionableProjectionPack(ws.Baseline())
+	pack.Layout = rulepack.LayoutManifest
+	pack.Orientation = projectionOrientation()
+	pack.Orientation.Documents[0].Path = "javascript:alert(1)"
+
+	result, err := render.Apply(ws, pack, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(result.Content)
+	if strings.Contains(content, "](javascript:") ||
+		!strings.Contains(content, "](./javascript:alert%281%29)") {
+		t.Fatalf("orientation document link is not explicitly repository-relative:\n%s", content)
 	}
 }
 

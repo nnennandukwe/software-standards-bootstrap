@@ -965,6 +965,9 @@ func loadManifestVerificationRecipe(
 	}
 	recipe, recipeDiagnostics := decodeVerificationRecipe(manifest.Path, data)
 	diagnostics = append(diagnostics, recipeDiagnostics...)
+	if len(recipeDiagnostics) != 0 {
+		return VerificationRecipe{}, diagnostics, nil
+	}
 	diagnostics = append(diagnostics, validateVerificationRecipe(ctx, evidenceRepo, recipe, manifest)...)
 	diagnostics = append(diagnostics, validateNativeMetadataBinding(manifest.Path, recipe.ID, recipe.Category, recipe.Lenses, recipe.Scopes, recipe.Derivation, recipe.Evidence, manifest)...)
 	return recipe, diagnostics, nil
@@ -1914,6 +1917,9 @@ func loadVerificationRecipe(
 	}
 	recipe, recipeDiagnostics := decodeVerificationRecipe(manifest.Path, data)
 	diagnostics = append(diagnostics, recipeDiagnostics...)
+	if len(recipeDiagnostics) != 0 {
+		return VerificationRecipe{}, diagnostics, nil
+	}
 	diagnostics = append(diagnostics, validateVerificationRecipe(ctx, evidenceRepo, recipe, manifest)...)
 	return recipe, diagnostics, nil
 }
