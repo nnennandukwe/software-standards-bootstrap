@@ -117,7 +117,7 @@ func TestValidateAcceptsZeroArtifactReport(t *testing.T) {
 	}
 }
 
-func TestValidateAcceptsManifestLayoutAndHumanFirstRule(t *testing.T) {
+func TestValidateAcceptsManifestRule(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
 	fixture := writeValidManifestLayoutPack(t, repo, baseline, true)
 
@@ -159,7 +159,7 @@ func TestValidateAcceptsManifestLayoutAndHumanFirstRule(t *testing.T) {
 	}
 }
 
-func TestValidateAcceptsZeroArtifactManifest(t *testing.T) {
+func TestValidateAcceptsEmptyManifest(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
 	writeValidManifestLayoutPack(t, repo, baseline, false)
 
@@ -221,7 +221,7 @@ func TestValidateKeepsHumanReportSmallFor2239FileInventory(t *testing.T) {
 	}
 }
 
-func TestValidateAcceptsMinimalPortableSkillInManifestLayout(t *testing.T) {
+func TestValidateAcceptsManifestSkill(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
 	fixture := writeValidManifestLayoutPack(t, repo, baseline, false)
 	skill := []byte(`---
@@ -280,7 +280,7 @@ license: MIT
 	}
 }
 
-func TestValidateManifestPresentationHandlesCRLFAndRejectsDeferredContent(t *testing.T) {
+func TestValidateManifestPresentation(t *testing.T) {
 	tests := []struct {
 		name       string
 		report     []byte
@@ -344,7 +344,7 @@ func TestValidateManifestPresentationHandlesCRLFAndRejectsDeferredContent(t *tes
 	}
 }
 
-func TestValidateManifestLayoutAppliesSizeLimitsBeforeParsing(t *testing.T) {
+func TestValidateManifestSizeLimits(t *testing.T) {
 	tests := []struct {
 		name     string
 		path     func(manifestLayoutFixture) string
@@ -383,7 +383,7 @@ func TestValidateManifestLayoutAppliesSizeLimitsBeforeParsing(t *testing.T) {
 	}
 }
 
-func TestUpdateManifestArtifactsRefreshesDigestsAndRemovesRelationships(t *testing.T) {
+func TestUpdateManifestArtifacts(t *testing.T) {
 	input := []byte(`schema: ssb.dev/manifest/v1
 baseline_commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 inventory:
@@ -456,7 +456,7 @@ artifacts:
 	}
 }
 
-func TestValidateManifestPresenceNeverFallsBackToEmbedded(t *testing.T) {
+func TestValidateManifestNoFallback(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
 	writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), actionableReport(baseline, "  []"))
 	writeFile(t, filepath.Join(repo, ".software-standards", "manifest.yaml"), "schema: ssb.dev/manifest/v0\nunknown: true\n")
@@ -475,7 +475,7 @@ func TestValidateManifestPresenceNeverFallsBackToEmbedded(t *testing.T) {
 	}
 }
 
-func TestValidateManifestLayoutRejectsMalformedOrSubstitutedSources(t *testing.T) {
+func TestValidateRejectsManifestSources(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(t *testing.T, repo string, fixture manifestLayoutFixture)
@@ -577,7 +577,7 @@ func TestValidateManifestLayoutRejectsMalformedOrSubstitutedSources(t *testing.T
 	}
 }
 
-func TestValidateManifestLayoutRejectsSymlinkedMachineArtifacts(t *testing.T) {
+func TestValidateRejectsManifestSymlinks(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation is not consistently available on Windows")
 	}

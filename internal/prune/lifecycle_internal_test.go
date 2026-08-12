@@ -478,7 +478,7 @@ func TestApplicationRollbackRemovesCreatedDirectories(t *testing.T) {
 	}
 }
 
-func TestManifestPublicationFailureRestoresExactPackPrestate(t *testing.T) {
+func TestManifestPublicationRollback(t *testing.T) {
 	root := t.TempDir()
 	rulePath := filepath.Join(root, ".software-standards", "rules", "keep-rule.md")
 	skillPath := filepath.Join(root, ".agents", "skills", "orphan-skill", "SKILL.md")

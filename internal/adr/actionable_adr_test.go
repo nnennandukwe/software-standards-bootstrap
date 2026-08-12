@@ -54,7 +54,7 @@ func TestCreateRecordsAdoptableArtifactsAndExcludesAutomation(t *testing.T) {
 	}
 }
 
-func TestCreateManifestLayoutRecordsManifestInventoryAndReportPaths(t *testing.T) {
+func TestCreateIncludesManifestPaths(t *testing.T) {
 	repo := committedRepository(t)
 	ws, err := workspace.Open(context.Background(), repo)
 	if err != nil {
@@ -82,7 +82,7 @@ func TestCreateManifestLayoutRecordsManifestInventoryAndReportPaths(t *testing.T
 	}
 }
 
-func TestCreateEmbeddedADRBytesRemainStable(t *testing.T) {
+func TestCreatePreservesEmbeddedBytes(t *testing.T) {
 	repo := committedRepository(t)
 	ws, err := workspace.Open(context.Background(), repo)
 	if err != nil {

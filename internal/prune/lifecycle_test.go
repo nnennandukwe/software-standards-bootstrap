@@ -507,7 +507,7 @@ func TestApplyDefaultsToDryRunThenAppliesApprovedRemoval(t *testing.T) {
 	}
 }
 
-func TestApplyManifestRemovalUpdatesManifestAndCleansRelationshipsAtomically(t *testing.T) {
+func TestApplyManifestRemoval(t *testing.T) {
 	root := manifestLayoutLifecycleRepository(t)
 	manifestPath := filepath.Join(root, ".software-standards", "manifest.yaml")
 	reportPath := filepath.Join(root, ".software-standards", "report.md")
@@ -583,7 +583,7 @@ func TestApplyManifestRemovalUpdatesManifestAndCleansRelationshipsAtomically(t *
 	}
 }
 
-func TestApplyManifestRuleUpdateRefreshesOnlyPrimaryDigest(t *testing.T) {
+func TestApplyRefreshesManifestDigest(t *testing.T) {
 	root := manifestLayoutLifecycleRepository(t)
 	configureRuleUpdateCandidate(t, root)
 	manifestPath := filepath.Join(root, ".software-standards", "manifest.yaml")
@@ -1110,7 +1110,7 @@ func TestApprovalRejectsRetainedRuleWithUnreachableBaselineBeforeMutation(t *tes
 	}
 }
 
-func TestApprovalRejectsEmbeddedRuleOwnedRelationship(t *testing.T) {
+func TestApprovalRejectsEmbeddedRelationship(t *testing.T) {
 	root := lifecycleRepository(t)
 	rulePath := filepath.Join(root, ".software-standards", "rules", "keep-rule.md")
 	ruleData, err := os.ReadFile(rulePath)

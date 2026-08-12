@@ -56,7 +56,7 @@ func TestInspectJSONIsReadOnlyAndMachineReadable(t *testing.T) {
 	}
 }
 
-func TestInspectTextGuidesManifestLayoutGeneration(t *testing.T) {
+func TestInspectGuidesManifestGeneration(t *testing.T) {
 	repo := committedRepository(t)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -950,7 +950,7 @@ func TestValidateJSONExportsActionableInterchangeFields(t *testing.T) {
 	}
 }
 
-func TestValidateJSONSchemaThreeIdentifiesManifestLayout(t *testing.T) {
+func TestValidateJSONReportsManifestLayout(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
 	writeValidManifestLayoutPack(t, repo, baseline)
 
@@ -1136,7 +1136,7 @@ func TestRenderDryRunReportsAlreadyCurrentForActivePack(t *testing.T) {
 	}
 }
 
-func TestRenderManifestLayoutGuidanceNamesManifestDigestUpdate(t *testing.T) {
+func TestRenderGuidesManifestDigestUpdate(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
 	writeValidManifestLayoutPack(t, repo, baseline)
 

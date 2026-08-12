@@ -36,7 +36,7 @@ func TestAgentSkillRequiresActionableCandidateRouting(t *testing.T) {
 	}
 }
 
-func TestAgentSkillGeneratesHumanFirstManifestLayout(t *testing.T) {
+func TestAgentSkillDefinesManifestGeneration(t *testing.T) {
 	root := repositoryRoot(t)
 	skill := normalizedText(t, filepath.Join(
 		root,
@@ -255,7 +255,7 @@ func TestPublicDocumentationUsesOnlyActionableContracts(t *testing.T) {
 	}
 }
 
-func TestPublicDocumentationDefinesManifestGenerationAndEmbeddedCompatibility(t *testing.T) {
+func TestDocsDefinePackLayouts(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, relative := range []string{
 		"CONTEXT.md",

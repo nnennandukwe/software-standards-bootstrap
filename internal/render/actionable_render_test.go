@@ -62,7 +62,7 @@ func TestApplyProjectsRulesRecipesAndSkillsWithoutAutomationOrCommands(t *testin
 	}
 }
 
-func TestApplyManifestLayoutNamesAllCanonicalSourcesAndBindsTheirDigests(t *testing.T) {
+func TestApplyBindsManifestSources(t *testing.T) {
 	repo := committedRepository(t)
 	ws, err := workspace.Open(context.Background(), repo)
 	if err != nil {
@@ -109,7 +109,7 @@ func TestApplyManifestLayoutNamesAllCanonicalSourcesAndBindsTheirDigests(t *test
 	}
 }
 
-func TestApplyEmbeddedProjectionBytesRemainStable(t *testing.T) {
+func TestApplyPreservesEmbeddedBytes(t *testing.T) {
 	repo := committedRepository(t)
 	ws, err := workspace.Open(context.Background(), repo)
 	if err != nil {
