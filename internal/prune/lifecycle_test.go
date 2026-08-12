@@ -583,6 +583,78 @@ func TestApplyManifestRemoval(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsRemovingSkillReferencedByOrientationBeforeMutation(t *testing.T) {
+	root := manifestLayoutLifecycleRepository(t)
+	orientationPath := filepath.Join(root, ".software-standards", "orientation.yaml")
+	orientationData := []byte(`schema: ssb.dev/orientation/v1
+related_artifacts:
+  - orphan-skill
+`)
+	writeFile(t, orientationPath, string(orientationData))
+	manifestPath := filepath.Join(root, ".software-standards", "manifest.yaml")
+	manifestData, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest rulepack.Manifest
+	if err := yaml.Load(manifestData, &manifest, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Orientation = rulepack.FileReference{
+		Path:   ".software-standards/orientation.yaml",
+		SHA256: fileDigest(t, orientationPath),
+	}
+	manifestData, err = yaml.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, manifestPath, string(manifestData))
+	git(t, root, "add", ".software-standards/manifest.yaml", ".software-standards/orientation.yaml")
+	git(t, root, "commit", "-m", "bind orientation")
+
+	createReviewWithProposal(t, root, false)
+	review, _, err := prune.LoadReview(root, "review-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	review.Proposal.Actions[1].Disposition = prune.DispositionRemove
+	proposalData, err := yaml.Marshal(review.Proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), proposalData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifestBefore, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := workspace.Open(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, diagnostics, err := prune.ValidateReview(context.Background(), repo, "review-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diagnostics) == 0 ||
+		!strings.Contains(diagnostics[len(diagnostics)-1].Message, "orientation") ||
+		!strings.Contains(diagnostics[len(diagnostics)-1].Message, "orphan-skill") ||
+		!strings.Contains(diagnostics[len(diagnostics)-1].Message, "new reviewed pack") {
+		t.Fatalf("diagnostics = %#v, want actionable orientation relationship block", diagnostics)
+	}
+	manifestAfter, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(manifestAfter, manifestBefore) {
+		t.Fatal("validation changed the manifest before approval")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".agents", "skills", "orphan-skill", "SKILL.md")); err != nil {
+		t.Fatalf("validation removed the related skill: %v", err)
+	}
+}
+
 func TestApplyRefreshesManifestDigest(t *testing.T) {
 	root := manifestLayoutLifecycleRepository(t)
 	configureRuleUpdateCandidate(t, root)

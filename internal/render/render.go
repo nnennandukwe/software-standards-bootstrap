@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/rulepack"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/workspace"
@@ -189,7 +190,7 @@ func buildSection(pack rulepack.Pack) ([]byte, string, string, error) {
 		}
 		fmt.Fprintf(&body, "Generated from %s and the accepted artifacts by `ssb render`. Edit canonical sources and the manifest together, then rerun the command.\n\n", codeList(sources))
 	} else {
-		body.WriteString("Generated from `.software-standards/report.md` and its accepted artifacts by `ssb render`. Edit canonical sources and the manifest together, then rerun the command.\n\n")
+		body.WriteString("Generated from `.software-standards/report.md` and its accepted artifacts by `ssb render`. Edit canonical sources and the report index together, then rerun the command.\n\n")
 	}
 	fmt.Fprintf(&body, "Baseline: `%s`\n\n", pack.BaselineCommit)
 	body.WriteString("SSB did not stage, commit, push, open a pull request, execute any command, or activate another system. Recipe presence and expected results are not execution evidence.\n")
@@ -294,7 +295,7 @@ func writeOrientation(
 		}
 	}
 	if len(orientation.RelatedArtifactIDs) != 0 {
-		body.WriteString("\n#### Related standards\n")
+		body.WriteString("\n#### Related standards\n\n")
 		for _, relatedID := range orientation.RelatedArtifactIDs {
 			writeRelatedArtifact(body, relatedID, manifest, titles, "")
 		}
@@ -521,7 +522,7 @@ func markdownText(value string) string {
 		"!", "\\!",
 		"|", "\\|",
 	)
-	return replacer.Replace(value)
+	return visibleControlCharacters(replacer.Replace(value))
 }
 
 func markdownLink(label, relative string) string {
@@ -533,12 +534,34 @@ func markdownLink(label, relative string) string {
 }
 
 func inlineCode(value string) string {
+	value = visibleControlCharacters(value)
 	delimiter := strings.Repeat("`", longestRun(value, '`')+1)
 	if strings.HasPrefix(value, "`") || strings.HasSuffix(value, "`") ||
 		strings.HasPrefix(value, " ") || strings.HasSuffix(value, " ") {
 		return delimiter + " " + value + " " + delimiter
 	}
 	return delimiter + value + delimiter
+}
+
+func visibleControlCharacters(value string) string {
+	var result strings.Builder
+	for _, character := range value {
+		switch character {
+		case '\n':
+			result.WriteString(`\n`)
+		case '\r':
+			result.WriteString(`\r`)
+		case '\t':
+			result.WriteString(`\t`)
+		default:
+			if unicode.IsControl(character) {
+				fmt.Fprintf(&result, `\u{%04X}`, character)
+				continue
+			}
+			result.WriteRune(character)
+		}
+	}
+	return result.String()
 }
 
 func writeCommandFence(body *strings.Builder, command string) {

@@ -223,6 +223,7 @@ func TestApplyPreservesEmbeddedLayoutBehavior(t *testing.T) {
 	content := string(result.Content)
 	for _, required := range []string{
 		"Generated from `.software-standards/report.md`",
+		"Edit canonical sources and the report index together",
 		"### How routing works",
 		"### Standing orders",
 		"### Verification commands",
@@ -234,6 +235,9 @@ func TestApplyPreservesEmbeddedLayoutBehavior(t *testing.T) {
 	}
 	if strings.Contains(content, "### Repository orientation") {
 		t.Fatalf("embedded projection rendered orientation:\n%s", content)
+	}
+	if strings.Contains(content, "the manifest together") {
+		t.Fatalf("embedded projection gave manifest-layout recovery guidance:\n%s", content)
 	}
 }
 
@@ -272,6 +276,7 @@ func TestApplyProjectsOrientationAndBindsItToSourceIdentity(t *testing.T) {
 		"#### Canonical documents",
 		"[Contributor guide](CONTRIBUTING.md)",
 		"#### Related standards",
+		"#### Related standards\n\n- Related recipe:",
 		"Related recipe: [Verify change](.software-standards/verification/verify-change.yaml)",
 		"#### Task guidance",
 		"**Handoff:** Report the result.",
@@ -289,6 +294,48 @@ func TestApplyProjectsOrientationAndBindsItToSourceIdentity(t *testing.T) {
 	}
 	if first.SourceDigest == second.SourceDigest || first.ContentDigest == second.ContentDigest {
 		t.Fatal("orientation change did not affect source and content digests")
+	}
+}
+
+func TestApplyRendersNonCommandControlCharactersAsVisibleText(t *testing.T) {
+	repo := committedRepository(t)
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack := actionableProjectionPack(ws.Baseline())
+	pack.Recipes[0].Title = "Verify\n### injected heading"
+	pack.Recipes[0].When = "Before\n- injected list"
+	pack.Recipes[0].Scopes = []string{"tools\n- injected scope"}
+	pack.Recipes[0].Steps[0].ExpectedResult = "Success\n### injected result"
+	pack.Skills[0].Description = "Review\n### injected skill heading"
+
+	result, err := render.Apply(ws, pack, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(result.Content)
+	for _, injected := range []string{
+		"\n### injected heading",
+		"\n- injected list",
+		"\n- injected scope",
+		"\n### injected result",
+		"\n### injected skill heading",
+	} {
+		if strings.Contains(content, injected) {
+			t.Fatalf("non-command scalar injected Markdown structure %q:\n%s", injected, content)
+		}
+	}
+	for _, visible := range []string{
+		`Verify\n\#\#\# injected heading`,
+		`Before\n- injected list`,
+		`tools\n- injected scope`,
+		`Success\n\#\#\# injected result`,
+		`Review\n\#\#\# injected skill heading`,
+	} {
+		if !strings.Contains(content, visible) {
+			t.Errorf("projection did not render control characters visibly as %q:\n%s", visible, content)
+		}
 	}
 }
 

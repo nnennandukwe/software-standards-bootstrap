@@ -494,14 +494,16 @@ func validateManifestLayoutPack(
 		switch {
 		case orientationErr == nil:
 			message := orientationPath + " is present without a manifest reference"
+			recovery := "bind it in the manifest or remove it"
 			if orientationInfo.Mode()&os.ModeSymlink != 0 {
 				message = orientationPath + " is a symlink present without a manifest reference"
+				recovery = "replace it with reviewed regular-file bytes and bind those bytes in the manifest, or remove the symlink"
 			}
 			diagnostics = append(diagnostics, diagnostic(
 				orientationPath,
 				"file",
 				message,
-				"bind it in the manifest or remove it",
+				recovery,
 			))
 		case !errors.Is(orientationErr, os.ErrNotExist):
 			return Pack{}, nil, fmt.Errorf("inspect %s: %w", orientationPath, orientationErr)

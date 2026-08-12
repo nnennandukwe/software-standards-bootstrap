@@ -691,6 +691,20 @@ func validateResultingGraph(
 		}
 		final[itemPath] = finalArtifact{kind: kind, content: operation.Content}
 	}
+	if pack.Orientation != nil {
+		for _, relatedID := range pack.Orientation.RelatedArtifactIDs {
+			related := manifestByID[relatedID]
+			if related.Kind != ArtifactSkill {
+				continue
+			}
+			if _, retained := final[related.Path]; !retained {
+				return fmt.Errorf(
+					"resulting graph removes Agent Skill %s while orientation still references it; create a new reviewed pack that revises orientation before removing the skill",
+					relatedID,
+				)
+			}
+		}
+	}
 	for itemPath, artifact := range final {
 		if artifact.kind != ArtifactSkill {
 			continue
