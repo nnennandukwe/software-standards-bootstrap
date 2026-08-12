@@ -32,8 +32,8 @@ const (
 	VerificationSchema = "ssb.dev/verification/v1"
 	AutomationSchema   = "ssb.dev/automation/v1"
 	UtilityMethod      = "ssb-utility-v1"
-	FormatSplitV1      = "split-v1"
-	FormatLegacyV1     = "legacy-v1"
+	LayoutManifest     = "manifest"
+	LayoutEmbedded     = "embedded"
 	categoryRecovery   = "use one primary category: architecture, compatibility, compliance, correctness, developer-experience, documentation, maintainability, operability, performance, quality, reliability, security, or testability"
 )
 
@@ -119,20 +119,20 @@ type ManifestArtifact struct {
 	Evidence           []Evidence `yaml:"evidence,omitempty" json:"evidence,omitempty"`
 }
 
-// FileReference binds one canonical split-pack file to its exact raw bytes.
+// FileReference binds one canonical manifest-layout file to its exact raw bytes.
 type FileReference struct {
 	Path   string `yaml:"path" json:"path"`
 	SHA256 string `yaml:"sha256" json:"sha256"`
 }
 
-// IsZero lets validation JSON omit split-only file references for legacy
-// packs while preserving one normalized manifest shape.
+// IsZero lets validation JSON omit manifest-layout file references for
+// embedded packs while preserving one normalized manifest shape.
 func (reference FileReference) IsZero() bool {
 	return reference.Path == "" && reference.SHA256 == ""
 }
 
-// Manifest owns split-pack machine metadata. Legacy reports are normalized
-// into the same shape without separate file references.
+// Manifest owns manifest-layout machine metadata. Embedded reports are
+// normalized into the same shape without separate file references.
 type Manifest struct {
 	Schema         string             `yaml:"schema" json:"schema"`
 	BaselineCommit string             `yaml:"baseline_commit" json:"baseline_commit"`
@@ -155,11 +155,11 @@ type Report struct {
 	Body           string             `yaml:"-" json:"body"`
 }
 
-// RemoveManifestArtifacts removes accepted artifacts and relationships to
+// RemoveReportArtifacts removes accepted artifacts and relationships to
 // them while preserving the report inventory and narrative. Lifecycle
 // mutation uses this to keep report.md in the same atomic write set as the
 // governed artifacts it removes.
-func RemoveManifestArtifacts(data []byte, removedIDs map[string]struct{}) ([]byte, error) {
+func RemoveReportArtifacts(data []byte, removedIDs map[string]struct{}) ([]byte, error) {
 	if len(removedIDs) == 0 {
 		return data, nil
 	}
@@ -210,10 +210,10 @@ func RemoveManifestArtifacts(data []byte, removedIDs map[string]struct{}) ([]byt
 	return result, nil
 }
 
-// UpdateSplitManifestArtifacts removes accepted artifacts, clears dangling
+// UpdateManifestArtifacts removes accepted artifacts, clears dangling
 // relationships, and refreshes primary-file digests without changing semantic
 // metadata. Governed prune includes the returned bytes in its atomic write set.
-func UpdateSplitManifestArtifacts(
+func UpdateManifestArtifacts(
 	data []byte,
 	removedIDs map[string]struct{},
 	updatedDigests map[string]string,
@@ -223,10 +223,10 @@ func UpdateSplitManifestArtifacts(
 	}
 	var manifest Manifest
 	if err := yaml.Load(data, &manifest, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
-		return nil, fmt.Errorf("parse split manifest: %w", err)
+		return nil, fmt.Errorf("parse manifest: %w", err)
 	}
 	if manifest.Schema != ManifestSchema {
-		return nil, fmt.Errorf("split manifest schema must be %s", ManifestSchema)
+		return nil, fmt.Errorf("manifest schema must be %s", ManifestSchema)
 	}
 	foundRemoved := make(map[string]struct{}, len(removedIDs))
 	foundUpdated := make(map[string]struct{}, len(updatedDigests))
@@ -256,15 +256,15 @@ func UpdateSplitManifestArtifacts(
 		artifacts = append(artifacts, artifact)
 	}
 	if missing := missingManifestIDs(removedIDs, foundRemoved); len(missing) != 0 {
-		return nil, fmt.Errorf("split manifest does not list artifact %s", missing[0])
+		return nil, fmt.Errorf("manifest does not list artifact %s", missing[0])
 	}
 	if missing := missingManifestIDs(updatedDigests, foundUpdated); len(missing) != 0 {
-		return nil, fmt.Errorf("split manifest does not list updated artifact %s", missing[0])
+		return nil, fmt.Errorf("manifest does not list updated artifact %s", missing[0])
 	}
 	manifest.Artifacts = artifacts
 	encoded, err := yaml.Marshal(manifest)
 	if err != nil {
-		return nil, fmt.Errorf("encode split manifest: %w", err)
+		return nil, fmt.Errorf("encode manifest: %w", err)
 	}
 	return encoded, nil
 }
@@ -356,7 +356,7 @@ type AutomationProposal struct {
 // Pack contains parsed artifacts even when diagnostics are returned. Consumers
 // must not render or create an ADR unless diagnostics is empty.
 type Pack struct {
-	Format         string               `json:"format"`
+	Layout         string               `json:"layout"`
 	BaselineCommit string               `json:"baseline_commit"`
 	ManifestPath   string               `json:"manifest_path,omitempty"`
 	InventoryPath  string               `json:"inventory_path,omitempty"`
@@ -405,7 +405,7 @@ type semanticRuleSource struct {
 	Evidence   []Evidence `yaml:"evidence"`
 }
 
-func validateSplitPack(
+func validateManifestLayoutPack(
 	ctx context.Context,
 	repo *workspace.Repository,
 	retained bool,
@@ -416,7 +416,7 @@ func validateSplitPack(
 		reportPath    = ".software-standards/report.md"
 	)
 	pack := Pack{
-		Format:         FormatSplitV1,
+		Layout:         LayoutManifest,
 		BaselineCommit: repo.Baseline(),
 		ManifestPath:   manifestPath,
 		InventoryPath:  inventoryPath,
@@ -436,7 +436,7 @@ func validateSplitPack(
 				".software-standards",
 				"file",
 				".software-standards does not exist",
-				"create the split pack and rerun ssb validate",
+				"create the manifest-layout pack and rerun ssb validate",
 			)}, nil
 		}
 		return Pack{}, nil, fmt.Errorf("inspect .software-standards: %w", err)
@@ -476,7 +476,7 @@ func validateSplitPack(
 		return pack, diagnostics, nil
 	}
 	pack.BaselineCommit = pack.Manifest.BaselineCommit
-	diagnostics = append(diagnostics, validateSplitManifest(repo, pack.Manifest, retained)...)
+	diagnostics = append(diagnostics, validateManifest(repo, pack.Manifest, retained)...)
 
 	var inventoryBytes []byte
 	if pack.Manifest.Inventory.Path == inventoryPath {
@@ -571,8 +571,8 @@ func validateSplitPack(
 	entriesByPath := make(map[string]ManifestArtifact, len(pack.Manifest.Artifacts))
 	for index, artifact := range pack.Manifest.Artifacts {
 		field := fmt.Sprintf("artifacts[%d]", index)
-		diagnostics = append(diagnostics, validateSplitManifestArtifact(manifestPath, field, artifact)...)
-		diagnostics = append(diagnostics, validateSplitOwnedMetadata(
+		diagnostics = append(diagnostics, validateManifestArtifact(manifestPath, field, artifact)...)
+		diagnostics = append(diagnostics, validateManifestOwnedMetadata(
 			ctx,
 			evidenceRepo,
 			manifestPath,
@@ -607,7 +607,7 @@ func validateSplitPack(
 		}
 		switch artifact.Kind {
 		case "rule":
-			rule, artifactDiagnostics, loadErr := loadSplitRule(repo.Root(), artifact)
+			rule, artifactDiagnostics, loadErr := loadManifestRule(repo.Root(), artifact)
 			if loadErr != nil {
 				return Pack{}, nil, loadErr
 			}
@@ -616,7 +616,7 @@ func validateSplitPack(
 				pack.Rules = append(pack.Rules, rule)
 			}
 		case "verification":
-			recipe, artifactDiagnostics, loadErr := loadSplitVerificationRecipe(ctx, evidenceRepo, repo.Root(), artifact)
+			recipe, artifactDiagnostics, loadErr := loadManifestVerificationRecipe(ctx, evidenceRepo, repo.Root(), artifact)
 			if loadErr != nil {
 				return Pack{}, nil, loadErr
 			}
@@ -625,7 +625,7 @@ func validateSplitPack(
 				pack.Recipes = append(pack.Recipes, recipe)
 			}
 		case "skill":
-			skill, artifactDiagnostics, loadErr := loadSplitSkill(repo.Root(), artifact)
+			skill, artifactDiagnostics, loadErr := loadManifestSkill(repo.Root(), artifact)
 			if loadErr != nil {
 				return Pack{}, nil, loadErr
 			}
@@ -634,7 +634,7 @@ func validateSplitPack(
 				pack.Skills = append(pack.Skills, skill)
 			}
 		case "automation":
-			automation, artifactDiagnostics, loadErr := loadSplitAutomationProposal(ctx, evidenceRepo, repo.Root(), artifact)
+			automation, artifactDiagnostics, loadErr := loadManifestAutomationProposal(ctx, evidenceRepo, repo.Root(), artifact)
 			if loadErr != nil {
 				return Pack{}, nil, loadErr
 			}
@@ -663,14 +663,14 @@ func validateSplitPack(
 	return pack, diagnostics, nil
 }
 
-func validateSplitManifest(repo *workspace.Repository, manifest Manifest, retained bool) []Diagnostic {
+func validateManifest(repo *workspace.Repository, manifest Manifest, retained bool) []Diagnostic {
 	const sourcePath = ".software-standards/manifest.yaml"
 	diagnostics := make([]Diagnostic, 0)
 	add := func(field, message, recovery string) {
 		diagnostics = append(diagnostics, diagnostic(sourcePath, field, message, recovery))
 	}
 	if manifest.Schema != ManifestSchema {
-		add("schema", "schema must be "+ManifestSchema, "update the split manifest schema value")
+		add("schema", "schema must be "+ManifestSchema, "update the manifest schema value")
 	}
 	if !commitPattern.MatchString(manifest.BaselineCommit) {
 		add("baseline_commit", "baseline_commit must be a 40-character lowercase Git object id", "copy the exact commit from ssb inspect")
@@ -682,13 +682,13 @@ func validateSplitManifest(repo *workspace.Repository, manifest Manifest, retain
 		)
 	}
 	if manifest.Inventory.Path != ".software-standards/inventory.json" {
-		add("inventory.path", "inventory path must be .software-standards/inventory.json", "use the canonical split-pack inventory path")
+		add("inventory.path", "inventory path must be .software-standards/inventory.json", "use the canonical manifest-layout inventory path")
 	}
 	if !digestPattern.MatchString(manifest.Inventory.SHA256) {
 		add("inventory.sha256", "inventory sha256 must use sha256:<64 lowercase hex characters>", "hash the exact inventory.json bytes")
 	}
 	if manifest.Report.Path != ".software-standards/report.md" {
-		add("report.path", "report path must be .software-standards/report.md", "use the canonical split-pack report path")
+		add("report.path", "report path must be .software-standards/report.md", "use the canonical manifest-layout report path")
 	}
 	if !digestPattern.MatchString(manifest.Report.SHA256) {
 		add("report.sha256", "report sha256 must use sha256:<64 lowercase hex characters>", "hash the exact report.md bytes")
@@ -696,7 +696,7 @@ func validateSplitManifest(repo *workspace.Repository, manifest Manifest, retain
 	return diagnostics
 }
 
-func validateSplitManifestArtifact(sourcePath, field string, artifact ManifestArtifact) []Diagnostic {
+func validateManifestArtifact(sourcePath, field string, artifact ManifestArtifact) []Diagnostic {
 	diagnostics := make([]Diagnostic, 0)
 	add := func(suffix, message, recovery string) {
 		diagnostics = append(diagnostics, diagnostic(sourcePath, field+suffix, message, recovery))
@@ -730,7 +730,7 @@ func validateSplitManifestArtifact(sourcePath, field string, artifact ManifestAr
 	return diagnostics
 }
 
-func validateSplitOwnedMetadata(
+func validateManifestOwnedMetadata(
 	ctx context.Context,
 	repo *workspace.Repository,
 	sourcePath string,
@@ -841,21 +841,21 @@ func parseHumanRule(sourcePath string, data []byte) (string, string, []Diagnosti
 	return title, string(bodyBytes), nil
 }
 
-func validatePortableSplitSkill(sourcePath string, metadata skillFrontmatter, body []byte) []Diagnostic {
+func validatePortableManifestSkill(sourcePath string, metadata skillFrontmatter, body []byte) []Diagnostic {
 	diagnostics := make([]Diagnostic, 0)
 	if _, exists := metadata.Metadata["category"]; exists {
 		diagnostics = append(diagnostics, diagnostic(
 			sourcePath,
 			"metadata.category",
-			"split-pack Agent Skills must not repeat SSB-owned metadata.category",
-			"remove metadata.category; the split manifest owns category and provenance",
+			"manifest-layout Agent Skills must not repeat SSB-owned metadata.category",
+			"remove metadata.category; the manifest owns category and provenance",
 		))
 	}
 	if strings.TrimSpace(metadata.License) == "" && strings.TrimSpace(metadata.Compatibility) == "" {
 		diagnostics = append(diagnostics, diagnostic(
 			sourcePath,
 			"frontmatter",
-			"split-pack Agent Skills require a meaningful license or compatibility field",
+			"manifest-layout Agent Skills require a meaningful license or compatibility field",
 			"add the applicable SPDX license or host compatibility statement",
 		))
 	}
@@ -869,11 +869,11 @@ func validatePortableSplitSkill(sourcePath string, metadata skillFrontmatter, bo
 	return diagnostics
 }
 
-func loadSplitRule(
+func loadManifestRule(
 	root string,
 	manifest ManifestArtifact,
 ) (Rule, []Diagnostic, error) {
-	data, diagnostics, err := readSplitArtifact(root, manifest)
+	data, diagnostics, err := readManifestArtifact(root, manifest)
 	if err != nil || len(data) == 0 {
 		return Rule{}, diagnostics, err
 	}
@@ -894,13 +894,13 @@ func loadSplitRule(
 	}, diagnostics, nil
 }
 
-func loadSplitVerificationRecipe(
+func loadManifestVerificationRecipe(
 	ctx context.Context,
 	evidenceRepo *workspace.Repository,
 	root string,
 	manifest ManifestArtifact,
 ) (VerificationRecipe, []Diagnostic, error) {
-	data, diagnostics, err := readSplitArtifact(root, manifest)
+	data, diagnostics, err := readManifestArtifact(root, manifest)
 	if err != nil || len(data) == 0 {
 		return VerificationRecipe{}, diagnostics, err
 	}
@@ -918,11 +918,11 @@ func loadSplitVerificationRecipe(
 	return recipe, diagnostics, nil
 }
 
-func loadSplitSkill(
+func loadManifestSkill(
 	root string,
 	manifest ManifestArtifact,
 ) (Skill, []Diagnostic, error) {
-	data, diagnostics, err := readSplitArtifact(root, manifest)
+	data, diagnostics, err := readManifestArtifact(root, manifest)
 	if err != nil || len(data) == 0 {
 		return Skill{}, diagnostics, err
 	}
@@ -943,7 +943,7 @@ func loadSplitSkill(
 			"use only Agent Skills core specification fields",
 		)), nil
 	}
-	diagnostics = append(diagnostics, validatePortableSplitSkill(manifest.Path, metadata, body)...)
+	diagnostics = append(diagnostics, validatePortableManifestSkill(manifest.Path, metadata, body)...)
 	if metadata.Name != manifest.ID {
 		diagnostics = append(diagnostics, diagnostic(
 			manifest.Path,
@@ -967,13 +967,13 @@ func loadSplitSkill(
 	}, diagnostics, nil
 }
 
-func loadSplitAutomationProposal(
+func loadManifestAutomationProposal(
 	ctx context.Context,
 	evidenceRepo *workspace.Repository,
 	root string,
 	manifest ManifestArtifact,
 ) (AutomationProposal, []Diagnostic, error) {
-	data, diagnostics, err := readSplitArtifact(root, manifest)
+	data, diagnostics, err := readManifestArtifact(root, manifest)
 	if err != nil || len(data) == 0 {
 		return AutomationProposal{}, diagnostics, err
 	}
@@ -1011,12 +1011,12 @@ func validateNativeMetadataBinding(
 	return []Diagnostic{diagnostic(
 		sourcePath,
 		"manifest",
-		"native artifact metadata must exactly match its split manifest entry",
+		"native artifact metadata must exactly match its manifest entry",
 		"align the native schema fields with the manifest-owned ID, selection metadata, and provenance",
 	)}
 }
 
-func readSplitArtifact(root string, manifest ManifestArtifact) ([]byte, []Diagnostic, error) {
+func readManifestArtifact(root string, manifest ManifestArtifact) ([]byte, []Diagnostic, error) {
 	return readDigestBoundFile(
 		root,
 		FileReference{Path: manifest.Path, SHA256: manifest.SHA256},
@@ -1207,22 +1207,22 @@ func validateActionablePack(
 	_, err := os.Lstat(manifestPath)
 	switch {
 	case err == nil:
-		return validateSplitPack(ctx, repo, retained)
+		return validateManifestLayoutPack(ctx, repo, retained)
 	case errors.Is(err, os.ErrNotExist):
-		return validateLegacyPack(ctx, repo, retained)
+		return validateEmbeddedLayoutPack(ctx, repo, retained)
 	default:
 		return Pack{}, nil, fmt.Errorf("inspect .software-standards/manifest.yaml: %w", err)
 	}
 }
 
-func validateLegacyPack(
+func validateEmbeddedLayoutPack(
 	ctx context.Context,
 	repo *workspace.Repository,
 	retained bool,
 ) (Pack, []Diagnostic, error) {
 	const reportPath = ".software-standards/report.md"
 	pack := Pack{
-		Format:         FormatLegacyV1,
+		Layout:         LayoutEmbedded,
 		BaselineCommit: repo.Baseline(),
 		ReportPath:     reportPath,
 		Rules:          make([]Rule, 0),
@@ -1345,7 +1345,7 @@ func validateLegacyPack(
 	entriesByPath := make(map[string]ManifestArtifact, len(pack.Report.Artifacts))
 	for index, artifact := range pack.Report.Artifacts {
 		field := fmt.Sprintf("artifacts[%d]", index)
-		diagnostics = append(diagnostics, validateManifestArtifact(reportPath, field, artifact)...)
+		diagnostics = append(diagnostics, validateEmbeddedArtifact(reportPath, field, artifact)...)
 		if prior, exists := entriesByID[artifact.ID]; exists {
 			diagnostics = append(diagnostics, diagnostic(
 				reportPath,
@@ -1546,7 +1546,7 @@ func validateReportInventory(
 	)}, nil
 }
 
-func validateManifestArtifact(sourcePath, field string, artifact ManifestArtifact) []Diagnostic {
+func validateEmbeddedArtifact(sourcePath, field string, artifact ManifestArtifact) []Diagnostic {
 	diagnostics := make([]Diagnostic, 0)
 	add := func(suffix, message, recovery string) {
 		diagnostics = append(diagnostics, diagnostic(sourcePath, field+suffix, message, recovery))
@@ -1663,7 +1663,7 @@ func loadActionableRule(
 	root string,
 	manifest ManifestArtifact,
 ) (Rule, []Diagnostic, error) {
-	data, diagnostics, err := readManifestArtifact(root, manifest)
+	data, diagnostics, err := readEmbeddedArtifact(root, manifest)
 	if err != nil || len(data) == 0 {
 		if len(data) == 0 && len(diagnostics) != 0 {
 			for index := range diagnostics {
@@ -1856,7 +1856,7 @@ func loadVerificationRecipe(
 	root string,
 	manifest ManifestArtifact,
 ) (VerificationRecipe, []Diagnostic, error) {
-	data, diagnostics, err := readManifestArtifact(root, manifest)
+	data, diagnostics, err := readEmbeddedArtifact(root, manifest)
 	if err != nil || len(data) == 0 {
 		return VerificationRecipe{}, diagnostics, err
 	}
@@ -1946,7 +1946,7 @@ func loadActionableSkill(
 	manifestField string,
 	manifest ManifestArtifact,
 ) (Skill, []Diagnostic, error) {
-	data, diagnostics, err := readManifestArtifact(root, manifest)
+	data, diagnostics, err := readEmbeddedArtifact(root, manifest)
 	if err != nil || len(data) == 0 {
 		return Skill{}, diagnostics, err
 	}
@@ -2019,7 +2019,7 @@ func loadAutomationProposal(
 	root string,
 	manifest ManifestArtifact,
 ) (AutomationProposal, []Diagnostic, error) {
-	data, diagnostics, err := readManifestArtifact(root, manifest)
+	data, diagnostics, err := readEmbeddedArtifact(root, manifest)
 	if err != nil || len(data) == 0 {
 		return AutomationProposal{}, diagnostics, err
 	}
@@ -2079,7 +2079,7 @@ func validateAutomationProposal(
 	return diagnostics
 }
 
-func readManifestArtifact(
+func readEmbeddedArtifact(
 	root string,
 	manifest ManifestArtifact,
 ) ([]byte, []Diagnostic, error) {
@@ -2263,9 +2263,9 @@ func ValidateCandidateRule(
 	return rule, validateActionableRule(ctx, repo, rule, manifest)
 }
 
-// ValidateSplitCandidateRule validates human-first rule bytes while retaining
-// immutable semantic metadata from the existing split manifest entry.
-func ValidateSplitCandidateRule(
+// ValidateManifestCandidateRule validates human-first rule bytes while
+// retaining immutable semantic metadata from the existing manifest entry.
+func ValidateManifestCandidateRule(
 	relative string,
 	manifest ManifestArtifact,
 	data []byte,
@@ -2275,7 +2275,7 @@ func ValidateSplitCandidateRule(
 		diagnostics = append(diagnostics, diagnostic(
 			relative,
 			"manifest",
-			"candidate rule does not match its split manifest entry",
+			"candidate rule does not match its manifest entry",
 			"keep the existing canonical rule ID and path",
 		))
 	}
@@ -2294,9 +2294,9 @@ func ValidateSplitCandidateRule(
 	}, diagnostics
 }
 
-// ValidateSplitCandidateSkill validates portable Agent Skill bytes while
-// retaining SSB-owned metadata from the existing split manifest entry.
-func ValidateSplitCandidateSkill(
+// ValidateManifestCandidateSkill validates portable Agent Skill bytes while
+// retaining SSB-owned metadata from the existing manifest entry.
+func ValidateManifestCandidateSkill(
 	relative string,
 	manifest ManifestArtifact,
 	data []byte,
@@ -2310,12 +2310,12 @@ func ValidateSplitCandidateSkill(
 	if err := yaml.Load(frontmatter, &metadata, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
 		return Skill{}, append(diagnostics, yamlDiagnostic(relative, err, "use only Agent Skills core specification fields"))
 	}
-	diagnostics = append(diagnostics, validatePortableSplitSkill(relative, metadata, body)...)
+	diagnostics = append(diagnostics, validatePortableManifestSkill(relative, metadata, body)...)
 	if manifest.Kind != "skill" || manifest.Path != relative || metadata.Name != manifest.ID {
 		diagnostics = append(diagnostics, diagnostic(
 			relative,
 			"manifest",
-			"candidate skill name and path must match its split manifest entry",
+			"candidate skill name and path must match its manifest entry",
 			"keep the existing canonical skill ID and path",
 		))
 	}

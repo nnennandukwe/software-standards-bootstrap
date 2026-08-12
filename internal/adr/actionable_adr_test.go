@@ -54,14 +54,14 @@ func TestCreateRecordsAdoptableArtifactsAndExcludesAutomation(t *testing.T) {
 	}
 }
 
-func TestCreateSplitPackRecordsManifestInventoryAndReportPaths(t *testing.T) {
+func TestCreateManifestLayoutRecordsManifestInventoryAndReportPaths(t *testing.T) {
 	repo := committedRepository(t)
 	ws, err := workspace.Open(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pack := actionableADRPack(ws.Baseline())
-	pack.Format = rulepack.FormatSplitV1
+	pack.Layout = rulepack.LayoutManifest
 	pack.ManifestPath = ".software-standards/manifest.yaml"
 	pack.InventoryPath = ".software-standards/inventory.json"
 
@@ -77,19 +77,19 @@ func TestCreateSplitPackRecordsManifestInventoryAndReportPaths(t *testing.T) {
 		"the manifest, inventory, human report, and canonical artifact source files remain editable",
 	} {
 		if !strings.Contains(content, required) {
-			t.Errorf("split ADR missing %q:\n%s", required, content)
+			t.Errorf("manifest-layout ADR missing %q:\n%s", required, content)
 		}
 	}
 }
 
-func TestCreateLegacyADRBytesRemainStable(t *testing.T) {
+func TestCreateEmbeddedADRBytesRemainStable(t *testing.T) {
 	repo := committedRepository(t)
 	ws, err := workspace.Open(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pack := actionableADRPack(strings.Repeat("a", 40))
-	pack.Format = rulepack.FormatLegacyV1
+	pack.Layout = rulepack.LayoutEmbedded
 	result, err := adr.Create(context.Background(), ws, pack, adr.Options{DryRun: true})
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +98,7 @@ func TestCreateLegacyADRBytesRemainStable(t *testing.T) {
 	got := "sha256:" + hex.EncodeToString(sum[:])
 	const want = "sha256:7e70dfdddd33860f5269c7395c69f6c7dc9d70cd0e12a6e57a889bef0578b1cd"
 	if got != want {
-		t.Fatalf("legacy ADR digest = %s, want %s", got, want)
+		t.Fatalf("embedded ADR digest = %s, want %s", got, want)
 	}
 }
 

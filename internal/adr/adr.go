@@ -263,7 +263,7 @@ func render(pack rulepack.Pack, number int) []byte {
 	fmt.Fprintf(&output, "# ADR %04d: Adopt actionable repository standards\n\n", number)
 	output.WriteString("- Status: Proposed\n")
 	fmt.Fprintf(&output, "- Baseline commit: `%s`\n", pack.BaselineCommit)
-	if pack.Format == rulepack.FormatSplitV1 {
+	if pack.Layout == rulepack.LayoutManifest {
 		fmt.Fprintf(&output, "- Manifest: `%s`\n", pack.ManifestPath)
 		fmt.Fprintf(&output, "- Inventory: `%s`\n", pack.InventoryPath)
 		fmt.Fprintf(&output, "- Report: `%s`\n\n", pack.ReportPath)
@@ -314,7 +314,7 @@ func render(pack rulepack.Pack, number int) []byte {
 		}
 	}
 	output.WriteString("\n## Consequences\n\n")
-	if pack.Format == rulepack.FormatSplitV1 {
+	if pack.Layout == rulepack.LayoutManifest {
 		output.WriteString("- `AGENTS.md` is a derived projection; the manifest, inventory, human report, and canonical artifact source files remain editable.\n")
 	} else {
 		output.WriteString("- `AGENTS.md` is a derived projection; the report and canonical artifact source files remain editable.\n")

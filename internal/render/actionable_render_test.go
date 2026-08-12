@@ -62,24 +62,24 @@ func TestApplyProjectsRulesRecipesAndSkillsWithoutAutomationOrCommands(t *testin
 	}
 }
 
-func TestApplySplitPackNamesAllCanonicalSourcesAndBindsTheirDigests(t *testing.T) {
+func TestApplyManifestLayoutNamesAllCanonicalSourcesAndBindsTheirDigests(t *testing.T) {
 	repo := committedRepository(t)
 	ws, err := workspace.Open(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacy := actionableProjectionPack(ws.Baseline())
-	legacy.Format = rulepack.FormatLegacyV1
-	legacyResult, err := render.Apply(ws, legacy, true)
+	embedded := actionableProjectionPack(ws.Baseline())
+	embedded.Layout = rulepack.LayoutEmbedded
+	embeddedResult, err := render.Apply(ws, embedded, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	split := actionableProjectionPack(ws.Baseline())
-	split.Format = rulepack.FormatSplitV1
-	split.ManifestPath = ".software-standards/manifest.yaml"
-	split.InventoryPath = ".software-standards/inventory.json"
-	split.Manifest = rulepack.Manifest{
+	manifestLayout := actionableProjectionPack(ws.Baseline())
+	manifestLayout.Layout = rulepack.LayoutManifest
+	manifestLayout.ManifestPath = ".software-standards/manifest.yaml"
+	manifestLayout.InventoryPath = ".software-standards/inventory.json"
+	manifestLayout.Manifest = rulepack.Manifest{
 		Schema:         rulepack.ManifestSchema,
 		BaselineCommit: ws.Baseline(),
 		Inventory: rulepack.FileReference{
@@ -88,35 +88,35 @@ func TestApplySplitPackNamesAllCanonicalSourcesAndBindsTheirDigests(t *testing.T
 		Report: rulepack.FileReference{
 			Path: ".software-standards/report.md", SHA256: "sha256:" + strings.Repeat("2", 64),
 		},
-		Artifacts: split.Report.Artifacts,
+		Artifacts: manifestLayout.Report.Artifacts,
 	}
-	splitResult, err := render.Apply(ws, split, true)
+	manifestResult, err := render.Apply(ws, manifestLayout, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	content := string(splitResult.Content)
+	content := string(manifestResult.Content)
 	for _, source := range []string{
 		"`.software-standards/manifest.yaml`",
 		"`.software-standards/inventory.json`",
 		"`.software-standards/report.md`",
 	} {
 		if !strings.Contains(content, source) {
-			t.Errorf("split projection missing source %s:\n%s", source, content)
+			t.Errorf("manifest-layout projection missing source %s:\n%s", source, content)
 		}
 	}
-	if splitResult.SourceDigest == legacyResult.SourceDigest {
-		t.Fatal("split source digest did not bind split manifest file references")
+	if manifestResult.SourceDigest == embeddedResult.SourceDigest {
+		t.Fatal("manifest-layout source digest did not bind manifest file references")
 	}
 }
 
-func TestApplyLegacyProjectionBytesRemainStable(t *testing.T) {
+func TestApplyEmbeddedProjectionBytesRemainStable(t *testing.T) {
 	repo := committedRepository(t)
 	ws, err := workspace.Open(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pack := actionableProjectionPack(strings.Repeat("a", 40))
-	pack.Format = rulepack.FormatLegacyV1
+	pack.Layout = rulepack.LayoutEmbedded
 	result, err := render.Apply(ws, pack, true)
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +125,7 @@ func TestApplyLegacyProjectionBytesRemainStable(t *testing.T) {
 	got := "sha256:" + hex.EncodeToString(sum[:])
 	const want = "sha256:043364ea803d1689596baa6fb10d76d42b72d0edba63ef4bd7335f5d4c159ae2"
 	if got != want {
-		t.Fatalf("legacy projection digest = %s, want %s", got, want)
+		t.Fatalf("embedded projection digest = %s, want %s", got, want)
 	}
 }
 

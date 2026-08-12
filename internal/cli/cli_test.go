@@ -56,7 +56,7 @@ func TestInspectJSONIsReadOnlyAndMachineReadable(t *testing.T) {
 	}
 }
 
-func TestInspectTextGuidesSplitPackGeneration(t *testing.T) {
+func TestInspectTextGuidesManifestLayoutGeneration(t *testing.T) {
 	repo := committedRepository(t)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -66,7 +66,7 @@ func TestInspectTextGuidesSplitPackGeneration(t *testing.T) {
 	}
 	for _, required := range []string{"inventory.json", "human-facing artifacts", "manifest.yaml"} {
 		if !strings.Contains(stdout.String(), required) {
-			t.Fatalf("split generation guidance missing %q:\n%s", required, stdout.String())
+			t.Fatalf("manifest-layout generation guidance missing %q:\n%s", required, stdout.String())
 		}
 	}
 }
@@ -877,13 +877,13 @@ func TestValidateJSONExportsActionableInterchangeFields(t *testing.T) {
 	var stderr bytes.Buffer
 	code := cli.Run([]string{"validate", "--repo", repo, "--format", "json"}, &stdout, &stderr)
 	if code != 0 || stderr.Len() != 0 {
-		t.Fatalf("valid legacy pack failed: exit=%d stderr=%q", code, stderr.String())
+		t.Fatalf("valid embedded-layout pack failed: exit=%d stderr=%q", code, stderr.String())
 	}
 	var response struct {
 		SchemaVersion int  `json:"schema_version"`
 		Valid         bool `json:"valid"`
 		Pack          *struct {
-			Format   string `json:"format"`
+			Layout   string `json:"layout"`
 			Manifest struct {
 				Schema    string `json:"schema"`
 				Artifacts []struct {
@@ -911,7 +911,7 @@ func TestValidateJSONExportsActionableInterchangeFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	if response.SchemaVersion != 3 || !response.Valid || response.Pack == nil ||
-		response.Pack.Format != rulepack.FormatLegacyV1 ||
+		response.Pack.Layout != rulepack.LayoutEmbedded ||
 		response.Pack.Manifest.Schema != rulepack.ReportSchema ||
 		len(response.Pack.Manifest.Artifacts) != 1 ||
 		response.Pack.Manifest.Artifacts[0].Confidence != "high" ||
@@ -930,7 +930,12 @@ func TestValidateJSONExportsActionableInterchangeFields(t *testing.T) {
 		t.Fatalf("unexpected actionable interchange response: %#v", response)
 	}
 	if strings.Contains(stdout.String(), `"manifest_path"`) || strings.Contains(stdout.String(), `"inventory_path"`) {
-		t.Fatalf("legacy schema 3 response exposed nonexistent split paths:\n%s", stdout.String())
+		t.Fatalf("embedded schema 3 response exposed nonexistent manifest paths:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), `"format"`) ||
+		strings.Contains(stdout.String(), "split-v1") ||
+		strings.Contains(stdout.String(), "legacy-v1") {
+		t.Fatalf("embedded schema 3 response retained obsolete layout terminology:\n%s", stdout.String())
 	}
 	if strings.Contains(stdout.String(), `"topic"`) ||
 		strings.Contains(stdout.String(), `"classification"`) ||
@@ -945,21 +950,21 @@ func TestValidateJSONExportsActionableInterchangeFields(t *testing.T) {
 	}
 }
 
-func TestValidateJSONSchemaThreeIdentifiesSplitLayout(t *testing.T) {
+func TestValidateJSONSchemaThreeIdentifiesManifestLayout(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
-	writeValidSplitPack(t, repo, baseline)
+	writeValidManifestLayoutPack(t, repo, baseline)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := cli.Run([]string{"validate", "--repo", repo, "--format", "json"}, &stdout, &stderr)
 	if code != 0 || stderr.Len() != 0 {
-		t.Fatalf("valid split pack failed: exit=%d stderr=%q", code, stderr.String())
+		t.Fatalf("valid manifest-layout pack failed: exit=%d stderr=%q", code, stderr.String())
 	}
 	var response struct {
 		SchemaVersion int  `json:"schema_version"`
 		Valid         bool `json:"valid"`
 		Pack          *struct {
-			Format        string `json:"format"`
+			Layout        string `json:"layout"`
 			ManifestPath  string `json:"manifest_path"`
 			InventoryPath string `json:"inventory_path"`
 			ReportPath    string `json:"report_path"`
@@ -982,7 +987,7 @@ func TestValidateJSONSchemaThreeIdentifiesSplitLayout(t *testing.T) {
 		t.Fatalf("invalid schema 3 JSON %q: %v", stdout.String(), err)
 	}
 	if response.SchemaVersion != 3 || !response.Valid || response.Pack == nil ||
-		response.Pack.Format != rulepack.FormatSplitV1 ||
+		response.Pack.Layout != rulepack.LayoutManifest ||
 		response.Pack.ManifestPath != ".software-standards/manifest.yaml" ||
 		response.Pack.InventoryPath != ".software-standards/inventory.json" ||
 		response.Pack.ReportPath != ".software-standards/report.md" ||
@@ -992,10 +997,15 @@ func TestValidateJSONSchemaThreeIdentifiesSplitLayout(t *testing.T) {
 		response.Pack.Inventory.BaselineCommit != baseline || response.Pack.Inventory.IndexedFiles != 2 ||
 		!strings.HasPrefix(response.Pack.Report.Body, "# Software standards report") ||
 		len(response.Pack.Rules) != 1 || response.Pack.Rules[0].Title != "Verify before merge" {
-		t.Fatalf("unexpected schema 3 split response: %#v\n%s", response, stdout.String())
+		t.Fatalf("unexpected schema 3 manifest-layout response: %#v\n%s", response, stdout.String())
 	}
 	if strings.Contains(stdout.String(), `"report": {\n      "schema":`) {
 		t.Fatalf("schema 3 report repeated machine frontmatter metadata:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), `"format"`) ||
+		strings.Contains(stdout.String(), "split-v1") ||
+		strings.Contains(stdout.String(), "legacy-v1") {
+		t.Fatalf("manifest schema 3 response retained obsolete layout terminology:\n%s", stdout.String())
 	}
 }
 
@@ -1126,9 +1136,9 @@ func TestRenderDryRunReportsAlreadyCurrentForActivePack(t *testing.T) {
 	}
 }
 
-func TestRenderSplitPackGuidanceNamesManifestDigestUpdate(t *testing.T) {
+func TestRenderManifestLayoutGuidanceNamesManifestDigestUpdate(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
-	writeValidSplitPack(t, repo, baseline)
+	writeValidManifestLayoutPack(t, repo, baseline)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -1138,7 +1148,7 @@ func TestRenderSplitPackGuidanceNamesManifestDigestUpdate(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "update manifest.yaml SHA-256 values") ||
 		strings.Contains(stdout.String(), "report manifest together") {
-		t.Fatalf("split render guidance is stale:\n%s", stdout.String())
+		t.Fatalf("manifest-layout render guidance is stale:\n%s", stdout.String())
 	}
 
 	agentsPath := filepath.Join(repo, "AGENTS.md")
@@ -1152,7 +1162,7 @@ func TestRenderSplitPackGuidanceNamesManifestDigestUpdate(t *testing.T) {
 	code = cli.Run([]string{"render", "--repo", repo}, &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), "update manifest.yaml SHA-256 values") ||
 		strings.Contains(stderr.String(), "sources and report.md") {
-		t.Fatalf("split drift recovery is stale: exit=%d stderr=%q", code, stderr.String())
+		t.Fatalf("manifest-layout drift recovery is stale: exit=%d stderr=%q", code, stderr.String())
 	}
 }
 
@@ -1356,12 +1366,12 @@ Run the repository verification command before merging.
 `, excerptHash("package main\n")))
 }
 
-func writeValidSplitPack(t *testing.T, repo, baseline string) {
+func writeValidManifestLayoutPack(t *testing.T, repo, baseline string) {
 	t.Helper()
 	var inventoryOut bytes.Buffer
 	var inventoryErr bytes.Buffer
 	if code := cli.Run([]string{"inspect", "--repo", repo, "--format", "json"}, &inventoryOut, &inventoryErr); code != 0 {
-		t.Fatalf("inspect split fixture: exit=%d stderr=%q", code, inventoryErr.String())
+		t.Fatalf("inspect manifest-layout fixture: exit=%d stderr=%q", code, inventoryErr.String())
 	}
 	report := []byte(`# Software standards report
 
