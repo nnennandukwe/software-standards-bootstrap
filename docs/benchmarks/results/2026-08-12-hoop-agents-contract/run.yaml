@@ -4,8 +4,8 @@ target:
   url: https://github.com/hoophq/hoop
   commit: 3e0091b89fdaa3912f4f8e7b33fbb3104e47d71e
 ssb:
-  source_commit: d6ddc8d4b0da2b54ddcc342e7a8425cec1dbd254
-  binary_sha256: sha256:70cbe1d6e77ceedfa13c3cbea847ed565db82ee4409c94b60f679e749b8fad5e
+  source_commit: 0747419d3e63675f2f716eaf6cc21aa7c58380ed
+  binary_sha256: sha256:e12d791e6a09746ccff03dabbabf36548b22191f1eb21899fbb6a03762d1ba03
   skill_version: 0.6.0
 host:
   name: Codex CLI
@@ -30,8 +30,8 @@ proposal:
   orientation: true
   orientation_artifacts: 0
   source_digest: sha256:8e7ac51d033b957b03b4752bc1cf262a35c0e80198ab81a5283ea555f7774708
-  content_digest: sha256:8a2a57b23ca8dfd076cf1b8d1d0d8c77ffb508a02c89d3b53245307d40b084e6
-  output_digest: sha256:3e1a8528b669190d5a467090f14820561049eba30562d1dc5e2fae52d258199d
+  content_digest: sha256:6bb3ec18c5d6801f6be220146838690b316193a08ecb9623a5855a88c365d48e
+  output_digest: sha256:51e62528feb76acdf2465a7b4af3360b2a6c53163a91829b6e0d1ef17703374b
   retained_path: proposal/AGENTS.proposed.md
 verification:
   validate: pass
@@ -104,7 +104,7 @@ files:
   - path: proposal/.software-standards/verification/verify-react-webapp.yaml
     sha256: sha256:0032be1e932e1225d4fbde937fa97260401ad6611eadd4205940ed3acca75738
   - path: proposal/AGENTS.proposed.md
-    sha256: sha256:3e1a8528b669190d5a467090f14820561049eba30562d1dc5e2fae52d258199d
+    sha256: sha256:51e62528feb76acdf2465a7b4af3360b2a6c53163a91829b6e0d1ef17703374b
   - path: routing/implementation.md
     sha256: sha256:72c1fcea1cb995cfab7652c40d9339b2fbe473e1fce2b99da702d0a56c765564
   - path: routing/planning.md

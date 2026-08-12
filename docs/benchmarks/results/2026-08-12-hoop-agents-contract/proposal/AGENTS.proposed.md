@@ -1,6 +1,6 @@
 <!-- software-standards-bootstrap:start -->
 <!-- source-digest: sha256:8e7ac51d033b957b03b4752bc1cf262a35c0e80198ab81a5283ea555f7774708 -->
-<!-- content-digest: sha256:8a2a57b23ca8dfd076cf1b8d1d0d8c77ffb508a02c89d3b53245307d40b084e6 -->
+<!-- content-digest: sha256:6bb3ec18c5d6801f6be220146838690b316193a08ecb9623a5855a88c365d48e -->
 ## Software Standards Bootstrap
 
 This managed section is derived from retained canonical sources. An unmerged generated change is a proposal; repository review and merge are the adoption decision. File presence alone does not prove adoption.
@@ -39,6 +39,7 @@ Hoop is an open-source layer 7 gateway that governs access to infrastructure at 
   - Evidence: `DEV.md:149-180 (declares)`
 
 #### Related standards
+
 - Related recipe: [Verify Go changes](.software-standards/verification/verify-go-changes.yaml)
 - Related skill: [Change gateway api route](.agents/skills/change-gateway-api-route/SKILL.md)
 
