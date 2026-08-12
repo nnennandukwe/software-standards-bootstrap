@@ -29,15 +29,17 @@ import (
 type Layout string
 
 const (
-	ManifestSchema            = "ssb.dev/manifest/v1"
-	ReportSchema              = "ssb.dev/report/v1"
-	RuleSchema                = "ssb.dev/rule/v2"
-	VerificationSchema        = "ssb.dev/verification/v1"
-	AutomationSchema          = "ssb.dev/automation/v1"
-	UtilityMethod             = "ssb-utility-v1"
-	LayoutManifest     Layout = "manifest"
-	LayoutEmbedded     Layout = "embedded"
-	categoryRecovery          = "use one primary category: architecture, compatibility, compliance, correctness, developer-experience, documentation, maintainability, operability, performance, quality, reliability, security, or testability"
+	ManifestSchema              = "ssb.dev/manifest/v1"
+	ReportSchema                = "ssb.dev/report/v1"
+	RuleSchema                  = "ssb.dev/rule/v2"
+	VerificationSchemaV1        = "ssb.dev/verification/v1"
+	VerificationSchemaV2        = "ssb.dev/verification/v2"
+	VerificationSchema          = VerificationSchemaV1
+	AutomationSchema            = "ssb.dev/automation/v1"
+	UtilityMethod               = "ssb-utility-v1"
+	LayoutManifest       Layout = "manifest"
+	LayoutEmbedded       Layout = "embedded"
+	categoryRecovery            = "use one primary category: architecture, compatibility, compliance, correctness, developer-experience, documentation, maintainability, operability, performance, quality, reliability, security, or testability"
 )
 
 var (
@@ -317,9 +319,10 @@ type Skill struct {
 
 // VerificationStep is one existing command in a recorded recipe.
 type VerificationStep struct {
-	Run            string `yaml:"run" json:"run"`
-	SourceEvidence string `yaml:"source_evidence" json:"source_evidence"`
-	ExpectedResult string `yaml:"expected_result" json:"expected_result"`
+	Run              string `yaml:"run" json:"run"`
+	WorkingDirectory string `yaml:"working_directory" json:"working_directory"`
+	SourceEvidence   string `yaml:"source_evidence" json:"source_evidence"`
+	ExpectedResult   string `yaml:"expected_result" json:"expected_result"`
 }
 
 // VerificationRecipe records an ordered, deliberately invoked existing
@@ -907,15 +910,8 @@ func loadManifestVerificationRecipe(
 	if err != nil || len(data) == 0 {
 		return VerificationRecipe{}, diagnostics, err
 	}
-	var recipe VerificationRecipe
-	if err := yaml.Load(data, &recipe, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
-		return VerificationRecipe{}, append(diagnostics, yamlDiagnostic(
-			manifest.Path,
-			err,
-			"use only fields from the ssb.dev/verification/v1 schema",
-		)), nil
-	}
-	recipe.SourcePath = manifest.Path
+	recipe, recipeDiagnostics := decodeVerificationRecipe(manifest.Path, data)
+	diagnostics = append(diagnostics, recipeDiagnostics...)
 	diagnostics = append(diagnostics, validateVerificationRecipe(ctx, evidenceRepo, recipe, manifest)...)
 	diagnostics = append(diagnostics, validateNativeMetadataBinding(manifest.Path, recipe.ID, recipe.Category, recipe.Lenses, recipe.Scopes, recipe.Derivation, recipe.Evidence, manifest)...)
 	return recipe, diagnostics, nil
@@ -1863,82 +1859,10 @@ func loadVerificationRecipe(
 	if err != nil || len(data) == 0 {
 		return VerificationRecipe{}, diagnostics, err
 	}
-	var recipe VerificationRecipe
-	if err := yaml.Load(data, &recipe, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
-		return VerificationRecipe{}, append(diagnostics, yamlDiagnostic(
-			manifest.Path,
-			err,
-			"use only fields from the ssb.dev/verification/v1 schema",
-		)), nil
-	}
-	recipe.SourcePath = manifest.Path
+	recipe, recipeDiagnostics := decodeVerificationRecipe(manifest.Path, data)
+	diagnostics = append(diagnostics, recipeDiagnostics...)
 	diagnostics = append(diagnostics, validateVerificationRecipe(ctx, evidenceRepo, recipe, manifest)...)
 	return recipe, diagnostics, nil
-}
-
-func validateVerificationRecipe(
-	ctx context.Context,
-	repo *workspace.Repository,
-	recipe VerificationRecipe,
-	manifest AcceptedArtifact,
-) []Diagnostic {
-	diagnostics := make([]Diagnostic, 0)
-	add := func(field, message, recovery string) {
-		diagnostics = append(diagnostics, diagnostic(recipe.SourcePath, field, message, recovery))
-	}
-	if recipe.Schema != VerificationSchema {
-		add("schema", "schema must be "+VerificationSchema, "update the verification recipe schema value")
-	}
-	if recipe.ID != manifest.ID {
-		add("id", fmt.Sprintf("recipe id %q must match manifest id %q", recipe.ID, manifest.ID), "align the recipe id, filename, and report entry")
-	}
-	if strings.TrimSpace(recipe.Title) == "" {
-		add("title", "title is required", "add a concise developer-facing title")
-	}
-	if _, supported := supportedCategories[recipe.Category]; recipe.Category == "" || !supported {
-		add("category", fmt.Sprintf("category %q is not supported", recipe.Category), categoryRecovery)
-	}
-	diagnostics = append(diagnostics, validateActionableLenses(recipe.SourcePath, "lenses", recipe.Lenses)...)
-	diagnostics = append(diagnostics, validateScopes(recipe.SourcePath, recipe.Scopes)...)
-	diagnostics = append(diagnostics, validateDerivationEvidence(ctx, repo, recipe.SourcePath, recipe.Derivation, recipe.Evidence)...)
-	if strings.TrimSpace(recipe.When) == "" {
-		add("when", "when is required", "state the exact handoff context in which the recipe applies")
-	}
-	enforcesByRef := make(map[string]struct{})
-	seenRefs := make(map[string]struct{})
-	for index, evidence := range recipe.Evidence {
-		field := fmt.Sprintf("evidence[%d].ref", index)
-		if !stableIDPattern.MatchString(evidence.Ref) {
-			add(field, "recipe evidence ref must be lower-case kebab-case", "give every evidence citation a stable ref")
-		}
-		if _, duplicate := seenRefs[evidence.Ref]; duplicate {
-			add(field, fmt.Sprintf("duplicate evidence ref %q", evidence.Ref), "give every recipe evidence citation a unique ref")
-		}
-		seenRefs[evidence.Ref] = struct{}{}
-		if evidence.Role == "enforces" {
-			enforcesByRef[evidence.Ref] = struct{}{}
-		}
-	}
-	if len(recipe.Steps) == 0 {
-		add("steps", "verification recipe requires at least one ordered command", "record an existing deliberately invoked command")
-	}
-	for index, step := range recipe.Steps {
-		field := fmt.Sprintf("steps[%d]", index)
-		if strings.TrimSpace(step.Run) == "" {
-			add(field+".run", "run is required", "record the exact existing repository command")
-		}
-		if _, exists := enforcesByRef[step.SourceEvidence]; !exists {
-			add(
-				field+".source_evidence",
-				fmt.Sprintf("step references missing enforces evidence %q", step.SourceEvidence),
-				"reference an evidence ref whose role is enforces",
-			)
-		}
-		if strings.TrimSpace(step.ExpectedResult) == "" {
-			add(field+".expected_result", "expected_result is required", "state the observable successful result")
-		}
-	}
-	return diagnostics
 }
 
 func loadActionableSkill(
