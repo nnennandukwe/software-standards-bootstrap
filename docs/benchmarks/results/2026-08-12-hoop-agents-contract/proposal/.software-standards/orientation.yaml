@@ -1,0 +1,77 @@
+schema: ssb.dev/orientation/v1
+summary:
+  text: Hoop is an open-source layer 7 gateway that governs access to infrastructure at the wire-protocol boundary.
+  evidence:
+    - role: declares
+      path: README.md
+      lines: 33-43
+      excerpt_sha256: sha256:4ce1f998526222d453a3d39843fb616c6c14804ca5e17ee4174f94259fe4f7ab
+areas:
+  - path: gateway
+    purpose: Hosts the HTTP and gRPC gateway, business services, persistence, and transport plugins.
+    evidence:
+      - role: declares
+        path: CLAUDE.md
+        lines: 30-50
+        excerpt_sha256: sha256:da3b4c71923fd707e3b9424929896dd8abab86f1ac1fd0504fd646474c035581
+  - path: agent
+    purpose: Hosts the long-lived agent connection and protocol-specific packet handlers.
+    evidence:
+      - role: declares
+        path: CLAUDE.md
+        lines: 52-68
+        excerpt_sha256: sha256:ff2c556b1989060ed3a35392ddc1af1d220d0c368a8ee975b17cbccc72690657
+prerequisites:
+  - requirement: Go 1.26.2
+    evidence:
+      - role: declares
+        path: go.work
+        lines: 1-3
+        excerpt_sha256: sha256:05a620ce6a7e22309ced5eed438943fa26617387600901d94b3097d1ad3c2636
+documents:
+  - label: Repository architecture and conventions
+    path: CLAUDE.md
+    evidence:
+      - role: declares
+        path: CLAUDE.md
+        lines: 3-15
+        excerpt_sha256: sha256:d0265bee2615649eaa3fb7830a802ddd235fb781e5740da1fb0b6962d74c82e0
+  - label: Development and verification workflow
+    path: DEV.md
+    evidence:
+      - role: declares
+        path: DEV.md
+        lines: 149-180
+        excerpt_sha256: sha256:e8081231ab91b39870af3cc38d7485ad5529ca0f28f79f41835423c1f676cfac
+related_artifacts:
+  - verify-go-changes
+  - change-gateway-api-route
+guidance:
+  - kind: planning
+    text: Identify the affected module boundary and its public protocol or API contracts before proposing a change.
+    evidence:
+      - role: declares
+        path: CLAUDE.md
+        lines: 30-50
+        excerpt_sha256: sha256:da3b4c71923fd707e3b9424929896dd8abab86f1ac1fd0504fd646474c035581
+  - kind: implementation
+    text: Preserve the documented library, gateway, agent, and shared-protocol boundaries while changing behavior.
+    evidence:
+      - role: declares
+        path: CLAUDE.md
+        lines: 52-68
+        excerpt_sha256: sha256:ff2c556b1989060ed3a35392ddc1af1d220d0c368a8ee975b17cbccc72690657
+  - kind: verification
+    text: Use the documented focused verification for the affected surface before handoff.
+    evidence:
+      - role: declares
+        path: DEV.md
+        lines: 149-180
+        excerpt_sha256: sha256:e8081231ab91b39870af3cc38d7485ad5529ca0f28f79f41835423c1f676cfac
+  - kind: handoff
+    text: Describe the change, tests performed, and any remaining concerns for reviewers.
+    evidence:
+      - role: declares
+        path: .github/PULL_REQUEST_TEMPLATE.md
+        lines: 40-52
+        excerpt_sha256: sha256:945137fa35177398679d94fcb652b3a496379ca5d9fce3dc269711aae0c1d6fa

@@ -1,0 +1,8 @@
+- Classification: `planning`
+- Scope: `gateway/api/**/*.go`
+- Active artifact IDs:
+  - `preserve-analytics-event-continuity`
+  - `use-protocol-packet-constants`
+  - `synchronize-environment-configuration`
+- Orientation guidance: Identify the affected gateway module boundary and its public API/protocol contracts before proposing the change.
+- Routing: No Agent Skill or verification recipe activates during planning; `change-gateway-api-route`, `regenerate-openapi-artifacts`, and `verify-go-changes` apply only in later implementation or verification work. Automation proposals are inactive.
