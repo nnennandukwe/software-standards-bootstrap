@@ -577,6 +577,8 @@ func writeQuotedMarkdown(body *strings.Builder, value string) {
 		body.WriteByte(value[index])
 		if value[index] == '\n' && index+1 < len(value) {
 			body.WriteString("> ")
+		} else if value[index] == '\r' && index+1 < len(value) && value[index+1] != '\n' {
+			body.WriteString("> ")
 		}
 	}
 }

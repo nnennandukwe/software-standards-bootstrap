@@ -299,8 +299,20 @@ func TestValidateManifestPresentation(t *testing.T) {
 			wantLayout: rulepack.LayoutManifest,
 		},
 		{
+			name:       "lone CR lower heading after actionable text",
+			rule:       []byte("# Keep public APIs compatible\n\nKeep APIs stable.\r## Rationale\rDownstream consumers pin versions.\r"),
+			wantBody:   "Keep APIs stable.\r## Rationale\rDownstream consumers pin versions.\r",
+			wantTitle:  "Keep public APIs compatible",
+			wantLayout: rulepack.LayoutManifest,
+		},
+		{
 			name: "second H1",
 			rule: []byte("# Keep public APIs compatible\n\nKeep APIs stable.\n\n# Hidden replacement\n\nBreak them.\n"),
+			want: "semantic rule must contain exactly one H1 title",
+		},
+		{
+			name: "second H1 after lone CR",
+			rule: []byte("# Keep public APIs compatible\n\nKeep APIs stable.\r# Hidden replacement\rBreak them.\r"),
 			want: "semantic rule must contain exactly one H1 title",
 		},
 		{

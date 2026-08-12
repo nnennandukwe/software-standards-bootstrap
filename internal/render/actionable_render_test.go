@@ -128,29 +128,40 @@ func TestApplyKeepsOrientationDocumentLinksRepositoryRelative(t *testing.T) {
 }
 
 func TestApplyContainsRawRuleHeadingsInsideTheRuleBody(t *testing.T) {
-	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pack := actionableProjectionPack(ws.Baseline())
-	pack.Rules[0].Body = "Keep public APIs compatible.\n\n## Rationale\n\nDownstream consumers pin versions.\n"
+	for _, test := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "line feed", body: "Keep public APIs compatible.\n\n## Rationale\n\nDownstream consumers pin versions.\n", want: "\n> ## Rationale\n"},
+		{name: "carriage return", body: "Keep public APIs compatible.\r## Rationale\rDownstream consumers pin versions.\r", want: "\r> ## Rationale\r"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := committedRepository(t)
+			ws, err := workspace.Open(context.Background(), repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pack := actionableProjectionPack(ws.Baseline())
+			pack.Rules[0].Body = test.body
 
-	result, err := render.Apply(ws, pack, true)
-	if err != nil {
-		t.Fatal(err)
+			result, err := render.Apply(ws, pack, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			content := string(result.Content)
+			if strings.Contains(content, "\n## Rationale\n") || strings.Contains(content, "\r## Rationale\r") ||
+				!strings.Contains(content, test.want) {
+				t.Fatalf("raw rule heading escaped its rule container:\n%s", content)
+			}
+			assertOrdered(t, content,
+				"> Keep public APIs compatible.",
+				"> ## Rationale",
+				"- Applies to: `**/*.go`",
+				"### Contextual semantic rules",
+			)
+		})
 	}
-	content := string(result.Content)
-	if strings.Contains(content, "\n## Rationale\n") ||
-		!strings.Contains(content, "\n> ## Rationale\n") {
-		t.Fatalf("raw rule heading escaped its rule container:\n%s", content)
-	}
-	assertOrdered(t, content,
-		"> Keep public APIs compatible.",
-		"> ## Rationale",
-		"- Applies to: `**/*.go`",
-		"### Contextual semantic rules",
-	)
 }
 
 func TestApplyOrdersEveryDirectiveAndUtilityDeterministically(t *testing.T) {

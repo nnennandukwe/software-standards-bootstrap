@@ -888,7 +888,9 @@ func parseHumanRule(sourcePath string, data []byte) (string, string, []Diagnosti
 		return title, string(bodyBytes), []Diagnostic{diagnostic(sourcePath, "body", "semantic rule body must not contain Unicode format characters", "remove bidirectional overrides and other invisible format characters")}
 	}
 	firstContent := true
-	for _, line := range strings.Split(strings.ReplaceAll(string(bodyBytes), "\r\n", "\n"), "\n") {
+	normalizedBody := strings.ReplaceAll(string(bodyBytes), "\r\n", "\n")
+	normalizedBody = strings.ReplaceAll(normalizedBody, "\r", "\n")
+	for _, line := range strings.Split(normalizedBody, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
