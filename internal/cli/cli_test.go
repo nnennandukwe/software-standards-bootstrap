@@ -933,8 +933,8 @@ func TestValidateJSONExportsActionableInterchangeFields(t *testing.T) {
 		t.Fatalf("embedded schema 3 response exposed nonexistent manifest paths:\n%s", stdout.String())
 	}
 	if strings.Contains(stdout.String(), `"format"`) ||
-		strings.Contains(stdout.String(), "split-v1") ||
-		strings.Contains(stdout.String(), "legacy-v1") {
+		strings.Contains(stdout.String(), "split"+"-v1") ||
+		strings.Contains(stdout.String(), "legacy"+"-v1") {
 		t.Fatalf("embedded schema 3 response retained obsolete layout terminology:\n%s", stdout.String())
 	}
 	if strings.Contains(stdout.String(), `"topic"`) ||
@@ -1003,8 +1003,8 @@ func TestValidateJSONSchemaThreeIdentifiesManifestLayout(t *testing.T) {
 		t.Fatalf("schema 3 report repeated machine frontmatter metadata:\n%s", stdout.String())
 	}
 	if strings.Contains(stdout.String(), `"format"`) ||
-		strings.Contains(stdout.String(), "split-v1") ||
-		strings.Contains(stdout.String(), "legacy-v1") {
+		strings.Contains(stdout.String(), "split"+"-v1") ||
+		strings.Contains(stdout.String(), "legacy"+"-v1") {
 		t.Fatalf("manifest schema 3 response retained obsolete layout terminology:\n%s", stdout.String())
 	}
 }

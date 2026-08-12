@@ -2,9 +2,10 @@
 
 New accepted packs are indexed by `.software-standards/manifest.yaml`. All
 YAML and JSON are strict: unknown fields and duplicate keys fail validation.
-Published legacy `ssb.dev/report/v1` packs remain readable without conversion.
+Published embedded-layout `ssb.dev/report/v1` packs remain readable without
+conversion.
 
-## Split manifest
+## Manifest layout
 
 ```yaml
 schema: ssb.dev/manifest/v1
@@ -83,7 +84,7 @@ Keep changes to in-scope public APIs backward compatible.
 ```
 
 The rule has no frontmatter. Its single opening H1 supplies the normalized
-title, and nonempty actionable text follows immediately. The split manifest
+title, and nonempty actionable text follows immediately. The manifest
 owns category, lenses, directive, scopes, derivation, and evidence. The
 normalized rule contract remains `ssb.dev/rule/v2`.
 
