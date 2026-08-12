@@ -285,15 +285,15 @@ func actionableMetadataChange(
 	}
 	var updated []byte
 	if metadataPath == actionableManifestPath {
-		updated, err = rulepack.UpdateSplitManifestArtifacts(metadataData, removedIDs, updatedDigests)
+		updated, err = rulepack.UpdateManifestArtifacts(metadataData, removedIDs, updatedDigests)
 		if err != nil {
-			return nil, nil, fmt.Errorf("update actionable split manifest: %w", err)
+			return nil, nil, fmt.Errorf("update actionable manifest: %w", err)
 		}
 	} else {
 		if len(removedIDs) == 0 {
 			return nil, nil, nil
 		}
-		updated, err = rulepack.RemoveManifestArtifacts(metadataData, removedIDs)
+		updated, err = rulepack.RemoveReportArtifacts(metadataData, removedIDs)
 		if err != nil {
 			return nil, nil, fmt.Errorf("update actionable report manifest: %w", err)
 		}

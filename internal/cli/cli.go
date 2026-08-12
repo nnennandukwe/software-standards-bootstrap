@@ -412,7 +412,7 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 	} else {
 		fmt.Fprintf(stdout, "%s requires no write for the current actionable artifacts.\n", result.Path)
 	}
-	if pack.Format == rulepack.FormatSplitV1 {
+	if pack.Layout == rulepack.LayoutManifest {
 		fmt.Fprintln(stdout, "Next: review the uncommitted diff; edit digest-bound sources and update manifest.yaml SHA-256 values together.")
 	} else {
 		fmt.Fprintln(stdout, "Next: review the uncommitted diff; edit canonical artifact sources and the report manifest together.")

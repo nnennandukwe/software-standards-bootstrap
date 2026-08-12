@@ -8,7 +8,7 @@ Software Standards Bootstrap turns a pinned repository snapshot into a Git-revie
 host agent semantic reads
           │
           ▼
-split manifest + inventory + human report + four actionable artifact types
+manifest + inventory + human report + four actionable artifact types
           │
           ├── ssb validate ── schema, inventory, evidence, confidence,
           │                   utility, and relationship checks
@@ -88,10 +88,10 @@ complete files. Events form a digest chain binding the context, proposal,
 baseline, decision, and results.
 
 An approved removal binds the artifact bytes and the corresponding pack index
-update into one application plan, journal, and rollback boundary. For
-`split-v1`, prune updates `.software-standards/manifest.yaml`, refreshes
+update into one application plan, journal, and rollback boundary. For the
+manifest layout, prune updates `.software-standards/manifest.yaml`, refreshes
 primary-file digests, and removes dangling relationships without changing
-semantic metadata. For `legacy-v1`, it updates
+semantic metadata. For the embedded layout, it updates
 `.software-standards/report.md`. Both preserve valid zero-rule and
 zero-artifact packs without leaving a dangling accepted-artifact entry.
 
@@ -168,13 +168,14 @@ poststate before recording its event.
 
 `rulepack.Validate` detects the source layout once and is the single public
 validation seam over all pack files and four artifact types. Presence of a
-safe regular `.software-standards/manifest.yaml` selects `split-v1`; an
-invalid split manifest never falls back. Without it, `ssb.dev/report/v1`
-frontmatter selects `legacy-v1`. Strict YAML and JSON reject unknown and
-duplicate fields. Both layouts normalize into one pack consumed by rendering,
-JSON, ADR creation, and governed prune.
+safe regular `.software-standards/manifest.yaml` selects the manifest layout;
+an invalid manifest never falls back. Without it, `ssb.dev/report/v1`
+frontmatter selects the embedded layout. Strict YAML and JSON reject unknown
+and duplicate fields. Both layouts normalize into one pack consumed by
+rendering, JSON, ADR creation, and governed prune.
 
-Split loading checks file type, symlinks, and canonical paths before parsing.
+Manifest-layout loading checks file type, symlinks, and canonical paths before
+parsing.
 `manifest.yaml` is limited to 1 MiB and `inventory.json` to 128 MiB. The
 manifest binds the exact raw bytes of the inventory, human report, and each
 primary artifact, including line endings. Human report and rule presentation
@@ -200,8 +201,8 @@ good. Those remain host-agent judgments reviewed by a developer. It never
 executes a recipe or implements an automation proposal.
 
 Valid `ssb validate --format json` output includes the normalized pack in
-response schema 3. It reports `pack.format` as `split-v1` or `legacy-v1` and
-exposes separate manifest, inventory, and report paths only when they exist.
+response schema 3. It reports `pack.layout` as `manifest` or `embedded` and
+exposes separate manifest, inventory, and report paths for the manifest layout.
 Invalid output omits the pack. This is a local interchange boundary, not a
 catalog import or synchronization mechanism.
 
@@ -245,10 +246,10 @@ status.
 
 | Artifact | Role | Editable | Evidence state |
 |---|---|---:|---:|
-| `.software-standards/manifest.yaml` | Split-pack accepted index, selection metadata, provenance, relationships, and primary-file digests | Yes | Exact file and evidence binding |
+| `.software-standards/manifest.yaml` | Manifest-layout accepted index, selection metadata, provenance, relationships, and primary-file digests | Yes | Exact file and evidence binding |
 | `.software-standards/inventory.json` | Complete unedited inspection response | Yes | Exact baseline inventory accounting |
-| `.software-standards/report.md` | Human limitations and accepted-output narrative; legacy packs also retain their `ssb.dev/report/v1` machine contract here | Yes | Split: digest-bound narrative; legacy: inventory and evidence index |
-| `.software-standards/rules/*.md` | Human-first semantic rules; legacy files retain `ssb.dev/rule/v2` frontmatter | Yes | Manifest-owned evidence mapping |
+| `.software-standards/report.md` | Human limitations and accepted-output narrative; embedded-layout packs also retain their `ssb.dev/report/v1` machine contract here | Yes | Manifest layout: digest-bound narrative; embedded layout: inventory and evidence index |
+| `.software-standards/rules/*.md` | Human-first semantic rules; embedded-layout files retain `ssb.dev/rule/v2` frontmatter | Yes | Manifest-owned evidence mapping |
 | `.software-standards/verification/*.yaml` | Canonical existing-command recipes | Yes | Records commands, never a run result |
 | `.agents/skills/*/SKILL.md` | Canonical procedural workflows | Yes | No |
 | `.software-standards/automation/*.yaml` | Reviewable proposed-check designs | Yes | Not implemented or adopted |

@@ -32,8 +32,8 @@ prune proposal.
 
 If neither `.software-standards/manifest.yaml` nor
 `.software-standards/report.md` exists, use generation mode. A safe regular
-`manifest.yaml` selects the split layout; otherwise a frontmatter-based
-`ssb.dev/report/v1` report selects the legacy layout. When either pack exists:
+`manifest.yaml` selects the manifest layout; otherwise a frontmatter-based
+`ssb.dev/report/v1` report selects the embedded layout. When either pack exists:
 
 - use reviewed-pack maintenance mode only for an explicit request to validate
   or rerender developer-edited sources;
@@ -49,7 +49,7 @@ Do not run `ssb inspect`, `ssb validate`, or `ssb render`, and do not rewrite
 the pack.
 
 1. Read `.software-standards/manifest.yaml` and the linked human report and
-   inventory for a split pack. For a legacy pack, read
+   inventory for a manifest-layout pack. For an embedded-layout pack, read
    `.software-standards/report.md` and its accepted artifact index.
 2. If the pack contains no rule, verification recipe, or Agent Skill, report
    that it has no active guidance. Automation proposals are not active policy.
@@ -195,9 +195,9 @@ Before presenting final candidates:
    total below 45.
 8. Review each semantic name. A rule name must express a falsifiable goal and
    include a mechanism only when that mechanism is the repository contract.
-9. Write accepted artifacts and then the final report manifest. For the split
-   layout, Write `manifest.yaml` last, after every digest-bound primary file is
-   final.
+9. Write accepted artifacts and then the final report manifest. For the
+   manifest layout, write `manifest.yaml` last, after every digest-bound
+   primary file is final.
 
 Do not persist rejected candidates, rejection reasons, or rejection counts.
 Do not split a compound observation unless semantic clarity requires it.

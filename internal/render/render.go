@@ -52,7 +52,7 @@ func Apply(repo *workspace.Repository, pack rulepack.Pack, dryRun bool) (Result,
 	if len(pack.Rules) == 0 && len(pack.Recipes) == 0 && len(pack.Skills) == 0 {
 		next, err := removeManagedSection(existing)
 		if err != nil {
-			if pack.Format == rulepack.FormatSplitV1 && errors.Is(err, ErrDrift) {
+			if pack.Layout == rulepack.LayoutManifest && errors.Is(err, ErrDrift) {
 				return Result{}, fmt.Errorf("%w: edit digest-bound sources and update manifest.yaml SHA-256 values instead of editing the generated section", ErrDrift)
 			}
 			return Result{}, err
@@ -82,7 +82,7 @@ func Apply(repo *workspace.Repository, pack rulepack.Pack, dryRun bool) (Result,
 	}
 	next, err := replaceManagedSection(existing, section)
 	if err != nil {
-		if pack.Format == rulepack.FormatSplitV1 && errors.Is(err, ErrDrift) {
+		if pack.Layout == rulepack.LayoutManifest && errors.Is(err, ErrDrift) {
 			return Result{}, fmt.Errorf("%w: edit digest-bound sources and update manifest.yaml SHA-256 values instead of editing the generated section", ErrDrift)
 		}
 		return Result{}, err
@@ -116,17 +116,17 @@ func buildSection(pack rulepack.Pack) ([]byte, string, string, error) {
 	sort.Slice(recipes, func(i, j int) bool { return recipes[i].ID < recipes[j].ID })
 	sort.Slice(skills, func(i, j int) bool { return skills[i].ID < skills[j].ID })
 
-	manifest := make(map[string]rulepack.ManifestArtifact, len(pack.Report.Artifacts))
+	manifest := make(map[string]rulepack.AcceptedArtifact, len(pack.Report.Artifacts))
 	for _, artifact := range pack.Report.Artifacts {
 		manifest[artifact.ID] = artifact
 	}
 	sourceState := struct {
 		Baseline       string                        `json:"baseline"`
-		Manifest       []rulepack.ManifestArtifact   `json:"manifest"`
+		Manifest       []rulepack.AcceptedArtifact   `json:"manifest"`
 		Rules          []rulepack.Rule               `json:"rules"`
 		Recipes        []rulepack.VerificationRecipe `json:"recipes"`
 		Skills         []rulepack.Skill              `json:"skills"`
-		Format         string                        `json:"format,omitempty"`
+		Layout         rulepack.Layout               `json:"layout,omitempty"`
 		ManifestPath   string                        `json:"manifest_path,omitempty"`
 		ManifestSchema string                        `json:"manifest_schema,omitempty"`
 		InventoryFile  *rulepack.FileReference       `json:"inventory_file,omitempty"`
@@ -138,8 +138,8 @@ func buildSection(pack rulepack.Pack) ([]byte, string, string, error) {
 		Recipes:  recipes,
 		Skills:   skills,
 	}
-	if pack.Format == rulepack.FormatSplitV1 {
-		sourceState.Format = pack.Format
+	if pack.Layout == rulepack.LayoutManifest {
+		sourceState.Layout = pack.Layout
 		sourceState.ManifestPath = pack.ManifestPath
 		sourceState.ManifestSchema = pack.Manifest.Schema
 		sourceState.InventoryFile = &pack.Manifest.Inventory
@@ -173,7 +173,7 @@ func buildSection(pack rulepack.Pack) ([]byte, string, string, error) {
 
 	var body strings.Builder
 	body.WriteString("## Software Standards Bootstrap\n\n")
-	if pack.Format == rulepack.FormatSplitV1 {
+	if pack.Layout == rulepack.LayoutManifest {
 		fmt.Fprintf(
 			&body,
 			"Generated from `%s`, `%s`, `%s`, and the accepted artifacts by `ssb render`. Edit canonical sources and the manifest together, then rerun the command.\n\n",
@@ -215,8 +215,8 @@ func buildSection(pack rulepack.Pack) ([]byte, string, string, error) {
 	return []byte(section.String()), sourceDigest, contentDigest, nil
 }
 
-func renderableManifest(artifacts []rulepack.ManifestArtifact) []rulepack.ManifestArtifact {
-	result := make([]rulepack.ManifestArtifact, 0, len(artifacts))
+func renderableManifest(artifacts []rulepack.AcceptedArtifact) []rulepack.AcceptedArtifact {
+	result := make([]rulepack.AcceptedArtifact, 0, len(artifacts))
 	for _, artifact := range artifacts {
 		if artifact.Kind != "automation" {
 			result = append(result, artifact)
@@ -229,7 +229,7 @@ func renderableManifest(artifacts []rulepack.ManifestArtifact) []rulepack.Manife
 func writeStandingOrders(
 	body *strings.Builder,
 	rules []rulepack.Rule,
-	manifest map[string]rulepack.ManifestArtifact,
+	manifest map[string]rulepack.AcceptedArtifact,
 ) {
 	body.WriteString("\n### Standing orders\n")
 	wroteAny := false
@@ -257,7 +257,7 @@ func writeStandingOrders(
 func writeStandingOrder(
 	body *strings.Builder,
 	rule rulepack.Rule,
-	manifest map[string]rulepack.ManifestArtifact,
+	manifest map[string]rulepack.AcceptedArtifact,
 ) {
 	fmt.Fprintf(body, "\n##### %s (`%s`)\n\n", rule.Title, rule.ID)
 	fmt.Fprintf(body, "- Source: [%s](%s)\n", rule.SourcePath, rule.SourcePath)
@@ -275,7 +275,7 @@ func writeStandingOrder(
 func writeContextualRules(
 	body *strings.Builder,
 	rules []rulepack.Rule,
-	manifest map[string]rulepack.ManifestArtifact,
+	manifest map[string]rulepack.AcceptedArtifact,
 ) {
 	contextual := make([]rulepack.Rule, 0)
 	for _, rule := range rules {
@@ -307,7 +307,7 @@ func writeContextualRules(
 func writeVerificationRecipes(
 	body *strings.Builder,
 	recipes []rulepack.VerificationRecipe,
-	manifest map[string]rulepack.ManifestArtifact,
+	manifest map[string]rulepack.AcceptedArtifact,
 ) {
 	if len(recipes) == 0 {
 		return
@@ -333,7 +333,7 @@ func writeVerificationRecipes(
 func writeSkills(
 	body *strings.Builder,
 	skills []rulepack.Skill,
-	manifest map[string]rulepack.ManifestArtifact,
+	manifest map[string]rulepack.AcceptedArtifact,
 ) {
 	if len(skills) == 0 {
 		return
@@ -361,8 +361,8 @@ func writeSkills(
 
 func writeRelationships(
 	body *strings.Builder,
-	artifact rulepack.ManifestArtifact,
-	manifest map[string]rulepack.ManifestArtifact,
+	artifact rulepack.AcceptedArtifact,
+	manifest map[string]rulepack.AcceptedArtifact,
 	indent string,
 ) {
 	for _, relatedID := range artifact.RelatedArtifactIDs {

@@ -13,11 +13,11 @@ Markdown while retaining four accepted artifact kinds:
 .software-standards/automation/<id>.yaml
 ```
 
-The new layout is `split-v1` and uses `ssb.dev/manifest/v1`. The published
-`legacy-v1` layout embeds `ssb.dev/report/v1` frontmatter in `report.md` and
+The new manifest layout uses `ssb.dev/manifest/v1`. The published embedded
+layout embeds `ssb.dev/report/v1` frontmatter in `report.md` and
 keeps `ssb.dev/rule/v2` frontmatter in semantic rules. It remains fully
 readable for validation, rendering, ADR creation, and governed prune without
-conversion. New generation always writes the split layout.
+conversion. New generation always writes the manifest layout.
 
 All YAML and JSON are strict. Unknown fields and duplicate keys fail
 validation. IDs are globally unique lower-case kebab-case and each artifact
@@ -125,7 +125,7 @@ Candidates below 45 are removed.
 Keep in-scope public API changes backward compatible.
 ```
 
-A split rule has no frontmatter. It starts with exactly one H1 whose text
+A manifest-layout rule has no frontmatter. It starts with exactly one H1 whose text
 supplies the normalized title, followed immediately by nonempty actionable
 text. The manifest owns category, activation, directive, scope, derivation,
 and exact evidence. Rules contain no commands or proof metadata.
@@ -182,8 +182,8 @@ license: Apache-2.0
 Inspect the public surface and each dependent package.
 ```
 
-The entrypoint remains `.agents/skills/<id>/SKILL.md`. Split-pack skills keep
-portable `name` and `description` frontmatter plus a meaningful standard
+The entrypoint remains `.agents/skills/<id>/SKILL.md`. Manifest-layout skills
+keep portable `name` and `description` frontmatter plus a meaningful standard
 `license` or `compatibility` field. They omit SSB-owned `metadata.category`.
 The body begins with an H1 and a nonempty procedure. The manifest records SSB
 provenance, selection metadata, confidence, utility, and relationships.
@@ -258,13 +258,13 @@ confidence, utility, and concise evidence sources. It excludes automation
 proposals and fails safely when nothing is adoptable.
 
 `ssb validate --format json` uses response schema 3. A valid response names
-`pack.format` as `split-v1` or `legacy-v1`, exposes explicit manifest,
+`pack.layout` as `manifest` or `embedded`, exposes explicit manifest,
 inventory, and report paths when separate, and includes normalized manifest,
 inventory, human report, and all four artifact arrays. Invalid output includes
 diagnostics and omits the normalized pack.
 
 Presence of a safe regular `.software-standards/manifest.yaml` selects the
-split layout. An invalid manifest never falls back to legacy parsing. When it
-is absent, `ssb.dev/report/v1` frontmatter selects `legacy-v1`. Split packs
-reject legacy report and rule frontmatter. Validation never rewrites, repairs,
-or migrates either format.
+manifest layout. An invalid manifest never falls back to embedded parsing. When
+it is absent, `ssb.dev/report/v1` frontmatter selects the embedded layout.
+Manifest-layout packs reject embedded report and rule frontmatter. Validation
+never rewrites, repairs, or migrates either layout.

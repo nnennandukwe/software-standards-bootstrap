@@ -71,7 +71,7 @@ Keep public API changes backward compatible.
 	if len(diagnostics) != 0 {
 		t.Fatalf("unexpected diagnostics: %#v", diagnostics)
 	}
-	if pack.Format != rulepack.FormatLegacyV1 ||
+	if pack.Layout != rulepack.LayoutEmbedded ||
 		pack.ManifestPath != "" || pack.InventoryPath != "" ||
 		pack.ReportPath != ".software-standards/report.md" ||
 		pack.Report.Schema != rulepack.ReportSchema ||
@@ -117,9 +117,9 @@ func TestValidateAcceptsZeroArtifactReport(t *testing.T) {
 	}
 }
 
-func TestValidateAcceptsSplitManifestAndHumanFirstRule(t *testing.T) {
+func TestValidateAcceptsManifestRule(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
-	fixture := writeValidSplitPack(t, repo, baseline, true)
+	fixture := writeValidManifestLayoutPack(t, repo, baseline, true)
 
 	ws, err := workspace.Open(context.Background(), repo)
 	if err != nil {
@@ -132,12 +132,12 @@ func TestValidateAcceptsSplitManifestAndHumanFirstRule(t *testing.T) {
 	if len(diagnostics) != 0 {
 		t.Fatalf("unexpected diagnostics: %#v", diagnostics)
 	}
-	if pack.Format != rulepack.FormatSplitV1 ||
+	if pack.Layout != rulepack.LayoutManifest ||
 		pack.ManifestPath != ".software-standards/manifest.yaml" ||
 		pack.InventoryPath != ".software-standards/inventory.json" ||
 		pack.ReportPath != ".software-standards/report.md" ||
 		pack.BaselineCommit != baseline {
-		t.Fatalf("unexpected split paths: %#v", pack)
+		t.Fatalf("unexpected manifest-layout paths: %#v", pack)
 	}
 	if pack.Manifest.Schema != rulepack.ManifestSchema ||
 		pack.Manifest.Inventory.SHA256 != digestBytes(fixture.inventory) ||
@@ -155,13 +155,13 @@ func TestValidateAcceptsSplitManifestAndHumanFirstRule(t *testing.T) {
 		rule.Category != "compatibility" ||
 		rule.Directive != "always" ||
 		rule.Body != "Keep public API changes backward compatible.\n" {
-		t.Fatalf("unexpected normalized split rule: %#v", rule)
+		t.Fatalf("unexpected normalized manifest-layout rule: %#v", rule)
 	}
 }
 
-func TestValidateAcceptsZeroArtifactSplitManifest(t *testing.T) {
+func TestValidateAcceptsEmptyManifest(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
-	writeValidSplitPack(t, repo, baseline, false)
+	writeValidManifestLayoutPack(t, repo, baseline, false)
 
 	ws, err := workspace.Open(context.Background(), repo)
 	if err != nil {
@@ -174,10 +174,10 @@ func TestValidateAcceptsZeroArtifactSplitManifest(t *testing.T) {
 	if len(diagnostics) != 0 {
 		t.Fatalf("unexpected diagnostics: %#v", diagnostics)
 	}
-	if pack.Format != rulepack.FormatSplitV1 || len(pack.Manifest.Artifacts) != 0 ||
+	if pack.Layout != rulepack.LayoutManifest || len(pack.Manifest.Artifacts) != 0 ||
 		len(pack.Rules) != 0 || len(pack.Recipes) != 0 ||
 		len(pack.Skills) != 0 || len(pack.Automations) != 0 {
-		t.Fatalf("unexpected zero-artifact split pack: %#v", pack)
+		t.Fatalf("unexpected zero-artifact manifest-layout pack: %#v", pack)
 	}
 }
 
@@ -193,7 +193,7 @@ func TestValidateKeepsHumanReportSmallFor2239FileInventory(t *testing.T) {
 	git(t, repo, "add", "internal/examples")
 	git(t, repo, "commit", "-m", "large inventory fixture")
 	baseline := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
-	fixture := writeValidSplitPack(t, repo, baseline, false)
+	fixture := writeValidManifestLayoutPack(t, repo, baseline, false)
 
 	ws, err := workspace.Open(context.Background(), repo)
 	if err != nil {
@@ -221,9 +221,9 @@ func TestValidateKeepsHumanReportSmallFor2239FileInventory(t *testing.T) {
 	}
 }
 
-func TestValidateAcceptsMinimalPortableSkillInSplitPack(t *testing.T) {
+func TestValidateAcceptsManifestSkill(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
-	fixture := writeValidSplitPack(t, repo, baseline, false)
+	fixture := writeValidManifestLayoutPack(t, repo, baseline, false)
 	skill := []byte(`---
 name: review-change
 description: Review a Go change using the repository workflow.
@@ -273,14 +273,14 @@ license: MIT
 		t.Fatal(err)
 	}
 	if len(diagnostics) != 0 || len(pack.Skills) != 1 {
-		t.Fatalf("split skill failed: pack=%#v diagnostics=%#v", pack, diagnostics)
+		t.Fatalf("manifest-layout skill failed: pack=%#v diagnostics=%#v", pack, diagnostics)
 	}
 	if pack.Skills[0].Category != "correctness" || strings.Contains(string(skill), "metadata:") {
-		t.Fatalf("split skill metadata was not manifest-owned: %#v", pack.Skills[0])
+		t.Fatalf("manifest-layout skill metadata was not manifest-owned: %#v", pack.Skills[0])
 	}
 }
 
-func TestValidateSplitPresentationHandlesCRLFAndRejectsDeferredContent(t *testing.T) {
+func TestValidateManifestPresentation(t *testing.T) {
 	tests := []struct {
 		name       string
 		report     []byte
@@ -288,7 +288,7 @@ func TestValidateSplitPresentationHandlesCRLFAndRejectsDeferredContent(t *testin
 		want       string
 		wantBody   string
 		wantTitle  string
-		wantFormat string
+		wantLayout rulepack.Layout
 	}{
 		{
 			name:       "CRLF",
@@ -296,7 +296,7 @@ func TestValidateSplitPresentationHandlesCRLFAndRejectsDeferredContent(t *testin
 			rule:       []byte("# Keep public APIs compatible\r\n\r\nKeep public API changes backward compatible.\r\n"),
 			wantBody:   "Keep public API changes backward compatible.\r\n",
 			wantTitle:  "Keep public APIs compatible",
-			wantFormat: rulepack.FormatSplitV1,
+			wantLayout: rulepack.LayoutManifest,
 		},
 		{
 			name: "second H1",
@@ -313,14 +313,14 @@ func TestValidateSplitPresentationHandlesCRLFAndRejectsDeferredContent(t *testin
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			repo, baseline := evidenceRepository(t)
-			fixture := writeValidSplitPack(t, repo, baseline, true)
+			fixture := writeValidManifestLayoutPack(t, repo, baseline, true)
 			if test.report != nil {
-				writeSplitReportAndRefreshManifest(t, fixture, test.report)
+				writeManifestReportAndRefreshManifest(t, fixture, test.report)
 				fixture.manifest = strings.Replace(fixture.manifest, digestBytes(fixture.report), digestBytes(test.report), 1)
 				fixture.report = test.report
 			}
 			if test.rule != nil {
-				writeSplitRuleAndRefreshManifest(t, fixture, test.rule)
+				writeManifestRuleAndRefreshManifest(t, fixture, test.rule)
 			}
 			ws, err := workspace.Open(context.Background(), repo)
 			if err != nil {
@@ -336,7 +336,7 @@ func TestValidateSplitPresentationHandlesCRLFAndRejectsDeferredContent(t *testin
 				}
 				return
 			}
-			if len(diagnostics) != 0 || pack.Format != test.wantFormat || len(pack.Rules) != 1 ||
+			if len(diagnostics) != 0 || pack.Layout != test.wantLayout || len(pack.Rules) != 1 ||
 				pack.Rules[0].Title != test.wantTitle || pack.Rules[0].Body != test.wantBody {
 				t.Fatalf("CRLF normalization failed: pack=%#v diagnostics=%#v", pack, diagnostics)
 			}
@@ -344,19 +344,19 @@ func TestValidateSplitPresentationHandlesCRLFAndRejectsDeferredContent(t *testin
 	}
 }
 
-func TestValidateSplitPackAppliesSizeLimitsBeforeParsing(t *testing.T) {
+func TestValidateManifestSizeLimits(t *testing.T) {
 	tests := []struct {
 		name     string
-		path     func(splitPackFixture) string
+		path     func(manifestLayoutFixture) string
 		maxBytes int64
 	}{
-		{name: "manifest", path: func(f splitPackFixture) string { return f.manifestPath }, maxBytes: 1 << 20},
-		{name: "inventory", path: func(f splitPackFixture) string { return f.inventoryPath }, maxBytes: 128 << 20},
+		{name: "manifest", path: func(f manifestLayoutFixture) string { return f.manifestPath }, maxBytes: 1 << 20},
+		{name: "inventory", path: func(f manifestLayoutFixture) string { return f.inventoryPath }, maxBytes: 128 << 20},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			repo, baseline := evidenceRepository(t)
-			fixture := writeValidSplitPack(t, repo, baseline, true)
+			fixture := writeValidManifestLayoutPack(t, repo, baseline, true)
 			file, err := os.OpenFile(test.path(fixture), os.O_WRONLY|os.O_TRUNC, 0o644)
 			if err != nil {
 				t.Fatal(err)
@@ -383,7 +383,7 @@ func TestValidateSplitPackAppliesSizeLimitsBeforeParsing(t *testing.T) {
 	}
 }
 
-func TestUpdateSplitManifestArtifactsRefreshesDigestsAndRemovesRelationships(t *testing.T) {
+func TestUpdateManifestArtifacts(t *testing.T) {
 	input := []byte(`schema: ssb.dev/manifest/v1
 baseline_commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 inventory:
@@ -433,7 +433,7 @@ artifacts:
       factors: {marginal_value: 15, risk_reduction: 10, actionability: 10, applicability: 10, earlier_feedback: 5}
 `)
 	updatedDigest := "sha256:" + strings.Repeat("f", 64)
-	result, err := rulepack.UpdateSplitManifestArtifacts(
+	result, err := rulepack.UpdateManifestArtifacts(
 		input,
 		map[string]struct{}{"remove-skill": {}},
 		map[string]string{"keep-rule": updatedDigest},
@@ -452,11 +452,11 @@ artifacts:
 		manifest.Artifacts[0].Directive != "prefer" ||
 		manifest.Inventory.SHA256 != "sha256:"+strings.Repeat("a", 64) ||
 		manifest.Report.SHA256 != "sha256:"+strings.Repeat("b", 64) {
-		t.Fatalf("unexpected split manifest mutation: %#v", manifest)
+		t.Fatalf("unexpected manifest mutation: %#v", manifest)
 	}
 }
 
-func TestValidateSplitManifestPresenceNeverFallsBackToLegacy(t *testing.T) {
+func TestValidateManifestNoFallback(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
 	writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), actionableReport(baseline, "  []"))
 	writeFile(t, filepath.Join(repo, ".software-standards", "manifest.yaml"), "schema: ssb.dev/manifest/v0\nunknown: true\n")
@@ -469,88 +469,88 @@ func TestValidateSplitManifestPresenceNeverFallsBackToLegacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pack.Format != rulepack.FormatSplitV1 || len(diagnostics) == 0 ||
+	if pack.Layout != rulepack.LayoutManifest || len(diagnostics) == 0 ||
 		!diagnosticsContain(diagnostics, "field unknown not found") {
 		t.Fatalf("invalid manifest fell back or produced unclear diagnostics: pack=%#v diagnostics=%#v", pack, diagnostics)
 	}
 }
 
-func TestValidateSplitPackRejectsMalformedOrSubstitutedSources(t *testing.T) {
+func TestValidateRejectsManifestSources(t *testing.T) {
 	tests := []struct {
 		name   string
-		mutate func(t *testing.T, repo string, fixture splitPackFixture)
+		mutate func(t *testing.T, repo string, fixture manifestLayoutFixture)
 		want   string
 	}{
 		{
 			name: "unknown manifest field",
-			mutate: func(t *testing.T, repo string, fixture splitPackFixture) {
+			mutate: func(t *testing.T, repo string, fixture manifestLayoutFixture) {
 				writeFile(t, fixture.manifestPath, strings.Replace(fixture.manifest, "schema:", "unknown: true\nschema:", 1))
 			},
 			want: "field unknown not found",
 		},
 		{
 			name: "duplicate manifest field",
-			mutate: func(t *testing.T, repo string, fixture splitPackFixture) {
+			mutate: func(t *testing.T, repo string, fixture manifestLayoutFixture) {
 				writeFile(t, fixture.manifestPath, strings.Replace(fixture.manifest, "schema: ssb.dev/manifest/v1", "schema: ssb.dev/manifest/v1\nschema: ssb.dev/manifest/v1", 1))
 			},
 			want: "mapping key \"schema\" already defined",
 		},
 		{
 			name: "unknown inventory field",
-			mutate: func(t *testing.T, repo string, fixture splitPackFixture) {
+			mutate: func(t *testing.T, repo string, fixture manifestLayoutFixture) {
 				changed := bytesReplaceOnce(t, fixture.inventory, []byte("{\n"), []byte("{\n  \"unknown\": true,\n"))
-				writeSplitInventoryAndRefreshManifest(t, fixture, changed)
+				writeManifestInventoryAndRefreshManifest(t, fixture, changed)
 			},
 			want: "unknown field \"unknown\"",
 		},
 		{
 			name: "duplicate inventory field",
-			mutate: func(t *testing.T, repo string, fixture splitPackFixture) {
+			mutate: func(t *testing.T, repo string, fixture manifestLayoutFixture) {
 				changed := bytesReplaceOnce(t, fixture.inventory, []byte("  \"schema_version\": 2,"), []byte("  \"schema_version\": 2,\n  \"schema_version\": 2,"))
-				writeSplitInventoryAndRefreshManifest(t, fixture, changed)
+				writeManifestInventoryAndRefreshManifest(t, fixture, changed)
 			},
 			want: "duplicate JSON field \"schema_version\"",
 		},
 		{
 			name: "inventory digest mismatch",
-			mutate: func(t *testing.T, repo string, fixture splitPackFixture) {
+			mutate: func(t *testing.T, repo string, fixture manifestLayoutFixture) {
 				writeFile(t, fixture.inventoryPath, string(fixture.inventory)+" \n")
 			},
 			want: "inventory.json SHA-256 does not match manifest",
 		},
 		{
 			name: "report digest mismatch",
-			mutate: func(t *testing.T, repo string, fixture splitPackFixture) {
+			mutate: func(t *testing.T, repo string, fixture manifestLayoutFixture) {
 				writeFile(t, fixture.reportPath, string(fixture.report)+"Changed.\n")
 			},
 			want: "report.md SHA-256 does not match manifest",
 		},
 		{
 			name: "rule digest mismatch",
-			mutate: func(t *testing.T, repo string, fixture splitPackFixture) {
+			mutate: func(t *testing.T, repo string, fixture manifestLayoutFixture) {
 				writeFile(t, fixture.rulePath, string(fixture.rule)+"Changed.\n")
 			},
 			want: "rule SHA-256 does not match manifest",
 		},
 		{
 			name: "report frontmatter",
-			mutate: func(t *testing.T, repo string, fixture splitPackFixture) {
-				changed := append([]byte("---\nlegacy: true\n---\n"), fixture.report...)
-				writeSplitReportAndRefreshManifest(t, fixture, changed)
+			mutate: func(t *testing.T, repo string, fixture manifestLayoutFixture) {
+				changed := append([]byte("---\nunexpected: true\n---\n"), fixture.report...)
+				writeManifestReportAndRefreshManifest(t, fixture, changed)
 			},
 			want: "report.md must begin at byte zero with # Software standards report",
 		},
 		{
 			name: "rule frontmatter",
-			mutate: func(t *testing.T, repo string, fixture splitPackFixture) {
+			mutate: func(t *testing.T, repo string, fixture manifestLayoutFixture) {
 				changed := append([]byte("---\nschema: ssb.dev/rule/v2\n---\n"), fixture.rule...)
-				writeSplitRuleAndRefreshManifest(t, fixture, changed)
+				writeManifestRuleAndRefreshManifest(t, fixture, changed)
 			},
 			want: "semantic rule must begin with one H1 title",
 		},
 		{
 			name: "escaping inventory path",
-			mutate: func(t *testing.T, repo string, fixture splitPackFixture) {
+			mutate: func(t *testing.T, repo string, fixture manifestLayoutFixture) {
 				writeFile(t, fixture.manifestPath, strings.Replace(fixture.manifest, ".software-standards/inventory.json", "../inventory.json", 1))
 			},
 			want: "inventory path must be .software-standards/inventory.json",
@@ -560,7 +560,7 @@ func TestValidateSplitPackRejectsMalformedOrSubstitutedSources(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			repo, baseline := evidenceRepository(t)
-			fixture := writeValidSplitPack(t, repo, baseline, true)
+			fixture := writeValidManifestLayoutPack(t, repo, baseline, true)
 			test.mutate(t, repo, fixture)
 			ws, err := workspace.Open(context.Background(), repo)
 			if err != nil {
@@ -577,21 +577,21 @@ func TestValidateSplitPackRejectsMalformedOrSubstitutedSources(t *testing.T) {
 	}
 }
 
-func TestValidateSplitPackRejectsSymlinkedMachineArtifacts(t *testing.T) {
+func TestValidateRejectsManifestSymlinks(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation is not consistently available on Windows")
 	}
 	tests := []struct {
 		name string
-		path func(splitPackFixture) string
+		path func(manifestLayoutFixture) string
 	}{
-		{name: "manifest", path: func(f splitPackFixture) string { return f.manifestPath }},
-		{name: "inventory", path: func(f splitPackFixture) string { return f.inventoryPath }},
+		{name: "manifest", path: func(f manifestLayoutFixture) string { return f.manifestPath }},
+		{name: "inventory", path: func(f manifestLayoutFixture) string { return f.inventoryPath }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			repo, baseline := evidenceRepository(t)
-			fixture := writeValidSplitPack(t, repo, baseline, true)
+			fixture := writeValidManifestLayoutPack(t, repo, baseline, true)
 			target := test.path(fixture)
 			data, err := os.ReadFile(target)
 			if err != nil {
@@ -1582,7 +1582,7 @@ metadata:
 	return repo, baseline
 }
 
-type splitPackFixture struct {
+type manifestLayoutFixture struct {
 	manifestPath  string
 	inventoryPath string
 	reportPath    string
@@ -1593,7 +1593,7 @@ type splitPackFixture struct {
 	rule          []byte
 }
 
-func writeValidSplitPack(t *testing.T, repo, baseline string, withRule bool) splitPackFixture {
+func writeValidManifestLayoutPack(t *testing.T, repo, baseline string, withRule bool) manifestLayoutFixture {
 	t.Helper()
 	ws, err := workspace.Open(context.Background(), repo)
 	if err != nil {
@@ -1657,7 +1657,7 @@ report:
 artifacts:
 %s
 `, baseline, digestBytes(inventoryBytes), digestBytes(reportBytes), artifactEntries)
-	fixture := splitPackFixture{
+	fixture := manifestLayoutFixture{
 		manifestPath:  filepath.Join(repo, ".software-standards", "manifest.yaml"),
 		inventoryPath: filepath.Join(repo, ".software-standards", "inventory.json"),
 		reportPath:    filepath.Join(repo, ".software-standards", "report.md"),
@@ -1676,7 +1676,7 @@ artifacts:
 	return fixture
 }
 
-func writeSplitInventoryAndRefreshManifest(t *testing.T, fixture splitPackFixture, data []byte) {
+func writeManifestInventoryAndRefreshManifest(t *testing.T, fixture manifestLayoutFixture, data []byte) {
 	t.Helper()
 	writeFile(t, fixture.inventoryPath, string(data))
 	writeFile(t, fixture.manifestPath, strings.Replace(
@@ -1687,7 +1687,7 @@ func writeSplitInventoryAndRefreshManifest(t *testing.T, fixture splitPackFixtur
 	))
 }
 
-func writeSplitReportAndRefreshManifest(t *testing.T, fixture splitPackFixture, data []byte) {
+func writeManifestReportAndRefreshManifest(t *testing.T, fixture manifestLayoutFixture, data []byte) {
 	t.Helper()
 	writeFile(t, fixture.reportPath, string(data))
 	writeFile(t, fixture.manifestPath, strings.Replace(
@@ -1698,7 +1698,7 @@ func writeSplitReportAndRefreshManifest(t *testing.T, fixture splitPackFixture, 
 	))
 }
 
-func writeSplitRuleAndRefreshManifest(t *testing.T, fixture splitPackFixture, data []byte) {
+func writeManifestRuleAndRefreshManifest(t *testing.T, fixture manifestLayoutFixture, data []byte) {
 	t.Helper()
 	writeFile(t, fixture.rulePath, string(data))
 	writeFile(t, fixture.manifestPath, strings.Replace(

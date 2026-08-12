@@ -5,6 +5,20 @@
 
 ## Domain language
 
+### Pack layout
+
+**Definition**: The representation used to store one actionable standards
+pack: the manifest layout separates machine metadata from human-facing files,
+while the embedded layout keeps machine metadata in Markdown frontmatter.
+
+**Use when**: Distinguishing how a pack is stored without changing its
+normalized meaning or lifecycle behavior.
+
+**Avoid**: Calling a layout a format or identifying it by implementation
+mechanics or relative age.
+
+---
+
 ### Artifact kind
 
 **Definition**: The candidate's one primary developer-action destination:
@@ -80,4 +94,4 @@ ADR-adopted behavior.
 
 ## Last updated
 
-2026-07-29
+2026-08-12

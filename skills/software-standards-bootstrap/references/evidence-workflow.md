@@ -10,7 +10,7 @@ prose, normalized whitespace, worktree-only edits, or model summaries.
 expected digest when a hash is stale. It also rebuilds the recorded complete
 inventory from the pinned baseline and limits.
 
-The split manifest also hashes every complete primary artifact plus the
+The manifest also hashes every complete primary artifact plus the
 inventory and human report. Those digests cover raw bytes, including line
 endings, rather than normalized YAML, JSON, or Markdown.
 

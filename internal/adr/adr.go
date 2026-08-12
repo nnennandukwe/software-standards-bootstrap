@@ -254,7 +254,7 @@ func render(pack rulepack.Pack, number int) []byte {
 	sort.Slice(rules, func(i, j int) bool { return rules[i].ID < rules[j].ID })
 	sort.Slice(recipes, func(i, j int) bool { return recipes[i].ID < recipes[j].ID })
 	sort.Slice(skills, func(i, j int) bool { return skills[i].ID < skills[j].ID })
-	manifest := make(map[string]rulepack.ManifestArtifact, len(pack.Report.Artifacts))
+	manifest := make(map[string]rulepack.AcceptedArtifact, len(pack.Report.Artifacts))
 	for _, artifact := range pack.Report.Artifacts {
 		manifest[artifact.ID] = artifact
 	}
@@ -263,7 +263,7 @@ func render(pack rulepack.Pack, number int) []byte {
 	fmt.Fprintf(&output, "# ADR %04d: Adopt actionable repository standards\n\n", number)
 	output.WriteString("- Status: Proposed\n")
 	fmt.Fprintf(&output, "- Baseline commit: `%s`\n", pack.BaselineCommit)
-	if pack.Format == rulepack.FormatSplitV1 {
+	if pack.Layout == rulepack.LayoutManifest {
 		fmt.Fprintf(&output, "- Manifest: `%s`\n", pack.ManifestPath)
 		fmt.Fprintf(&output, "- Inventory: `%s`\n", pack.InventoryPath)
 		fmt.Fprintf(&output, "- Report: `%s`\n\n", pack.ReportPath)
@@ -314,7 +314,7 @@ func render(pack rulepack.Pack, number int) []byte {
 		}
 	}
 	output.WriteString("\n## Consequences\n\n")
-	if pack.Format == rulepack.FormatSplitV1 {
+	if pack.Layout == rulepack.LayoutManifest {
 		output.WriteString("- `AGENTS.md` is a derived projection; the manifest, inventory, human report, and canonical artifact source files remain editable.\n")
 	} else {
 		output.WriteString("- `AGENTS.md` is a derived projection; the report and canonical artifact source files remain editable.\n")
@@ -329,7 +329,7 @@ func writeAdoptionMetadata(
 	category string,
 	derivation string,
 	evidence []rulepack.Evidence,
-	metadata rulepack.ManifestArtifact,
+	metadata rulepack.AcceptedArtifact,
 ) {
 	fmt.Fprintf(output, "- Category: `%s`\n", category)
 	fmt.Fprintf(output, "- Derivation: `%s`\n", derivation)

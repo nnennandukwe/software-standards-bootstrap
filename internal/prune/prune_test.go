@@ -613,7 +613,7 @@ Follow the workflow.
 	return repo
 }
 
-func splitLifecycleRepository(t *testing.T) string {
+func manifestLayoutLifecycleRepository(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
 	git(t, repo, "init", "-b", "main")
@@ -734,7 +734,7 @@ artifacts:
 		evidenceDigest,
 	))
 	git(t, repo, "add", ".")
-	git(t, repo, "commit", "-m", "adopt split standards")
+	git(t, repo, "commit", "-m", "adopt manifest-layout standards")
 	return repo
 }
 

@@ -36,7 +36,7 @@ func TestAgentSkillRequiresActionableCandidateRouting(t *testing.T) {
 	}
 }
 
-func TestAgentSkillGeneratesHumanFirstSplitPack(t *testing.T) {
+func TestAgentSkillDefinesManifestGeneration(t *testing.T) {
 	root := repositoryRoot(t)
 	skill := normalizedText(t, filepath.Join(
 		root,
@@ -46,6 +46,7 @@ func TestAgentSkillGeneratesHumanFirstSplitPack(t *testing.T) {
 	))
 
 	for _, required := range []string{
+		"manifest layout",
 		".software-standards/inventory.json",
 		".software-standards/manifest.yaml",
 		"complete, unedited `ssb inspect --format json` response",
@@ -53,10 +54,10 @@ func TestAgentSkillGeneratesHumanFirstSplitPack(t *testing.T) {
 		"begins at byte zero with `# Software standards report`",
 		"Semantic-rule Markdown has no frontmatter",
 		"Generation omits `metadata.category`",
-		"Write `manifest.yaml` last",
+		"write `manifest.yaml` last",
 	} {
 		if !strings.Contains(skill, required) {
-			t.Errorf("Agent Skill missing human-first split-pack contract %q", required)
+			t.Errorf("Agent Skill missing human-first manifest-layout contract %q", required)
 		}
 	}
 }
@@ -254,23 +255,26 @@ func TestPublicDocumentationUsesOnlyActionableContracts(t *testing.T) {
 	}
 }
 
-func TestPublicDocumentationDefinesSplitGenerationAndLegacyCompatibility(t *testing.T) {
+func TestDocsDefinePackLayouts(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, relative := range []string{
+		"CONTEXT.md",
 		"README.md",
 		"docs/architecture.md",
 		"docs/rule-format.md",
 	} {
 		content := normalizedText(t, filepath.Join(root, filepath.FromSlash(relative)))
 		for _, required := range []string{
-			"ssb.dev/manifest/v1",
-			"split-v1",
-			"legacy-v1",
-			"ssb.dev/report/v1",
-			"response schema 3",
+			"manifest layout",
+			"embedded layout",
 		} {
 			if !strings.Contains(content, required) {
-				t.Errorf("%s missing split/legacy contract %q", relative, required)
+				t.Errorf("%s missing manifest/embedded layout contract %q", relative, required)
+			}
+		}
+		for _, obsolete := range []string{"split" + "-v1", "legacy" + "-v1", "pack." + "format"} {
+			if strings.Contains(content, obsolete) {
+				t.Errorf("%s retains obsolete pack-layout term %q", relative, obsolete)
 			}
 		}
 	}

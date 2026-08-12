@@ -358,7 +358,7 @@ func TestReviewStatusAcceptsApprovedZeroRulePoststate(t *testing.T) {
 
 	status, diagnostics, err := prune.ReviewStatus(root, "review-one")
 	if err != nil {
-		t.Fatalf("status failed on a well-formed legacy bundle: %v", err)
+		t.Fatalf("status failed on a well-formed embedded-layout bundle: %v", err)
 	}
 	if !status.Approved || len(diagnostics) != 0 {
 		t.Fatalf("status=%#v diagnostics=%#v, want valid zero-rule approval", status, diagnostics)
@@ -507,8 +507,8 @@ func TestApplyDefaultsToDryRunThenAppliesApprovedRemoval(t *testing.T) {
 	}
 }
 
-func TestApplySplitRemovalUpdatesManifestAndCleansRelationshipsAtomically(t *testing.T) {
-	root := splitLifecycleRepository(t)
+func TestApplyManifestRemoval(t *testing.T) {
+	root := manifestLayoutLifecycleRepository(t)
 	manifestPath := filepath.Join(root, ".software-standards", "manifest.yaml")
 	reportPath := filepath.Join(root, ".software-standards", "report.md")
 	inventoryPath := filepath.Join(root, ".software-standards", "inventory.json")
@@ -546,7 +546,7 @@ func TestApplySplitRemovalUpdatesManifestAndCleansRelationshipsAtomically(t *tes
 	if len(dryRun.Changes) != 2 ||
 		dryRun.Changes[0].Path != ".agents/skills/orphan-skill/SKILL.md" ||
 		dryRun.Changes[1].Path != ".software-standards/manifest.yaml" {
-		t.Fatalf("split removal plan did not bind artifact and manifest: %#v", dryRun.Changes)
+		t.Fatalf("manifest-layout removal plan did not bind artifact and manifest: %#v", dryRun.Changes)
 	}
 	if _, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
 		ReviewID: "review-one",
@@ -564,13 +564,13 @@ func TestApplySplitRemovalUpdatesManifestAndCleansRelationshipsAtomically(t *tes
 	}
 	if len(manifest.Artifacts) != 1 || manifest.Artifacts[0].ID != "keep-rule" ||
 		len(manifest.Artifacts[0].RelatedArtifactIDs) != 0 {
-		t.Fatalf("split manifest retained removal or dangling relationship: %#v", manifest)
+		t.Fatalf("manifest retained removal or dangling relationship: %#v", manifest)
 	}
 	if reportAfter, err := os.ReadFile(reportPath); err != nil || !bytes.Equal(reportAfter, reportBefore) {
-		t.Fatalf("split prune changed human report: error=%v\nbefore=%s\nafter=%s", err, reportBefore, reportAfter)
+		t.Fatalf("manifest-layout prune changed human report: error=%v\nbefore=%s\nafter=%s", err, reportBefore, reportAfter)
 	}
 	if inventoryAfter, err := os.ReadFile(inventoryPath); err != nil || !bytes.Equal(inventoryAfter, inventoryBefore) {
-		t.Fatalf("split prune changed inventory: error=%v", err)
+		t.Fatalf("manifest-layout prune changed inventory: error=%v", err)
 	}
 	repo, err := workspace.Open(context.Background(), root)
 	if err != nil {
@@ -579,12 +579,12 @@ func TestApplySplitRemovalUpdatesManifestAndCleansRelationshipsAtomically(t *tes
 	if _, diagnostics, err := rulepack.ValidateRetainedPack(context.Background(), repo); err != nil {
 		t.Fatal(err)
 	} else if len(diagnostics) != 0 {
-		t.Fatalf("split pack invalid after atomic removal: %#v", diagnostics)
+		t.Fatalf("manifest-layout pack invalid after atomic removal: %#v", diagnostics)
 	}
 }
 
-func TestApplySplitRuleUpdateRefreshesOnlyPrimaryDigest(t *testing.T) {
-	root := splitLifecycleRepository(t)
+func TestApplyRefreshesManifestDigest(t *testing.T) {
+	root := manifestLayoutLifecycleRepository(t)
 	configureRuleUpdateCandidate(t, root)
 	manifestPath := filepath.Join(root, ".software-standards", "manifest.yaml")
 	manifestBeforeData, err := os.ReadFile(manifestPath)
@@ -608,7 +608,7 @@ func TestApplySplitRuleUpdateRefreshesOnlyPrimaryDigest(t *testing.T) {
 	if len(dryRun.Changes) != 2 ||
 		dryRun.Changes[0].Path != ".software-standards/manifest.yaml" ||
 		dryRun.Changes[1].Path != ".software-standards/rules/keep-rule.md" {
-		t.Fatalf("split update plan did not bind rule and manifest: %#v", dryRun.Changes)
+		t.Fatalf("manifest-layout update plan did not bind rule and manifest: %#v", dryRun.Changes)
 	}
 	if _, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
 		ReviewID: "review-one",
@@ -633,7 +633,7 @@ func TestApplySplitRuleUpdateRefreshesOnlyPrimaryDigest(t *testing.T) {
 		!reflect.DeepEqual(after.Scopes, before.Scopes) ||
 		after.Derivation != before.Derivation || !reflect.DeepEqual(after.Evidence, before.Evidence) ||
 		manifestAfter.Inventory != manifestBefore.Inventory || manifestAfter.Report != manifestBefore.Report {
-		t.Fatalf("split update changed immutable metadata or missed digest: before=%#v after=%#v", manifestBefore, manifestAfter)
+		t.Fatalf("manifest-layout update changed immutable metadata or missed digest: before=%#v after=%#v", manifestBefore, manifestAfter)
 	}
 	repo, err := workspace.Open(context.Background(), root)
 	if err != nil {
@@ -642,7 +642,7 @@ func TestApplySplitRuleUpdateRefreshesOnlyPrimaryDigest(t *testing.T) {
 	if _, diagnostics, err := rulepack.ValidateRetainedPack(context.Background(), repo); err != nil {
 		t.Fatal(err)
 	} else if len(diagnostics) != 0 {
-		t.Fatalf("split pack invalid after atomic update: %#v", diagnostics)
+		t.Fatalf("manifest-layout pack invalid after atomic update: %#v", diagnostics)
 	}
 }
 
@@ -695,7 +695,7 @@ func TestZeroArtifactRemovalClearsProjectionAndRecordsReplayableRender(t *testin
 	pack := rulepack.Pack{
 		BaselineCommit: repo.Baseline(),
 		Report: rulepack.Report{
-			Artifacts: []rulepack.ManifestArtifact{{
+			Artifacts: []rulepack.AcceptedArtifact{{
 				ID:   "keep-rule",
 				Kind: "rule",
 				Path: ".software-standards/rules/keep-rule.md",
@@ -1110,7 +1110,7 @@ func TestApprovalRejectsRetainedRuleWithUnreachableBaselineBeforeMutation(t *tes
 	}
 }
 
-func TestApprovalRejectsLegacyRuleOwnedRelationship(t *testing.T) {
+func TestApprovalRejectsEmbeddedRelationship(t *testing.T) {
 	root := lifecycleRepository(t)
 	rulePath := filepath.Join(root, ".software-standards", "rules", "keep-rule.md")
 	ruleData, err := os.ReadFile(rulePath)

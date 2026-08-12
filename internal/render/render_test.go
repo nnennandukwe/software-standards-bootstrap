@@ -216,7 +216,7 @@ func TestApplyWriteFailureLeavesExistingAgentsUntouched(t *testing.T) {
 
 func testPack(baseline string, pairs ...string) rulepack.Pack {
 	rules := make([]rulepack.Rule, 0, len(pairs)/2)
-	artifacts := make([]rulepack.ManifestArtifact, 0, len(pairs)/2)
+	artifacts := make([]rulepack.AcceptedArtifact, 0, len(pairs)/2)
 	for index := 0; index < len(pairs); index += 2 {
 		id := pairs[index]
 		sourcePath := ".software-standards/rules/" + id + ".md"
@@ -235,7 +235,7 @@ func testPack(baseline string, pairs ...string) rulepack.Pack {
 			SourcePath: sourcePath,
 			Body:       pairs[index+1] + "\n",
 		})
-		artifacts = append(artifacts, rulepack.ManifestArtifact{
+		artifacts = append(artifacts, rulepack.AcceptedArtifact{
 			ID: id, Kind: "rule", Path: sourcePath, Confidence: "high",
 			Utility: rulepack.Utility{Method: rulepack.UtilityMethod, Total: 70},
 		})

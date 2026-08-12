@@ -478,7 +478,7 @@ func TestApplicationRollbackRemovesCreatedDirectories(t *testing.T) {
 	}
 }
 
-func TestSplitManifestPublicationFailureRestoresExactPackPrestate(t *testing.T) {
+func TestManifestPublicationRollback(t *testing.T) {
 	root := t.TempDir()
 	rulePath := filepath.Join(root, ".software-standards", "rules", "keep-rule.md")
 	skillPath := filepath.Join(root, ".agents", "skills", "orphan-skill", "SKILL.md")
@@ -531,7 +531,7 @@ func TestSplitManifestPublicationFailureRestoresExactPackPrestate(t *testing.T) 
 		t.Fatalf("execute error = %v, want injected manifest failure", executeErr)
 	}
 	if err := restoreJournalPaths(root, journal, completed, operationPoststates(operations)); err != nil {
-		t.Fatalf("rollback split pack: %v", err)
+		t.Fatalf("rollback manifest-layout pack: %v", err)
 	}
 	for itemPath, want := range map[string][]byte{
 		rulePath: ruleBefore, skillPath: skillBefore, manifestPath: manifestBefore,

@@ -180,7 +180,7 @@ sources. `AGENTS.md` is derived.
 
 ### Report and ADR
 
-New packs use the human-first `split-v1` layout:
+New packs use the human-first manifest layout:
 
 ```text
 .software-standards/manifest.yaml
@@ -195,9 +195,9 @@ inspection response. `report.md` opens on `# Software standards report` and
 contains only run-wide limitations and accepted-output narrative, with links
 to both machine files. A zero-artifact manifest is valid.
 
-Published v0.1.1 packs remain fully supported as `legacy-v1`: their
-`ssb.dev/report/v1` frontmatter continues to validate, render, create ADRs,
-and participate in governed prune without conversion. Validation never
+Published v0.1.1 packs remain fully supported through the embedded layout:
+their `ssb.dev/report/v1` frontmatter continues to validate, render, create
+ADRs, and participate in governed prune without conversion. Validation never
 rewrites or migrates either layout.
 
 After developer review, `ssb` can create an optional ADR:
@@ -318,8 +318,8 @@ ssb prune    <inspect|validate|approve|apply|recover|status|verify> [options]
 `inspect` supports `--max-candidate-files` and `--max-candidate-bytes`. `--allow-partial` permits diagnostic output from an incomplete inventory, but that output cannot be used to generate a proposal. Exit code `4`: inventory coverage incomplete.
 
 `ssb validate --format json` uses response schema 3. Valid output identifies
-`pack.format` as `split-v1` or `legacy-v1`; split packs also expose separate
-manifest, inventory, and report paths. Invalid output omits `pack`.
+`pack.layout` as `manifest` or `embedded`; manifest-layout packs also expose
+separate manifest, inventory, and report paths. Invalid output omits `pack`.
 
 - `0`: success
 - `1`: actionable-pack or prune-proposal validation failure

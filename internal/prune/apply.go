@@ -487,18 +487,18 @@ func validateCandidate(
 	repo *workspace.Repository,
 	target CandidateRef,
 	content []byte,
-	packFormat string,
-	manifestByID map[string]rulepack.ManifestArtifact,
+	packLayout rulepack.Layout,
+	manifestByID map[string]rulepack.AcceptedArtifact,
 ) error {
 	manifest, manifestExists := manifestByID[target.ID]
 	switch target.Kind {
 	case ArtifactRule:
 		var diagnostics []rulepack.Diagnostic
-		if packFormat == rulepack.FormatSplitV1 {
+		if packLayout == rulepack.LayoutManifest {
 			if !manifestExists || manifest.Kind != ArtifactRule {
 				return fmt.Errorf("candidate %s has no matching rule entry in manifest.yaml", target.SourcePath)
 			}
-			_, diagnostics = rulepack.ValidateSplitCandidateRule(target.TargetPath, manifest, content)
+			_, diagnostics = rulepack.ValidateManifestCandidateRule(target.TargetPath, manifest, content)
 		} else {
 			_, diagnostics = rulepack.ValidateCandidateRule(ctx, repo, target.TargetPath, content)
 		}
@@ -508,11 +508,11 @@ func validateCandidate(
 	case ArtifactSkill:
 		var skill rulepack.Skill
 		var diagnostics []rulepack.Diagnostic
-		if packFormat == rulepack.FormatSplitV1 {
+		if packLayout == rulepack.LayoutManifest {
 			if !manifestExists || manifest.Kind != ArtifactSkill {
 				return fmt.Errorf("candidate %s has no matching skill entry in manifest.yaml", target.SourcePath)
 			}
-			skill, diagnostics = rulepack.ValidateSplitCandidateSkill(target.TargetPath, manifest, content)
+			skill, diagnostics = rulepack.ValidateManifestCandidateSkill(target.TargetPath, manifest, content)
 		} else {
 			skill, diagnostics = rulepack.ValidateCandidateSkill(target.TargetPath, target.ID, content)
 		}
@@ -522,7 +522,7 @@ func validateCandidate(
 		if !manifestExists || manifest.Kind != ArtifactSkill {
 			return fmt.Errorf("candidate %s has no matching skill entry in the pack manifest", target.SourcePath)
 		}
-		if packFormat == rulepack.FormatLegacyV1 && skill.Category != manifest.Category {
+		if packLayout == rulepack.LayoutEmbedded && skill.Category != manifest.Category {
 			return fmt.Errorf(
 				"candidate %s changes metadata.category from %s to %s; create a new actionable pack so report.md can record fresh skill provenance",
 				target.SourcePath,
@@ -548,8 +548,8 @@ func buildCandidateOperations(
 	if err != nil {
 		return nil, err
 	}
-	manifestByID := make(map[string]rulepack.ManifestArtifact)
-	packFormat := rulepack.FormatLegacyV1
+	manifestByID := make(map[string]rulepack.AcceptedArtifact)
+	packLayout := rulepack.LayoutEmbedded
 	needsPackManifest := false
 	for _, candidate := range candidates {
 		if candidate.target != nil {
@@ -565,7 +565,7 @@ func buildCandidateOperations(
 		if len(diagnostics) != 0 {
 			return nil, fmt.Errorf("retained actionable pack is invalid: %s", diagnostics[0].Message)
 		}
-		packFormat = pack.Format
+		packLayout = pack.Layout
 		for _, artifact := range pack.Manifest.Artifacts {
 			manifestByID[artifact.ID] = artifact
 		}
@@ -599,7 +599,7 @@ func buildCandidateOperations(
 				)
 			}
 			if candidate.target != nil {
-				if err := validateCandidate(ctx, repo, *candidate.target, content, packFormat, manifestByID); err != nil {
+				if err := validateCandidate(ctx, repo, *candidate.target, content, packLayout, manifestByID); err != nil {
 					return nil, err
 				}
 			}
@@ -642,7 +642,7 @@ func validateResultingGraph(
 	if len(packDiagnostics) != 0 {
 		return fmt.Errorf("retained actionable pack is invalid: %s", packDiagnostics[0].Message)
 	}
-	manifestByID := make(map[string]rulepack.ManifestArtifact, len(pack.Manifest.Artifacts))
+	manifestByID := make(map[string]rulepack.AcceptedArtifact, len(pack.Manifest.Artifacts))
 	for _, artifact := range pack.Manifest.Artifacts {
 		manifestByID[artifact.ID] = artifact
 	}
@@ -697,8 +697,8 @@ func validateResultingGraph(
 		}
 		_, id, _ := artifactIdentity(itemPath)
 		var diagnostics []rulepack.Diagnostic
-		if pack.Format == rulepack.FormatSplitV1 {
-			_, diagnostics = rulepack.ValidateSplitCandidateSkill(itemPath, manifestByID[id], artifact.content)
+		if pack.Layout == rulepack.LayoutManifest {
+			_, diagnostics = rulepack.ValidateManifestCandidateSkill(itemPath, manifestByID[id], artifact.content)
 		} else {
 			_, diagnostics = rulepack.ValidateCandidateSkill(itemPath, id, artifact.content)
 		}
@@ -712,9 +712,9 @@ func validateResultingGraph(
 		}
 		var rule rulepack.Rule
 		var diagnostics []rulepack.Diagnostic
-		if pack.Format == rulepack.FormatSplitV1 {
+		if pack.Layout == rulepack.LayoutManifest {
 			_, id, _ := artifactIdentity(itemPath)
-			rule, diagnostics = rulepack.ValidateSplitCandidateRule(itemPath, manifestByID[id], artifact.content)
+			rule, diagnostics = rulepack.ValidateManifestCandidateRule(itemPath, manifestByID[id], artifact.content)
 		} else {
 			var validateErr error
 			rule, diagnostics, validateErr = rulepack.ValidateRetainedRule(ctx, repo, itemPath, artifact.content)
