@@ -74,6 +74,27 @@ func TestValidateRejectsUnreferencedOrientationSymlinkWithActionableRecovery(t *
 	t.Fatalf("missing unreferenced orientation symlink diagnostic: %#v", diagnostics)
 }
 
+func TestValidateRejectsUnreferencedOrientationDirectoryWithActionableRecovery(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline, false)
+	orientationPath := filepath.Join(repo, ".software-standards", "orientation.yaml")
+	if err := os.Mkdir(orientationPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, diagnostics := validatePack(t, repo)
+	for _, item := range diagnostics {
+		if strings.Contains(item.Message, "non-regular entry present without a manifest reference") {
+			if !strings.Contains(item.Recovery, "replace it with reviewed regular-file bytes and bind those bytes") ||
+				!strings.Contains(item.Recovery, "remove the entry") {
+				t.Fatalf("unhelpful non-regular recovery: %#v", item)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing unreferenced orientation directory diagnostic: %#v", diagnostics)
+}
+
 func TestValidateAcceptsCompleteAndSchemaOnlyOrientation(t *testing.T) {
 	t.Run("complete", func(t *testing.T) {
 		repo, fixture := verificationPackRepository(t, rulepack.VerificationSchemaV2, validVerificationStep("    working_directory: .\n"))

@@ -498,6 +498,9 @@ func validateManifestLayoutPack(
 			if orientationInfo.Mode()&os.ModeSymlink != 0 {
 				message = orientationPath + " is a symlink present without a manifest reference"
 				recovery = "replace it with reviewed regular-file bytes and bind those bytes in the manifest, or remove the symlink"
+			} else if !orientationInfo.Mode().IsRegular() {
+				message = orientationPath + " is a non-regular entry present without a manifest reference"
+				recovery = "replace it with reviewed regular-file bytes and bind those bytes in the manifest, or remove the entry"
 			}
 			diagnostics = append(diagnostics, diagnostic(
 				orientationPath,
