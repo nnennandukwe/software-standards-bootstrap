@@ -1,4 +1,5 @@
 /ssb
+/ssb.exe
 /dist/
 /coverage.out
 *.test

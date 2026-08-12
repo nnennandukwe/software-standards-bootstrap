@@ -138,6 +138,9 @@ func TestInstallerIsPackagedAndDocumentedBeforeProductDetail(t *testing.T) {
 	if !strings.Contains(config, "      - install.sh") {
 		t.Error("GoReleaser archive does not include install.sh")
 	}
+	if !strings.Contains(config, "      - install.ps1") {
+		t.Error("GoReleaser archive does not include install.ps1")
+	}
 
 	installHeading := strings.Index(readme, "## Install")
 	productDetailHeading := strings.Index(readme, "## What it generates")
