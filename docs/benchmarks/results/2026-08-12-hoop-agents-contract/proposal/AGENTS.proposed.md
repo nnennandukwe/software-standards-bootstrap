@@ -1,6 +1,6 @@
 <!-- software-standards-bootstrap:start -->
 <!-- source-digest: sha256:8e7ac51d033b957b03b4752bc1cf262a35c0e80198ab81a5283ea555f7774708 -->
-<!-- content-digest: sha256:6bb3ec18c5d6801f6be220146838690b316193a08ecb9623a5855a88c365d48e -->
+<!-- content-digest: sha256:aa58c900d669ac99a8da050848bc91e188ff7393e3ec0b097353c186e790c3dc -->
 ## Software Standards Bootstrap
 
 This managed section is derived from retained canonical sources. An unmerged generated change is a proposal; repository review and merge are the adoption decision. File presence alone does not prove adoption.
@@ -9,7 +9,7 @@ Generated from `.software-standards/manifest.yaml`, `.software-standards/invento
 
 Baseline: `3e0091b89fdaa3912f4f8e7b33fbb3104e47d71e`
 
-SSB did not stage, commit, push, open a pull request, execute any command, or activate another system. Recipe presence and expected results are not execution evidence.
+SSB did not stage, commit, push, open a pull request, execute any displayed recipe command, or activate another system. Recipe presence and expected results are not execution evidence.
 
 ### Repository orientation
 
