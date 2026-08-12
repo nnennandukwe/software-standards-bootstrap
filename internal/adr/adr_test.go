@@ -179,7 +179,7 @@ func testPack(baseline string) rulepack.Pack {
 		Report: rulepack.Report{
 			Schema:         rulepack.ReportSchema,
 			BaselineCommit: baseline,
-			Artifacts: []rulepack.ManifestArtifact{{
+			Artifacts: []rulepack.AcceptedArtifact{{
 				ID: id, Kind: "rule", Path: sourcePath, Confidence: "high",
 				Utility: rulepack.Utility{Method: rulepack.UtilityMethod, Total: 70},
 			}},

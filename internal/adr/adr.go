@@ -254,7 +254,7 @@ func render(pack rulepack.Pack, number int) []byte {
 	sort.Slice(rules, func(i, j int) bool { return rules[i].ID < rules[j].ID })
 	sort.Slice(recipes, func(i, j int) bool { return recipes[i].ID < recipes[j].ID })
 	sort.Slice(skills, func(i, j int) bool { return skills[i].ID < skills[j].ID })
-	manifest := make(map[string]rulepack.ManifestArtifact, len(pack.Report.Artifacts))
+	manifest := make(map[string]rulepack.AcceptedArtifact, len(pack.Report.Artifacts))
 	for _, artifact := range pack.Report.Artifacts {
 		manifest[artifact.ID] = artifact
 	}
@@ -329,7 +329,7 @@ func writeAdoptionMetadata(
 	category string,
 	derivation string,
 	evidence []rulepack.Evidence,
-	metadata rulepack.ManifestArtifact,
+	metadata rulepack.AcceptedArtifact,
 ) {
 	fmt.Fprintf(output, "- Category: `%s`\n", category)
 	fmt.Fprintf(output, "- Derivation: `%s`\n", derivation)

@@ -883,7 +883,7 @@ func TestValidateJSONExportsActionableInterchangeFields(t *testing.T) {
 		SchemaVersion int  `json:"schema_version"`
 		Valid         bool `json:"valid"`
 		Pack          *struct {
-			Layout   string `json:"layout"`
+			Layout   rulepack.Layout `json:"layout"`
 			Manifest struct {
 				Schema    string `json:"schema"`
 				Artifacts []struct {
@@ -964,14 +964,14 @@ func TestValidateJSONSchemaThreeIdentifiesManifestLayout(t *testing.T) {
 		SchemaVersion int  `json:"schema_version"`
 		Valid         bool `json:"valid"`
 		Pack          *struct {
-			Layout        string `json:"layout"`
-			ManifestPath  string `json:"manifest_path"`
-			InventoryPath string `json:"inventory_path"`
-			ReportPath    string `json:"report_path"`
+			Layout        rulepack.Layout `json:"layout"`
+			ManifestPath  string          `json:"manifest_path"`
+			InventoryPath string          `json:"inventory_path"`
+			ReportPath    string          `json:"report_path"`
 			Manifest      struct {
 				Schema    string                      `json:"schema"`
 				Inventory rulepack.FileReference      `json:"inventory"`
-				Artifacts []rulepack.ManifestArtifact `json:"artifacts"`
+				Artifacts []rulepack.AcceptedArtifact `json:"artifacts"`
 			} `json:"manifest"`
 			Inventory struct {
 				BaselineCommit string `json:"baseline_commit"`

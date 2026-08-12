@@ -695,7 +695,7 @@ func TestZeroArtifactRemovalClearsProjectionAndRecordsReplayableRender(t *testin
 	pack := rulepack.Pack{
 		BaselineCommit: repo.Baseline(),
 		Report: rulepack.Report{
-			Artifacts: []rulepack.ManifestArtifact{{
+			Artifacts: []rulepack.AcceptedArtifact{{
 				ID:   "keep-rule",
 				Kind: "rule",
 				Path: ".software-standards/rules/keep-rule.md",

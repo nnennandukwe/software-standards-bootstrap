@@ -25,16 +25,19 @@ import (
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/workspace"
 )
 
+// Layout identifies how an actionable standards pack stores machine metadata.
+type Layout string
+
 const (
-	ManifestSchema     = "ssb.dev/manifest/v1"
-	ReportSchema       = "ssb.dev/report/v1"
-	RuleSchema         = "ssb.dev/rule/v2"
-	VerificationSchema = "ssb.dev/verification/v1"
-	AutomationSchema   = "ssb.dev/automation/v1"
-	UtilityMethod      = "ssb-utility-v1"
-	LayoutManifest     = "manifest"
-	LayoutEmbedded     = "embedded"
-	categoryRecovery   = "use one primary category: architecture, compatibility, compliance, correctness, developer-experience, documentation, maintainability, operability, performance, quality, reliability, security, or testability"
+	ManifestSchema            = "ssb.dev/manifest/v1"
+	ReportSchema              = "ssb.dev/report/v1"
+	RuleSchema                = "ssb.dev/rule/v2"
+	VerificationSchema        = "ssb.dev/verification/v1"
+	AutomationSchema          = "ssb.dev/automation/v1"
+	UtilityMethod             = "ssb-utility-v1"
+	LayoutManifest     Layout = "manifest"
+	LayoutEmbedded     Layout = "embedded"
+	categoryRecovery          = "use one primary category: architecture, compatibility, compliance, correctness, developer-experience, documentation, maintainability, operability, performance, quality, reliability, security, or testability"
 )
 
 var (
@@ -102,8 +105,8 @@ type UtilityFactors struct {
 // ReportInventory is the exact ssb-inventory-v2 response recorded in report.md.
 type ReportInventory = inventory.Report
 
-// ManifestArtifact is one accepted output indexed by report.md.
-type ManifestArtifact struct {
+// AcceptedArtifact is one accepted output indexed by a pack.
+type AcceptedArtifact struct {
 	ID                 string     `yaml:"id" json:"id"`
 	Kind               string     `yaml:"kind" json:"kind"`
 	Path               string     `yaml:"path" json:"path"`
@@ -138,7 +141,7 @@ type Manifest struct {
 	BaselineCommit string             `yaml:"baseline_commit" json:"baseline_commit"`
 	Inventory      FileReference      `yaml:"inventory,omitempty" json:"inventory,omitzero"`
 	Report         FileReference      `yaml:"report,omitempty" json:"report,omitzero"`
-	Artifacts      []ManifestArtifact `yaml:"artifacts" json:"artifacts"`
+	Artifacts      []AcceptedArtifact `yaml:"artifacts" json:"artifacts"`
 }
 
 // HumanReport is the human-facing report document after layout detection.
@@ -151,7 +154,7 @@ type Report struct {
 	Schema         string             `yaml:"schema" json:"schema"`
 	BaselineCommit string             `yaml:"baseline_commit" json:"baseline_commit"`
 	Inventory      ReportInventory    `yaml:"inventory" json:"inventory"`
-	Artifacts      []ManifestArtifact `yaml:"artifacts" json:"artifacts"`
+	Artifacts      []AcceptedArtifact `yaml:"artifacts" json:"artifacts"`
 	Body           string             `yaml:"-" json:"body"`
 }
 
@@ -172,7 +175,7 @@ func RemoveReportArtifacts(data []byte, removedIDs map[string]struct{}) ([]byte,
 		return nil, fmt.Errorf("parse report frontmatter: %w", err)
 	}
 	found := make(map[string]struct{}, len(removedIDs))
-	artifacts := make([]ManifestArtifact, 0, len(report.Artifacts))
+	artifacts := make([]AcceptedArtifact, 0, len(report.Artifacts))
 	for _, artifact := range report.Artifacts {
 		if _, removed := removedIDs[artifact.ID]; removed {
 			found[artifact.ID] = struct{}{}
@@ -230,7 +233,7 @@ func UpdateManifestArtifacts(
 	}
 	foundRemoved := make(map[string]struct{}, len(removedIDs))
 	foundUpdated := make(map[string]struct{}, len(updatedDigests))
-	artifacts := make([]ManifestArtifact, 0, len(manifest.Artifacts))
+	artifacts := make([]AcceptedArtifact, 0, len(manifest.Artifacts))
 	for _, artifact := range manifest.Artifacts {
 		if _, removed := removedIDs[artifact.ID]; removed {
 			if _, alsoUpdated := updatedDigests[artifact.ID]; alsoUpdated {
@@ -356,7 +359,7 @@ type AutomationProposal struct {
 // Pack contains parsed artifacts even when diagnostics are returned. Consumers
 // must not render or create an ADR unless diagnostics is empty.
 type Pack struct {
-	Layout         string               `json:"layout"`
+	Layout         Layout               `json:"layout"`
 	BaselineCommit string               `json:"baseline_commit"`
 	ManifestPath   string               `json:"manifest_path,omitempty"`
 	InventoryPath  string               `json:"inventory_path,omitempty"`
@@ -567,8 +570,8 @@ func validateManifestLayoutPack(
 		diagnostics = append(diagnostics, inventoryDiagnostics...)
 	}
 
-	entriesByID := make(map[string]ManifestArtifact, len(pack.Manifest.Artifacts))
-	entriesByPath := make(map[string]ManifestArtifact, len(pack.Manifest.Artifacts))
+	entriesByID := make(map[string]AcceptedArtifact, len(pack.Manifest.Artifacts))
+	entriesByPath := make(map[string]AcceptedArtifact, len(pack.Manifest.Artifacts))
 	for index, artifact := range pack.Manifest.Artifacts {
 		field := fmt.Sprintf("artifacts[%d]", index)
 		diagnostics = append(diagnostics, validateManifestArtifact(manifestPath, field, artifact)...)
@@ -696,7 +699,7 @@ func validateManifest(repo *workspace.Repository, manifest Manifest, retained bo
 	return diagnostics
 }
 
-func validateManifestArtifact(sourcePath, field string, artifact ManifestArtifact) []Diagnostic {
+func validateManifestArtifact(sourcePath, field string, artifact AcceptedArtifact) []Diagnostic {
 	diagnostics := make([]Diagnostic, 0)
 	add := func(suffix, message, recovery string) {
 		diagnostics = append(diagnostics, diagnostic(sourcePath, field+suffix, message, recovery))
@@ -735,7 +738,7 @@ func validateManifestOwnedMetadata(
 	repo *workspace.Repository,
 	sourcePath string,
 	field string,
-	artifact ManifestArtifact,
+	artifact AcceptedArtifact,
 ) []Diagnostic {
 	diagnostics := make([]Diagnostic, 0)
 	add := func(suffix, message, recovery string) {
@@ -871,7 +874,7 @@ func validatePortableManifestSkill(sourcePath string, metadata skillFrontmatter,
 
 func loadManifestRule(
 	root string,
-	manifest ManifestArtifact,
+	manifest AcceptedArtifact,
 ) (Rule, []Diagnostic, error) {
 	data, diagnostics, err := readManifestArtifact(root, manifest)
 	if err != nil || len(data) == 0 {
@@ -898,7 +901,7 @@ func loadManifestVerificationRecipe(
 	ctx context.Context,
 	evidenceRepo *workspace.Repository,
 	root string,
-	manifest ManifestArtifact,
+	manifest AcceptedArtifact,
 ) (VerificationRecipe, []Diagnostic, error) {
 	data, diagnostics, err := readManifestArtifact(root, manifest)
 	if err != nil || len(data) == 0 {
@@ -920,7 +923,7 @@ func loadManifestVerificationRecipe(
 
 func loadManifestSkill(
 	root string,
-	manifest ManifestArtifact,
+	manifest AcceptedArtifact,
 ) (Skill, []Diagnostic, error) {
 	data, diagnostics, err := readManifestArtifact(root, manifest)
 	if err != nil || len(data) == 0 {
@@ -971,7 +974,7 @@ func loadManifestAutomationProposal(
 	ctx context.Context,
 	evidenceRepo *workspace.Repository,
 	root string,
-	manifest ManifestArtifact,
+	manifest AcceptedArtifact,
 ) (AutomationProposal, []Diagnostic, error) {
 	data, diagnostics, err := readManifestArtifact(root, manifest)
 	if err != nil || len(data) == 0 {
@@ -999,7 +1002,7 @@ func validateNativeMetadataBinding(
 	scopes []string,
 	derivation string,
 	evidence []Evidence,
-	manifest ManifestArtifact,
+	manifest AcceptedArtifact,
 ) []Diagnostic {
 	if id == manifest.ID && category == manifest.Category &&
 		reflect.DeepEqual(lenses, manifest.Lenses) &&
@@ -1016,7 +1019,7 @@ func validateNativeMetadataBinding(
 	)}
 }
 
-func readManifestArtifact(root string, manifest ManifestArtifact) ([]byte, []Diagnostic, error) {
+func readManifestArtifact(root string, manifest AcceptedArtifact) ([]byte, []Diagnostic, error) {
 	return readDigestBoundFile(
 		root,
 		FileReference{Path: manifest.Path, SHA256: manifest.SHA256},
@@ -1166,7 +1169,7 @@ func rejectDuplicateJSONFields(data []byte) error {
 	return nil
 }
 
-func validateRelationships(sourcePath string, artifacts []ManifestArtifact, entriesByID map[string]ManifestArtifact) []Diagnostic {
+func validateRelationships(sourcePath string, artifacts []AcceptedArtifact, entriesByID map[string]AcceptedArtifact) []Diagnostic {
 	diagnostics := make([]Diagnostic, 0)
 	for _, artifact := range artifacts {
 		seenRelated := make(map[string]struct{}, len(artifact.RelatedArtifactIDs))
@@ -1341,8 +1344,8 @@ func validateEmbeddedLayoutPack(
 	}
 	diagnostics = append(diagnostics, inventoryDiagnostics...)
 
-	entriesByID := make(map[string]ManifestArtifact, len(pack.Report.Artifacts))
-	entriesByPath := make(map[string]ManifestArtifact, len(pack.Report.Artifacts))
+	entriesByID := make(map[string]AcceptedArtifact, len(pack.Report.Artifacts))
+	entriesByPath := make(map[string]AcceptedArtifact, len(pack.Report.Artifacts))
 	for index, artifact := range pack.Report.Artifacts {
 		field := fmt.Sprintf("artifacts[%d]", index)
 		diagnostics = append(diagnostics, validateEmbeddedArtifact(reportPath, field, artifact)...)
@@ -1546,7 +1549,7 @@ func validateReportInventory(
 	)}, nil
 }
 
-func validateEmbeddedArtifact(sourcePath, field string, artifact ManifestArtifact) []Diagnostic {
+func validateEmbeddedArtifact(sourcePath, field string, artifact AcceptedArtifact) []Diagnostic {
 	diagnostics := make([]Diagnostic, 0)
 	add := func(suffix, message, recovery string) {
 		diagnostics = append(diagnostics, diagnostic(sourcePath, field+suffix, message, recovery))
@@ -1661,7 +1664,7 @@ func loadActionableRule(
 	ctx context.Context,
 	evidenceRepo *workspace.Repository,
 	root string,
-	manifest ManifestArtifact,
+	manifest AcceptedArtifact,
 ) (Rule, []Diagnostic, error) {
 	data, diagnostics, err := readEmbeddedArtifact(root, manifest)
 	if err != nil || len(data) == 0 {
@@ -1710,7 +1713,7 @@ func validateActionableRule(
 	ctx context.Context,
 	repo *workspace.Repository,
 	rule Rule,
-	manifest ManifestArtifact,
+	manifest AcceptedArtifact,
 ) []Diagnostic {
 	diagnostics := make([]Diagnostic, 0)
 	add := func(field, message, recovery string) {
@@ -1854,7 +1857,7 @@ func loadVerificationRecipe(
 	ctx context.Context,
 	evidenceRepo *workspace.Repository,
 	root string,
-	manifest ManifestArtifact,
+	manifest AcceptedArtifact,
 ) (VerificationRecipe, []Diagnostic, error) {
 	data, diagnostics, err := readEmbeddedArtifact(root, manifest)
 	if err != nil || len(data) == 0 {
@@ -1877,7 +1880,7 @@ func validateVerificationRecipe(
 	ctx context.Context,
 	repo *workspace.Repository,
 	recipe VerificationRecipe,
-	manifest ManifestArtifact,
+	manifest AcceptedArtifact,
 ) []Diagnostic {
 	diagnostics := make([]Diagnostic, 0)
 	add := func(field, message, recovery string) {
@@ -1944,7 +1947,7 @@ func loadActionableSkill(
 	root string,
 	reportPath string,
 	manifestField string,
-	manifest ManifestArtifact,
+	manifest AcceptedArtifact,
 ) (Skill, []Diagnostic, error) {
 	data, diagnostics, err := readEmbeddedArtifact(root, manifest)
 	if err != nil || len(data) == 0 {
@@ -2017,7 +2020,7 @@ func loadAutomationProposal(
 	ctx context.Context,
 	evidenceRepo *workspace.Repository,
 	root string,
-	manifest ManifestArtifact,
+	manifest AcceptedArtifact,
 ) (AutomationProposal, []Diagnostic, error) {
 	data, diagnostics, err := readEmbeddedArtifact(root, manifest)
 	if err != nil || len(data) == 0 {
@@ -2040,7 +2043,7 @@ func validateAutomationProposal(
 	ctx context.Context,
 	repo *workspace.Repository,
 	proposal AutomationProposal,
-	manifest ManifestArtifact,
+	manifest AcceptedArtifact,
 ) []Diagnostic {
 	diagnostics := make([]Diagnostic, 0)
 	add := func(field, message, recovery string) {
@@ -2081,7 +2084,7 @@ func validateAutomationProposal(
 
 func readEmbeddedArtifact(
 	root string,
-	manifest ManifestArtifact,
+	manifest AcceptedArtifact,
 ) ([]byte, []Diagnostic, error) {
 	if component, found, err := findSymlinkComponent(root, manifest.Path); err != nil {
 		return nil, nil, err
@@ -2140,7 +2143,7 @@ func yamlDiagnostic(sourcePath string, err error, recovery string) Diagnostic {
 
 func unlistedNativeArtifacts(
 	root string,
-	listed map[string]ManifestArtifact,
+	listed map[string]AcceptedArtifact,
 ) ([]string, []Diagnostic, error) {
 	directories := []struct {
 		relative string
@@ -2259,7 +2262,7 @@ func ValidateCandidateRule(
 		return Rule{}, []Diagnostic{*parseDiagnostic}
 	}
 	manifestID := strings.TrimSuffix(path.Base(relative), path.Ext(relative))
-	manifest := ManifestArtifact{ID: manifestID, Kind: "rule", Path: relative}
+	manifest := AcceptedArtifact{ID: manifestID, Kind: "rule", Path: relative}
 	return rule, validateActionableRule(ctx, repo, rule, manifest)
 }
 
@@ -2267,7 +2270,7 @@ func ValidateCandidateRule(
 // retaining immutable semantic metadata from the existing manifest entry.
 func ValidateManifestCandidateRule(
 	relative string,
-	manifest ManifestArtifact,
+	manifest AcceptedArtifact,
 	data []byte,
 ) (Rule, []Diagnostic) {
 	title, body, diagnostics := parseHumanRule(relative, data)
@@ -2298,7 +2301,7 @@ func ValidateManifestCandidateRule(
 // retaining SSB-owned metadata from the existing manifest entry.
 func ValidateManifestCandidateSkill(
 	relative string,
-	manifest ManifestArtifact,
+	manifest AcceptedArtifact,
 	data []byte,
 ) (Skill, []Diagnostic) {
 	diagnostics := make([]Diagnostic, 0)
@@ -2350,7 +2353,7 @@ func ValidateRetainedRule(
 	if err != nil || len(diagnostics) != 0 {
 		return rule, diagnostics, err
 	}
-	manifest := ManifestArtifact{}
+	manifest := AcceptedArtifact{}
 	for _, candidate := range report.Artifacts {
 		if candidate.Kind == "rule" && candidate.Path == relative {
 			manifest = candidate

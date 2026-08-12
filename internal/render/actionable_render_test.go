@@ -182,7 +182,7 @@ func actionableProjectionPack(baseline string) rulepack.Pack {
 		Report: rulepack.Report{
 			Schema:         rulepack.ReportSchema,
 			BaselineCommit: baseline,
-			Artifacts: []rulepack.ManifestArtifact{
+			Artifacts: []rulepack.AcceptedArtifact{
 				{
 					ID:                 "keep-public-apis-compatible",
 					Kind:               "rule",

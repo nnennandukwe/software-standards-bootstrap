@@ -487,8 +487,8 @@ func validateCandidate(
 	repo *workspace.Repository,
 	target CandidateRef,
 	content []byte,
-	packLayout string,
-	manifestByID map[string]rulepack.ManifestArtifact,
+	packLayout rulepack.Layout,
+	manifestByID map[string]rulepack.AcceptedArtifact,
 ) error {
 	manifest, manifestExists := manifestByID[target.ID]
 	switch target.Kind {
@@ -548,7 +548,7 @@ func buildCandidateOperations(
 	if err != nil {
 		return nil, err
 	}
-	manifestByID := make(map[string]rulepack.ManifestArtifact)
+	manifestByID := make(map[string]rulepack.AcceptedArtifact)
 	packLayout := rulepack.LayoutEmbedded
 	needsPackManifest := false
 	for _, candidate := range candidates {
@@ -642,7 +642,7 @@ func validateResultingGraph(
 	if len(packDiagnostics) != 0 {
 		return fmt.Errorf("retained actionable pack is invalid: %s", packDiagnostics[0].Message)
 	}
-	manifestByID := make(map[string]rulepack.ManifestArtifact, len(pack.Manifest.Artifacts))
+	manifestByID := make(map[string]rulepack.AcceptedArtifact, len(pack.Manifest.Artifacts))
 	for _, artifact := range pack.Manifest.Artifacts {
 		manifestByID[artifact.ID] = artifact
 	}

@@ -140,7 +140,7 @@ func actionableADRPack(baseline string) rulepack.Pack {
 		Report: rulepack.Report{
 			Schema:         rulepack.ReportSchema,
 			BaselineCommit: baseline,
-			Artifacts: []rulepack.ManifestArtifact{
+			Artifacts: []rulepack.AcceptedArtifact{
 				{
 					ID: "keep-public-apis-compatible", Kind: "rule",
 					Path:       ".software-standards/rules/keep-public-apis-compatible.md",

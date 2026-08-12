@@ -288,7 +288,7 @@ func TestValidateManifestPresentationHandlesCRLFAndRejectsDeferredContent(t *tes
 		want       string
 		wantBody   string
 		wantTitle  string
-		wantLayout string
+		wantLayout rulepack.Layout
 	}{
 		{
 			name:       "CRLF",
