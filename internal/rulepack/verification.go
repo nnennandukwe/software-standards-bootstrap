@@ -170,6 +170,9 @@ func validateVerificationRecipe(
 		if strings.TrimSpace(step.Run) == "" {
 			add(field+".run", "run is required", "record the exact existing repository command")
 		}
+		if containsUnicodeFormatCharacter(step.Run) {
+			add(field+".run", "run must not contain Unicode format characters", "remove bidirectional overrides and other invisible format characters from the exact command")
+		}
 		if _, exists := enforcesByRef[step.SourceEvidence]; !exists {
 			add(field+".source_evidence", fmt.Sprintf("step references missing enforces evidence %q", step.SourceEvidence), "reference an evidence ref whose role is enforces")
 		}

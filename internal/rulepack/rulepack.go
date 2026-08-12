@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"go.yaml.in/yaml/v4"
 
@@ -882,6 +883,9 @@ func parseHumanRule(sourcePath string, data []byte) (string, string, []Diagnosti
 	bodyBytes := bodyAfterOpeningHeading(data)
 	if strings.TrimSpace(string(bodyBytes)) == "" {
 		return title, "", []Diagnostic{diagnostic(sourcePath, "body", "semantic rule actionable text must not be empty", "write the actionable obligation immediately after the H1 title")}
+	}
+	if containsUnicodeFormatCharacter(string(bodyBytes)) {
+		return title, string(bodyBytes), []Diagnostic{diagnostic(sourcePath, "body", "semantic rule body must not contain Unicode format characters", "remove bidirectional overrides and other invisible format characters")}
 	}
 	firstContent := true
 	for _, line := range strings.Split(strings.ReplaceAll(string(bodyBytes), "\r\n", "\n"), "\n") {
@@ -1786,6 +1790,9 @@ func validateActionableRule(
 	if strings.TrimSpace(rule.Body) == "" {
 		add("body", "rule body is required", "write the actionable semantic obligation")
 	}
+	if containsUnicodeFormatCharacter(rule.Body) {
+		add("body", "rule body must not contain Unicode format characters", "remove bidirectional overrides and other invisible format characters")
+	}
 	diagnostics = append(diagnostics, validateActionableLenses(rule.SourcePath, "lenses", rule.Lenses)...)
 	if _, supported := supportedDirectives[rule.Directive]; !supported {
 		add("directive", fmt.Sprintf("directive %q is not supported", rule.Directive), "use always, ask-first, never, or prefer")
@@ -1793,6 +1800,15 @@ func validateActionableRule(
 	diagnostics = append(diagnostics, validateScopes(rule.SourcePath, rule.Scopes)...)
 	diagnostics = append(diagnostics, validateDerivationEvidence(ctx, repo, rule.SourcePath, rule.Derivation, rule.Evidence)...)
 	return diagnostics
+}
+
+func containsUnicodeFormatCharacter(value string) bool {
+	for _, character := range value {
+		if unicode.In(character, unicode.Cf) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateActionableLenses(sourcePath, field string, lenses []Lens) []Diagnostic {

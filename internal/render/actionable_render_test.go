@@ -96,25 +96,61 @@ func TestApplyProjectsActionFirstRulesInertCommandsAndScannableSkills(t *testing
 }
 
 func TestApplyKeepsOrientationDocumentLinksRepositoryRelative(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "scheme", path: "javascript:alert(1)", want: "](./javascript:alert%281%29)"},
+		{name: "protocol relative", path: "//host/path", want: "](.///host/path)"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := committedRepository(t)
+			ws, err := workspace.Open(context.Background(), repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pack := actionableProjectionPack(ws.Baseline())
+			pack.Layout = rulepack.LayoutManifest
+			pack.Orientation = projectionOrientation()
+			pack.Orientation.Documents[0].Path = test.path
+
+			result, err := render.Apply(ws, pack, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			content := string(result.Content)
+			if !strings.Contains(content, test.want) {
+				t.Fatalf("orientation document link is not explicitly repository-relative:\n%s", content)
+			}
+		})
+	}
+}
+
+func TestApplyContainsRawRuleHeadingsInsideTheRuleBody(t *testing.T) {
 	repo := committedRepository(t)
 	ws, err := workspace.Open(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pack := actionableProjectionPack(ws.Baseline())
-	pack.Layout = rulepack.LayoutManifest
-	pack.Orientation = projectionOrientation()
-	pack.Orientation.Documents[0].Path = "javascript:alert(1)"
+	pack.Rules[0].Body = "Keep public APIs compatible.\n\n## Rationale\n\nDownstream consumers pin versions.\n"
 
 	result, err := render.Apply(ws, pack, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	content := string(result.Content)
-	if strings.Contains(content, "](javascript:") ||
-		!strings.Contains(content, "](./javascript:alert%281%29)") {
-		t.Fatalf("orientation document link is not explicitly repository-relative:\n%s", content)
+	if strings.Contains(content, "\n## Rationale\n") ||
+		!strings.Contains(content, "\n> ## Rationale\n") {
+		t.Fatalf("raw rule heading escaped its rule container:\n%s", content)
 	}
+	assertOrdered(t, content,
+		"> Keep public APIs compatible.",
+		"> ## Rationale",
+		"- Applies to: `**/*.go`",
+		"### Contextual semantic rules",
+	)
 }
 
 func TestApplyOrdersEveryDirectiveAndUtilityDeterministically(t *testing.T) {
@@ -331,7 +367,7 @@ func TestApplyRendersNonCommandControlCharactersAsVisibleText(t *testing.T) {
 	pack.Recipes[0].When = "Before\n- injected list"
 	pack.Recipes[0].Scopes = []string{"tools\n- injected scope"}
 	pack.Recipes[0].Steps[0].ExpectedResult = "Success\n### injected result"
-	pack.Skills[0].Description = "Review\n### injected skill heading"
+	pack.Skills[0].Description = "Review\n### injected skill heading \u202e"
 
 	result, err := render.Apply(ws, pack, true)
 	if err != nil {
@@ -344,6 +380,7 @@ func TestApplyRendersNonCommandControlCharactersAsVisibleText(t *testing.T) {
 		"\n- injected scope",
 		"\n### injected result",
 		"\n### injected skill heading",
+		"\u202e",
 	} {
 		if strings.Contains(content, injected) {
 			t.Fatalf("non-command scalar injected Markdown structure %q:\n%s", injected, content)
@@ -354,7 +391,7 @@ func TestApplyRendersNonCommandControlCharactersAsVisibleText(t *testing.T) {
 		`Before\n- injected list`,
 		`tools\n- injected scope`,
 		`Success\n\#\#\# injected result`,
-		`Review\n\#\#\# injected skill heading`,
+		`Review\n\#\#\# injected skill heading \u{202E}`,
 	} {
 		if !strings.Contains(content, visible) {
 			t.Errorf("projection did not render control characters visibly as %q:\n%s", visible, content)

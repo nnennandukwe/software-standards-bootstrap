@@ -345,7 +345,7 @@ func writeStandingOrder(
 	titles map[string]string,
 ) {
 	fmt.Fprintf(body, "\n##### %s (%s)\n\n", markdownText(rule.Title), inlineCode(rule.ID))
-	body.WriteString(rule.Body)
+	writeQuotedMarkdown(body, rule.Body)
 	if !strings.HasSuffix(rule.Body, "\n") {
 		body.WriteString("\n")
 	}
@@ -528,7 +528,7 @@ func markdownText(value string) string {
 func markdownLink(label, relative string) string {
 	segments := strings.Split(relative, "/")
 	repositoryRelativePrefix := ""
-	if strings.Contains(segments[0], ":") {
+	if segments[0] == "" || strings.Contains(segments[0], ":") {
 		repositoryRelativePrefix = "./"
 	}
 	for index, segment := range segments {
@@ -558,7 +558,7 @@ func visibleControlCharacters(value string) string {
 		case '\t':
 			result.WriteString(`\t`)
 		default:
-			if unicode.IsControl(character) {
+			if unicode.IsControl(character) || unicode.In(character, unicode.Cf) {
 				fmt.Fprintf(&result, `\u{%04X}`, character)
 				continue
 			}
@@ -566,6 +566,19 @@ func visibleControlCharacters(value string) string {
 		}
 	}
 	return result.String()
+}
+
+func writeQuotedMarkdown(body *strings.Builder, value string) {
+	if value == "" {
+		return
+	}
+	body.WriteString("> ")
+	for index := 0; index < len(value); index++ {
+		body.WriteByte(value[index])
+		if value[index] == '\n' && index+1 < len(value) {
+			body.WriteString("> ")
+		}
+	}
 }
 
 func writeCommandFence(body *strings.Builder, command string) {

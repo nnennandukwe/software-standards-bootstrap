@@ -238,8 +238,9 @@ it.
 The reading order is lifecycle boundary, populated repository orientation,
 routing instructions, standing orders, contextual semantic rules,
 verification commands, and Agent Skills. Base semantic rules remain ordered by
-directive, utility, and stable ID, but put the raw operative body before
-metadata. Contextual rules remain link-only. Verification steps stay in source
+directive, utility, and stable ID, but put the operative canonical Markdown
+body in a blockquote before metadata so body headings cannot escape the rule.
+Contextual rules remain link-only. Verification steps stay in source
 order and render exact command bytes inside dynamically safe Markdown fences;
 non-root `working_directory` and expected results are explicit. Rendering does
 not execute a command. Relationships show only explicitly declared rule,

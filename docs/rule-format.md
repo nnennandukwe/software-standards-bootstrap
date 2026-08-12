@@ -155,7 +155,7 @@ Orientation is concise reviewed context, not active policy. It does not enter
 `artifacts`, artifact counts, benchmark denominators, or ADR eligibility. A
 schema-only document is valid and affects source identity without rendering an
 empty section. An unreferenced canonical file is rejected with bind-or-remove
-recovery. Embedded-layout packs cannot carry orientation.
+recovery. Embedded-layout packs do not load or render orientation.
 
 The raw file limit is 1 MiB. Each optional collection accepts at most 32
 entries. Every rendered statement has 1–16 evidence citations. Summary,

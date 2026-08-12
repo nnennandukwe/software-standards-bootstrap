@@ -308,6 +308,11 @@ func TestValidateManifestPresentation(t *testing.T) {
 			rule: []byte("# Keep public APIs compatible\n\n## Details\n\nKeep APIs stable.\n"),
 			want: "actionable text must immediately follow the H1 title",
 		},
+		{
+			name: "Unicode format character in body",
+			rule: []byte("# Keep public APIs compatible\n\nKeep APIs \u202estable.\n"),
+			want: "format characters",
+		},
 	}
 
 	for _, test := range tests {

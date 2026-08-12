@@ -139,6 +139,17 @@ func TestValidateRejectsInvalidVerificationVersionsAndWorkingDirectories(t *test
 			steps:  validVerificationStep("    working_directory: .\n    working_directory: tools\n"),
 			want:   "working_directory",
 		},
+		{
+			name:   "Unicode format character in exact command",
+			schema: "ssb.dev/verification/v2",
+			steps: strings.Replace(
+				validVerificationStep("    working_directory: .\n"),
+				"run: go test ./...",
+				"run: \"go test ./... # \u202e\"",
+				1,
+			),
+			want: "format characters",
+		},
 	}
 
 	for _, test := range tests {
