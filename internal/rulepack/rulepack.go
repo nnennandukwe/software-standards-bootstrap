@@ -6,8 +6,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -24,17 +26,21 @@ import (
 )
 
 const (
+	ManifestSchema     = "ssb.dev/manifest/v1"
 	ReportSchema       = "ssb.dev/report/v1"
 	RuleSchema         = "ssb.dev/rule/v2"
 	VerificationSchema = "ssb.dev/verification/v1"
 	AutomationSchema   = "ssb.dev/automation/v1"
 	UtilityMethod      = "ssb-utility-v1"
+	FormatSplitV1      = "split-v1"
+	FormatLegacyV1     = "legacy-v1"
 	categoryRecovery   = "use one primary category: architecture, compatibility, compliance, correctness, developer-experience, documentation, maintainability, operability, performance, quality, reliability, security, or testability"
 )
 
 var (
 	stableIDPattern     = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`)
 	digestPattern       = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	commitPattern       = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	supportedCategories = map[string]struct{}{
 		"architecture":         {},
 		"compatibility":        {},
@@ -101,14 +107,37 @@ type ManifestArtifact struct {
 	ID                 string     `yaml:"id" json:"id"`
 	Kind               string     `yaml:"kind" json:"kind"`
 	Path               string     `yaml:"path" json:"path"`
+	SHA256             string     `yaml:"sha256,omitempty" json:"sha256,omitempty"`
 	Confidence         string     `yaml:"confidence" json:"confidence"`
 	Utility            Utility    `yaml:"utility" json:"utility"`
 	RelatedArtifactIDs []string   `yaml:"related_artifacts,omitempty" json:"related_artifacts,omitempty"`
 	Category           string     `yaml:"category,omitempty" json:"category,omitempty"`
 	Lenses             []Lens     `yaml:"lenses,omitempty" json:"lenses,omitempty"`
+	Directive          string     `yaml:"directive,omitempty" json:"directive,omitempty"`
 	Scopes             []string   `yaml:"scopes,omitempty" json:"scopes,omitempty"`
 	Derivation         string     `yaml:"derivation,omitempty" json:"derivation,omitempty"`
 	Evidence           []Evidence `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+}
+
+// FileReference binds one canonical split-pack file to its exact raw bytes.
+type FileReference struct {
+	Path   string `yaml:"path" json:"path"`
+	SHA256 string `yaml:"sha256" json:"sha256"`
+}
+
+// Manifest owns split-pack machine metadata. Legacy reports are normalized
+// into the same shape without separate file references.
+type Manifest struct {
+	Schema         string             `yaml:"schema" json:"schema"`
+	BaselineCommit string             `yaml:"baseline_commit" json:"baseline_commit"`
+	Inventory      FileReference      `yaml:"inventory,omitempty" json:"inventory,omitempty"`
+	Report         FileReference      `yaml:"report,omitempty" json:"report,omitempty"`
+	Artifacts      []ManifestArtifact `yaml:"artifacts" json:"artifacts"`
+}
+
+// HumanReport is the human-facing report document after layout detection.
+type HumanReport struct {
+	Body string `json:"body"`
 }
 
 // Report is the accepted artifact index and run narrative.
@@ -251,8 +280,14 @@ type AutomationProposal struct {
 // Pack contains parsed artifacts even when diagnostics are returned. Consumers
 // must not render or create an ADR unless diagnostics is empty.
 type Pack struct {
+	Format         string               `json:"-"`
 	BaselineCommit string               `json:"baseline_commit"`
+	ManifestPath   string               `json:"-"`
+	InventoryPath  string               `json:"-"`
 	ReportPath     string               `json:"report_path,omitempty"`
+	Manifest       Manifest             `json:"-"`
+	Inventory      ReportInventory      `json:"-"`
+	HumanReport    HumanReport          `json:"-"`
 	Report         Report               `json:"report,omitempty"`
 	Rules          []Rule               `json:"rules"`
 	Recipes        []VerificationRecipe `json:"verification_recipes"`
@@ -294,13 +329,824 @@ type semanticRuleSource struct {
 	Evidence   []Evidence `yaml:"evidence"`
 }
 
+func validateSplitPack(
+	ctx context.Context,
+	repo *workspace.Repository,
+	retained bool,
+) (Pack, []Diagnostic, error) {
+	const (
+		manifestPath  = ".software-standards/manifest.yaml"
+		inventoryPath = ".software-standards/inventory.json"
+		reportPath    = ".software-standards/report.md"
+	)
+	pack := Pack{
+		Format:         FormatSplitV1,
+		BaselineCommit: repo.Baseline(),
+		ManifestPath:   manifestPath,
+		InventoryPath:  inventoryPath,
+		ReportPath:     reportPath,
+		Rules:          make([]Rule, 0),
+		Recipes:        make([]VerificationRecipe, 0),
+		Skills:         make([]Skill, 0),
+		Automations:    make([]AutomationProposal, 0),
+	}
+	diagnostics := make([]Diagnostic, 0)
+
+	packRootPath := filepath.Join(repo.Root(), ".software-standards")
+	info, err := os.Lstat(packRootPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return pack, []Diagnostic{diagnostic(
+				".software-standards",
+				"file",
+				".software-standards does not exist",
+				"create the split pack and rerun ssb validate",
+			)}, nil
+		}
+		return Pack{}, nil, fmt.Errorf("inspect .software-standards: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return pack, []Diagnostic{diagnostic(
+			".software-standards",
+			"file",
+			".software-standards must be a real directory, not a symlink",
+			"move the editable pack inside the repository",
+		)}, nil
+	}
+
+	manifestBytes, manifestDiagnostics, err := readRequiredRegularFileLimited(
+		filepath.Join(repo.Root(), filepath.FromSlash(manifestPath)),
+		manifestPath,
+		inventory.DefaultLimits().MaxFileBytes,
+	)
+	if err != nil {
+		return Pack{}, nil, err
+	}
+	diagnostics = append(diagnostics, manifestDiagnostics...)
+	if len(manifestBytes) == 0 {
+		return pack, diagnostics, nil
+	}
+	if err := yaml.Load(
+		manifestBytes,
+		&pack.Manifest,
+		yaml.WithKnownFields(),
+		yaml.WithUniqueKeys(),
+	); err != nil {
+		diagnostics = append(diagnostics, yamlDiagnostic(
+			manifestPath,
+			err,
+			"remove unknown or duplicate fields and use the ssb.dev/manifest/v1 schema",
+		))
+		return pack, diagnostics, nil
+	}
+	pack.BaselineCommit = pack.Manifest.BaselineCommit
+	diagnostics = append(diagnostics, validateSplitManifest(repo, pack.Manifest, retained)...)
+
+	var inventoryBytes []byte
+	if pack.Manifest.Inventory.Path == inventoryPath {
+		inventoryBytes, manifestDiagnostics, err = readDigestBoundFile(
+			repo.Root(),
+			pack.Manifest.Inventory,
+			"inventory.json",
+			inventory.DefaultLimits().MaxCandidateBytes,
+		)
+		if err != nil {
+			return Pack{}, nil, err
+		}
+		diagnostics = append(diagnostics, manifestDiagnostics...)
+	}
+	if len(inventoryBytes) != 0 {
+		if err := decodeStrictJSON(inventoryBytes, &pack.Inventory); err != nil {
+			diagnostics = append(diagnostics, diagnostic(
+				inventoryPath,
+				"inventory",
+				err.Error(),
+				"copy the complete unedited ssb inspect --format json response",
+			))
+		}
+	}
+
+	var reportBytes []byte
+	if pack.Manifest.Report.Path == reportPath {
+		reportBytes, manifestDiagnostics, err = readDigestBoundFile(
+			repo.Root(),
+			pack.Manifest.Report,
+			"report.md",
+			inventory.DefaultLimits().MaxFileBytes,
+		)
+		if err != nil {
+			return Pack{}, nil, err
+		}
+		diagnostics = append(diagnostics, manifestDiagnostics...)
+	}
+	if len(reportBytes) != 0 {
+		diagnostics = append(diagnostics, validateHumanReport(reportPath, reportBytes)...)
+		pack.HumanReport = HumanReport{Body: string(reportBytes)}
+	}
+
+	pack.Report = Report{
+		Schema:         pack.Manifest.Schema,
+		BaselineCommit: pack.Manifest.BaselineCommit,
+		Inventory:      pack.Inventory,
+		Artifacts:      pack.Manifest.Artifacts,
+		Body:           pack.HumanReport.Body,
+	}
+
+	evidenceRepo := repo
+	if retained && commitPattern.MatchString(pack.Manifest.BaselineCommit) {
+		historical, historicalErr := repo.AtCommit(ctx, pack.Manifest.BaselineCommit)
+		if historicalErr != nil {
+			if !errors.Is(historicalErr, workspace.ErrHistoricalCommit) {
+				return Pack{}, nil, historicalErr
+			}
+			diagnostics = append(diagnostics, diagnostic(
+				manifestPath,
+				"baseline_commit",
+				fmt.Sprintf(
+					"recorded baseline_commit %q is not a reachable ancestor; artifact evidence cannot be verified: %v",
+					pack.Manifest.BaselineCommit,
+					historicalErr,
+				),
+				"restore the recorded baseline to current repository history or update this pack through a new approved review",
+			))
+			return pack, diagnostics, nil
+		}
+		evidenceRepo = historical
+	}
+	if len(inventoryBytes) != 0 && pack.Inventory.BaselineCommit != "" {
+		diagnostics = append(diagnostics, validateInventoryMetadata(
+			inventoryPath,
+			pack.Manifest.BaselineCommit,
+			pack.Inventory,
+		)...)
+		inventoryDiagnostics, inventoryErr := validateReportInventory(
+			ctx,
+			evidenceRepo,
+			pack.Inventory,
+			inventoryPath,
+		)
+		if inventoryErr != nil {
+			return Pack{}, nil, inventoryErr
+		}
+		diagnostics = append(diagnostics, inventoryDiagnostics...)
+	}
+
+	entriesByID := make(map[string]ManifestArtifact, len(pack.Manifest.Artifacts))
+	entriesByPath := make(map[string]ManifestArtifact, len(pack.Manifest.Artifacts))
+	for index, artifact := range pack.Manifest.Artifacts {
+		field := fmt.Sprintf("artifacts[%d]", index)
+		diagnostics = append(diagnostics, validateSplitManifestArtifact(manifestPath, field, artifact)...)
+		diagnostics = append(diagnostics, validateSplitOwnedMetadata(
+			ctx,
+			evidenceRepo,
+			manifestPath,
+			field,
+			artifact,
+		)...)
+		if prior, exists := entriesByID[artifact.ID]; exists {
+			diagnostics = append(diagnostics, diagnostic(
+				manifestPath,
+				field+".id",
+				fmt.Sprintf("duplicate artifact id %q also used by %s", artifact.ID, prior.Path),
+				"give every accepted artifact a globally unique stable id",
+			))
+		} else {
+			entriesByID[artifact.ID] = artifact
+		}
+		if prior, exists := entriesByPath[artifact.Path]; exists {
+			diagnostics = append(diagnostics, diagnostic(
+				manifestPath,
+				field+".path",
+				fmt.Sprintf("duplicate artifact path %q also used by %s", artifact.Path, prior.ID),
+				"list each canonical artifact path once",
+			))
+		} else {
+			entriesByPath[artifact.Path] = artifact
+		}
+	}
+
+	for _, artifact := range pack.Manifest.Artifacts {
+		if canonicalArtifactPath(artifact.Kind, artifact.ID) != artifact.Path {
+			continue
+		}
+		switch artifact.Kind {
+		case "rule":
+			rule, artifactDiagnostics, loadErr := loadSplitRule(repo.Root(), artifact)
+			if loadErr != nil {
+				return Pack{}, nil, loadErr
+			}
+			diagnostics = append(diagnostics, artifactDiagnostics...)
+			if rule.ID != "" {
+				pack.Rules = append(pack.Rules, rule)
+			}
+		case "verification":
+			recipe, artifactDiagnostics, loadErr := loadSplitVerificationRecipe(ctx, evidenceRepo, repo.Root(), artifact)
+			if loadErr != nil {
+				return Pack{}, nil, loadErr
+			}
+			diagnostics = append(diagnostics, artifactDiagnostics...)
+			if recipe.ID != "" {
+				pack.Recipes = append(pack.Recipes, recipe)
+			}
+		case "skill":
+			skill, artifactDiagnostics, loadErr := loadSplitSkill(repo.Root(), artifact)
+			if loadErr != nil {
+				return Pack{}, nil, loadErr
+			}
+			diagnostics = append(diagnostics, artifactDiagnostics...)
+			if skill.ID != "" {
+				pack.Skills = append(pack.Skills, skill)
+			}
+		case "automation":
+			automation, artifactDiagnostics, loadErr := loadSplitAutomationProposal(ctx, evidenceRepo, repo.Root(), artifact)
+			if loadErr != nil {
+				return Pack{}, nil, loadErr
+			}
+			diagnostics = append(diagnostics, artifactDiagnostics...)
+			if automation.ID != "" {
+				pack.Automations = append(pack.Automations, automation)
+			}
+		}
+	}
+
+	diagnostics = append(diagnostics, validateRelationships(manifestPath, pack.Manifest.Artifacts, entriesByID)...)
+	unlisted, scanDiagnostics, scanErr := unlistedNativeArtifacts(repo.Root(), entriesByPath)
+	if scanErr != nil {
+		return Pack{}, nil, scanErr
+	}
+	diagnostics = append(diagnostics, scanDiagnostics...)
+	for _, relative := range unlisted {
+		diagnostics = append(diagnostics, diagnostic(
+			relative,
+			"file",
+			relative+" is not listed in .software-standards/manifest.yaml",
+			"add the accepted artifact to the manifest or remove the unaccepted file",
+		))
+	}
+	sortPackArtifacts(&pack)
+	return pack, diagnostics, nil
+}
+
+func validateSplitManifest(repo *workspace.Repository, manifest Manifest, retained bool) []Diagnostic {
+	const sourcePath = ".software-standards/manifest.yaml"
+	diagnostics := make([]Diagnostic, 0)
+	add := func(field, message, recovery string) {
+		diagnostics = append(diagnostics, diagnostic(sourcePath, field, message, recovery))
+	}
+	if manifest.Schema != ManifestSchema {
+		add("schema", "schema must be "+ManifestSchema, "update the split manifest schema value")
+	}
+	if !commitPattern.MatchString(manifest.BaselineCommit) {
+		add("baseline_commit", "baseline_commit must be a 40-character lowercase Git object id", "copy the exact commit from ssb inspect")
+	} else if !retained && manifest.BaselineCommit != repo.Baseline() {
+		add(
+			"baseline_commit",
+			fmt.Sprintf("baseline_commit must equal current HEAD %s", repo.Baseline()),
+			"reinspect the new commit and refresh the manifest, inventory, and every evidence hash",
+		)
+	}
+	if manifest.Inventory.Path != ".software-standards/inventory.json" {
+		add("inventory.path", "inventory path must be .software-standards/inventory.json", "use the canonical split-pack inventory path")
+	}
+	if !digestPattern.MatchString(manifest.Inventory.SHA256) {
+		add("inventory.sha256", "inventory sha256 must use sha256:<64 lowercase hex characters>", "hash the exact inventory.json bytes")
+	}
+	if manifest.Report.Path != ".software-standards/report.md" {
+		add("report.path", "report path must be .software-standards/report.md", "use the canonical split-pack report path")
+	}
+	if !digestPattern.MatchString(manifest.Report.SHA256) {
+		add("report.sha256", "report sha256 must use sha256:<64 lowercase hex characters>", "hash the exact report.md bytes")
+	}
+	return diagnostics
+}
+
+func validateSplitManifestArtifact(sourcePath, field string, artifact ManifestArtifact) []Diagnostic {
+	diagnostics := make([]Diagnostic, 0)
+	add := func(suffix, message, recovery string) {
+		diagnostics = append(diagnostics, diagnostic(sourcePath, field+suffix, message, recovery))
+	}
+	if !stableIDPattern.MatchString(artifact.ID) {
+		add(".id", "artifact id must be lower-case kebab-case", "choose a stable id such as verify-test-migrations")
+	}
+	expectedPath := canonicalArtifactPath(artifact.Kind, artifact.ID)
+	switch artifact.Kind {
+	case "rule", "verification", "skill", "automation":
+	default:
+		add(".kind", fmt.Sprintf("artifact kind %q is not supported", artifact.Kind), "use rule, verification, skill, or automation")
+	}
+	if expectedPath != "" && artifact.Path != expectedPath {
+		add(
+			".path",
+			fmt.Sprintf("%s artifact path must be %s", artifact.Kind, expectedPath),
+			"move the artifact to its canonical path or correct the manifest entry",
+		)
+	}
+	if !digestPattern.MatchString(artifact.SHA256) {
+		add(".sha256", "artifact sha256 must use sha256:<64 lowercase hex characters>", "hash the exact primary artifact bytes")
+	}
+	if artifact.Confidence != "medium" && artifact.Confidence != "high" {
+		add(".confidence", "accepted artifact confidence must be medium or high", "remove the candidate instead of preserving a low-confidence artifact")
+	}
+	diagnostics = append(diagnostics, validateUtility(sourcePath, field+".utility", artifact.Utility)...)
+	if artifact.Kind != "rule" && artifact.Directive != "" {
+		add(".directive", "directive applies only to semantic rules", "remove directive from this manifest entry")
+	}
+	return diagnostics
+}
+
+func validateSplitOwnedMetadata(
+	ctx context.Context,
+	repo *workspace.Repository,
+	sourcePath string,
+	field string,
+	artifact ManifestArtifact,
+) []Diagnostic {
+	diagnostics := make([]Diagnostic, 0)
+	add := func(suffix, message, recovery string) {
+		diagnostics = append(diagnostics, diagnostic(sourcePath, field+suffix, message, recovery))
+	}
+	if _, supported := supportedCategories[artifact.Category]; artifact.Category == "" || !supported {
+		add(".category", fmt.Sprintf("category %q is not supported", artifact.Category), categoryRecovery)
+	}
+	diagnostics = append(diagnostics, validateActionableLenses(sourcePath, field+".lenses", artifact.Lenses)...)
+	diagnostics = append(diagnostics, prefixDiagnosticFields(validateScopes(sourcePath, artifact.Scopes), field+".")...)
+	if artifact.Kind == "rule" {
+		if _, supported := supportedDirectives[artifact.Directive]; !supported {
+			add(".directive", fmt.Sprintf("directive %q is not supported", artifact.Directive), "use always, ask-first, never, or prefer")
+		}
+	}
+	diagnostics = append(diagnostics, prefixDiagnosticFields(validateDerivationEvidence(
+		ctx,
+		repo,
+		sourcePath,
+		artifact.Derivation,
+		artifact.Evidence,
+	), field+".")...)
+	return diagnostics
+}
+
+func validateHumanReport(sourcePath string, data []byte) []Diagnostic {
+	diagnostics := make([]Diagnostic, 0)
+	const heading = "# Software standards report"
+	if !hasExactOpeningHeading(data, heading) {
+		diagnostics = append(diagnostics, diagnostic(
+			sourcePath,
+			"body",
+			"report.md must begin at byte zero with # Software standards report",
+			"remove frontmatter and begin the human report with its H1 title",
+		))
+		return diagnostics
+	}
+	body := bodyAfterOpeningHeading(data)
+	if strings.TrimSpace(string(body)) == "" {
+		diagnostics = append(diagnostics, diagnostic(sourcePath, "body", "report narrative must not be empty", "record run-wide limitations and accepted-output summaries"))
+	}
+	for _, target := range []string{"manifest.yaml", "inventory.json"} {
+		if !bytes.Contains(data, []byte("]("+target+")")) &&
+			!bytes.Contains(data, []byte("](.software-standards/"+target+")")) {
+			diagnostics = append(diagnostics, diagnostic(
+				sourcePath,
+				"body",
+				"report.md must link to "+target,
+				"add a Markdown link to the canonical machine artifact",
+			))
+		}
+	}
+	return diagnostics
+}
+
+func hasExactOpeningHeading(data []byte, heading string) bool {
+	return bytes.HasPrefix(data, []byte(heading+"\n")) || bytes.HasPrefix(data, []byte(heading+"\r\n"))
+}
+
+func bodyAfterOpeningHeading(data []byte) []byte {
+	newline := bytes.IndexByte(data, '\n')
+	if newline < 0 {
+		return nil
+	}
+	body := data[newline+1:]
+	if bytes.HasPrefix(body, []byte("\r\n")) {
+		return body[2:]
+	}
+	if bytes.HasPrefix(body, []byte("\n")) {
+		return body[1:]
+	}
+	return body
+}
+
+func parseHumanRule(sourcePath string, data []byte) (string, string, []Diagnostic) {
+	newline := bytes.IndexByte(data, '\n')
+	if newline < 0 {
+		return "", "", []Diagnostic{diagnostic(sourcePath, "body", "semantic rule must begin with one H1 title", "begin with # followed by a concise rule title")}
+	}
+	titleLine := strings.TrimSuffix(string(data[:newline]), "\r")
+	if !strings.HasPrefix(titleLine, "# ") || strings.TrimSpace(strings.TrimPrefix(titleLine, "# ")) == "" {
+		return "", "", []Diagnostic{diagnostic(sourcePath, "body", "semantic rule must begin with one H1 title", "remove frontmatter and begin with # followed by a concise rule title")}
+	}
+	title := strings.TrimSpace(strings.TrimPrefix(titleLine, "# "))
+	bodyBytes := bodyAfterOpeningHeading(data)
+	if strings.TrimSpace(string(bodyBytes)) == "" {
+		return title, "", []Diagnostic{diagnostic(sourcePath, "body", "semantic rule actionable text must not be empty", "write the actionable obligation immediately after the H1 title")}
+	}
+	firstContent := true
+	for _, line := range strings.Split(strings.ReplaceAll(string(bodyBytes), "\r\n", "\n"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "# ") {
+			return title, string(bodyBytes), []Diagnostic{diagnostic(sourcePath, "body", "semantic rule must contain exactly one H1 title", "use lower-level headings after the opening title")}
+		}
+		if firstContent && strings.HasPrefix(trimmed, "#") {
+			return title, string(bodyBytes), []Diagnostic{diagnostic(sourcePath, "body", "semantic rule actionable text must immediately follow the H1 title", "move headings after the opening actionable obligation")}
+		}
+		firstContent = false
+	}
+	return title, string(bodyBytes), nil
+}
+
+func validatePortableSplitSkill(sourcePath string, metadata skillFrontmatter, body []byte) []Diagnostic {
+	diagnostics := make([]Diagnostic, 0)
+	if _, exists := metadata.Metadata["category"]; exists {
+		diagnostics = append(diagnostics, diagnostic(
+			sourcePath,
+			"metadata.category",
+			"split-pack Agent Skills must not repeat SSB-owned metadata.category",
+			"remove metadata.category; the split manifest owns category and provenance",
+		))
+	}
+	if strings.TrimSpace(metadata.License) == "" && strings.TrimSpace(metadata.Compatibility) == "" {
+		diagnostics = append(diagnostics, diagnostic(
+			sourcePath,
+			"frontmatter",
+			"split-pack Agent Skills require a meaningful license or compatibility field",
+			"add the applicable SPDX license or host compatibility statement",
+		))
+	}
+	if !bytes.HasPrefix(body, []byte("# ")) {
+		diagnostics = append(diagnostics, diagnostic(sourcePath, "body", "skill body must begin with an H1 title", "begin the portable skill body with # followed by its task title"))
+	}
+	normalized := strings.ReplaceAll(string(body), "\r\n", "\n")
+	if !strings.Contains(normalized, "\n## Procedure\n") || strings.TrimSpace(strings.SplitN(normalized, "\n## Procedure\n", 2)[len(strings.SplitN(normalized, "\n## Procedure\n", 2))-1]) == "" {
+		diagnostics = append(diagnostics, diagnostic(sourcePath, "body", "skill body must include a nonempty Procedure section", "add ## Procedure followed by the actionable workflow"))
+	}
+	return diagnostics
+}
+
+func loadSplitRule(
+	root string,
+	manifest ManifestArtifact,
+) (Rule, []Diagnostic, error) {
+	data, diagnostics, err := readSplitArtifact(root, manifest)
+	if err != nil || len(data) == 0 {
+		return Rule{}, diagnostics, err
+	}
+	title, body, presentationDiagnostics := parseHumanRule(manifest.Path, data)
+	diagnostics = append(diagnostics, presentationDiagnostics...)
+	return Rule{
+		Schema:     RuleSchema,
+		ID:         manifest.ID,
+		Title:      title,
+		Category:   manifest.Category,
+		Lenses:     manifest.Lenses,
+		Directive:  manifest.Directive,
+		Scopes:     manifest.Scopes,
+		Derivation: manifest.Derivation,
+		Evidence:   manifest.Evidence,
+		SourcePath: manifest.Path,
+		Body:       body,
+	}, diagnostics, nil
+}
+
+func loadSplitVerificationRecipe(
+	ctx context.Context,
+	evidenceRepo *workspace.Repository,
+	root string,
+	manifest ManifestArtifact,
+) (VerificationRecipe, []Diagnostic, error) {
+	data, diagnostics, err := readSplitArtifact(root, manifest)
+	if err != nil || len(data) == 0 {
+		return VerificationRecipe{}, diagnostics, err
+	}
+	var recipe VerificationRecipe
+	if err := yaml.Load(data, &recipe, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+		return VerificationRecipe{}, append(diagnostics, yamlDiagnostic(
+			manifest.Path,
+			err,
+			"use only fields from the ssb.dev/verification/v1 schema",
+		)), nil
+	}
+	recipe.SourcePath = manifest.Path
+	diagnostics = append(diagnostics, validateVerificationRecipe(ctx, evidenceRepo, recipe, manifest)...)
+	diagnostics = append(diagnostics, validateNativeMetadataBinding(manifest.Path, recipe.ID, recipe.Category, recipe.Lenses, recipe.Scopes, recipe.Derivation, recipe.Evidence, manifest)...)
+	return recipe, diagnostics, nil
+}
+
+func loadSplitSkill(
+	root string,
+	manifest ManifestArtifact,
+) (Skill, []Diagnostic, error) {
+	data, diagnostics, err := readSplitArtifact(root, manifest)
+	if err != nil || len(data) == 0 {
+		return Skill{}, diagnostics, err
+	}
+	frontmatter, body, splitErr := splitFrontmatter(data)
+	if splitErr != nil {
+		return Skill{}, append(diagnostics, diagnostic(
+			manifest.Path,
+			"frontmatter",
+			splitErr.Error(),
+			"add portable Agent Skill YAML frontmatter",
+		)), nil
+	}
+	var metadata skillFrontmatter
+	if err := yaml.Load(frontmatter, &metadata, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+		return Skill{}, append(diagnostics, yamlDiagnostic(
+			manifest.Path,
+			err,
+			"use only Agent Skills core specification fields",
+		)), nil
+	}
+	diagnostics = append(diagnostics, validatePortableSplitSkill(manifest.Path, metadata, body)...)
+	if metadata.Name != manifest.ID {
+		diagnostics = append(diagnostics, diagnostic(
+			manifest.Path,
+			"name",
+			fmt.Sprintf("skill name %q must match manifest id %q", metadata.Name, manifest.ID),
+			"align the skill name, directory, and manifest entry",
+		))
+	}
+	if len(metadata.Name) > 64 {
+		diagnostics = append(diagnostics, diagnostic(manifest.Path, "name", "skill name must be at most 64 characters", "shorten the portable skill name"))
+	}
+	if strings.TrimSpace(metadata.Description) == "" || len(metadata.Description) > 1024 {
+		diagnostics = append(diagnostics, diagnostic(manifest.Path, "description", "skill description must contain 1-1024 characters", "describe what the skill does and when to use it"))
+	}
+	return Skill{
+		ID:          manifest.ID,
+		Description: metadata.Description,
+		Category:    manifest.Category,
+		SourcePath:  manifest.Path,
+		Body:        string(body),
+	}, diagnostics, nil
+}
+
+func loadSplitAutomationProposal(
+	ctx context.Context,
+	evidenceRepo *workspace.Repository,
+	root string,
+	manifest ManifestArtifact,
+) (AutomationProposal, []Diagnostic, error) {
+	data, diagnostics, err := readSplitArtifact(root, manifest)
+	if err != nil || len(data) == 0 {
+		return AutomationProposal{}, diagnostics, err
+	}
+	var proposal AutomationProposal
+	if err := yaml.Load(data, &proposal, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+		return AutomationProposal{}, append(diagnostics, yamlDiagnostic(
+			manifest.Path,
+			err,
+			"use only fields from the ssb.dev/automation/v1 schema",
+		)), nil
+	}
+	proposal.SourcePath = manifest.Path
+	diagnostics = append(diagnostics, validateAutomationProposal(ctx, evidenceRepo, proposal, manifest)...)
+	diagnostics = append(diagnostics, validateNativeMetadataBinding(manifest.Path, proposal.ID, proposal.Category, proposal.Lenses, proposal.Scopes, proposal.Derivation, proposal.Evidence, manifest)...)
+	return proposal, diagnostics, nil
+}
+
+func validateNativeMetadataBinding(
+	sourcePath string,
+	id string,
+	category string,
+	lenses []Lens,
+	scopes []string,
+	derivation string,
+	evidence []Evidence,
+	manifest ManifestArtifact,
+) []Diagnostic {
+	if id == manifest.ID && category == manifest.Category &&
+		reflect.DeepEqual(lenses, manifest.Lenses) &&
+		reflect.DeepEqual(scopes, manifest.Scopes) &&
+		derivation == manifest.Derivation &&
+		reflect.DeepEqual(evidence, manifest.Evidence) {
+		return nil
+	}
+	return []Diagnostic{diagnostic(
+		sourcePath,
+		"manifest",
+		"native artifact metadata must exactly match its split manifest entry",
+		"align the native schema fields with the manifest-owned ID, selection metadata, and provenance",
+	)}
+}
+
+func readSplitArtifact(root string, manifest ManifestArtifact) ([]byte, []Diagnostic, error) {
+	return readDigestBoundFile(
+		root,
+		FileReference{Path: manifest.Path, SHA256: manifest.SHA256},
+		manifest.Kind,
+		inventory.DefaultLimits().MaxFileBytes,
+	)
+}
+
+func readDigestBoundFile(
+	root string,
+	reference FileReference,
+	label string,
+	maxBytes int64,
+) ([]byte, []Diagnostic, error) {
+	if component, found, err := findSymlinkComponent(root, reference.Path); err != nil {
+		return nil, nil, err
+	} else if found {
+		return nil, []Diagnostic{diagnostic(
+			reference.Path,
+			"file",
+			reference.Path+" must be a real regular file, not a symlink; contains symlink component "+component,
+			"place the digest-bound artifact inside the repository",
+		)}, nil
+	}
+	data, diagnostics, err := readRequiredRegularFileLimited(
+		filepath.Join(root, filepath.FromSlash(reference.Path)),
+		reference.Path,
+		maxBytes,
+	)
+	if err != nil || len(data) == 0 {
+		return data, diagnostics, err
+	}
+	actual := digest(data)
+	if reference.SHA256 != actual {
+		diagnostics = append(diagnostics, diagnostic(
+			reference.Path,
+			"sha256",
+			label+" SHA-256 does not match manifest; expected "+actual,
+			"restore the reviewed bytes or update the manifest digest through explicit pack review",
+		))
+	}
+	return data, diagnostics, nil
+}
+
+func readRequiredRegularFileLimited(absolute, relative string, maxBytes int64) ([]byte, []Diagnostic, error) {
+	info, err := os.Lstat(absolute)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, []Diagnostic{diagnostic(relative, "file", relative+" does not exist", "create the required file and rerun ssb validate")}, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("inspect %s: %w", relative, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, []Diagnostic{diagnostic(relative, "file", relative+" must be a real regular file, not a symlink", "replace it with a file inside the repository")}, nil
+	}
+	if info.Size() > maxBytes {
+		return nil, []Diagnostic{diagnostic(
+			relative,
+			"file",
+			fmt.Sprintf("%s is larger than %d bytes", relative, maxBytes),
+			"reduce the artifact to the documented size ceiling and rerun ssb validate",
+		)}, nil
+	}
+	data, err := os.ReadFile(absolute)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read %s: %w", relative, err)
+	}
+	if len(data) == 0 {
+		return data, []Diagnostic{diagnostic(relative, "file", relative+" must not be empty", "write the required artifact and rerun ssb validate")}, nil
+	}
+	return data, nil, nil
+}
+
+func decodeStrictJSON(data []byte, target any) error {
+	if err := rejectDuplicateJSONFields(data); err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("inventory JSON contains multiple values")
+		}
+		return err
+	}
+	return nil
+}
+
+func rejectDuplicateJSONFields(data []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	var walk func() error
+	walk = func() error {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		delim, ok := token.(json.Delim)
+		if !ok {
+			return nil
+		}
+		switch delim {
+		case '{':
+			seen := make(map[string]struct{})
+			for decoder.More() {
+				keyToken, err := decoder.Token()
+				if err != nil {
+					return err
+				}
+				key, ok := keyToken.(string)
+				if !ok {
+					return errors.New("JSON object key is not a string")
+				}
+				if _, duplicate := seen[key]; duplicate {
+					return fmt.Errorf("duplicate JSON field %q", key)
+				}
+				seen[key] = struct{}{}
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+			_, err = decoder.Token()
+			return err
+		case '[':
+			for decoder.More() {
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+			_, err = decoder.Token()
+			return err
+		default:
+			return fmt.Errorf("unexpected JSON delimiter %q", delim)
+		}
+	}
+	if err := walk(); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("inventory JSON contains multiple values")
+		}
+		return err
+	}
+	return nil
+}
+
+func validateRelationships(sourcePath string, artifacts []ManifestArtifact, entriesByID map[string]ManifestArtifact) []Diagnostic {
+	diagnostics := make([]Diagnostic, 0)
+	for _, artifact := range artifacts {
+		seenRelated := make(map[string]struct{}, len(artifact.RelatedArtifactIDs))
+		for _, relatedID := range artifact.RelatedArtifactIDs {
+			if relatedID == artifact.ID {
+				diagnostics = append(diagnostics, diagnostic(sourcePath, "related_artifacts", fmt.Sprintf("artifact %s cannot relate to itself", artifact.ID), "remove the self relationship"))
+			}
+			if _, duplicate := seenRelated[relatedID]; duplicate {
+				diagnostics = append(diagnostics, diagnostic(sourcePath, "related_artifacts", fmt.Sprintf("artifact %s repeats relationship %s", artifact.ID, relatedID), "list each related artifact once"))
+			}
+			seenRelated[relatedID] = struct{}{}
+			if _, exists := entriesByID[relatedID]; !exists {
+				diagnostics = append(diagnostics, diagnostic(sourcePath, "related_artifacts", fmt.Sprintf("artifact %s references missing related artifact %s", artifact.ID, relatedID), "restore the related artifact or remove the dangling relationship"))
+			}
+		}
+	}
+	return diagnostics
+}
+
+func sortPackArtifacts(pack *Pack) {
+	sort.Slice(pack.Rules, func(i, j int) bool { return pack.Rules[i].ID < pack.Rules[j].ID })
+	sort.Slice(pack.Recipes, func(i, j int) bool { return pack.Recipes[i].ID < pack.Recipes[j].ID })
+	sort.Slice(pack.Skills, func(i, j int) bool { return pack.Skills[i].ID < pack.Skills[j].ID })
+	sort.Slice(pack.Automations, func(i, j int) bool { return pack.Automations[i].ID < pack.Automations[j].ID })
+}
+
+func digest(data []byte) string {
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
 func validateActionablePack(
+	ctx context.Context,
+	repo *workspace.Repository,
+	retained bool,
+) (Pack, []Diagnostic, error) {
+	manifestPath := filepath.Join(repo.Root(), ".software-standards", "manifest.yaml")
+	_, err := os.Lstat(manifestPath)
+	switch {
+	case err == nil:
+		return validateSplitPack(ctx, repo, retained)
+	case errors.Is(err, os.ErrNotExist):
+		return validateLegacyPack(ctx, repo, retained)
+	default:
+		return Pack{}, nil, fmt.Errorf("inspect .software-standards/manifest.yaml: %w", err)
+	}
+}
+
+func validateLegacyPack(
 	ctx context.Context,
 	repo *workspace.Repository,
 	retained bool,
 ) (Pack, []Diagnostic, error) {
 	const reportPath = ".software-standards/report.md"
 	pack := Pack{
+		Format:         FormatLegacyV1,
 		BaselineCommit: repo.Baseline(),
 		ReportPath:     reportPath,
 		Rules:          make([]Rule, 0),
@@ -370,6 +1216,13 @@ func validateActionablePack(
 	}
 	pack.Report.Body = string(body)
 	pack.BaselineCommit = pack.Report.BaselineCommit
+	pack.Manifest = Manifest{
+		Schema:         pack.Report.Schema,
+		BaselineCommit: pack.Report.BaselineCommit,
+		Artifacts:      pack.Report.Artifacts,
+	}
+	pack.Inventory = pack.Report.Inventory
+	pack.HumanReport = HumanReport{Body: pack.Report.Body}
 	diagnostics = append(diagnostics, validateReport(repo, pack.Report, retained)...)
 	if strings.TrimSpace(pack.Report.Body) == "" {
 		diagnostics = append(diagnostics, diagnostic(
@@ -405,6 +1258,7 @@ func validateActionablePack(
 		ctx,
 		evidenceRepo,
 		pack.Report.Inventory,
+		reportPath,
 	)
 	if inventoryErr != nil {
 		return Pack{}, nil, inventoryErr
@@ -504,36 +1358,7 @@ func validateActionablePack(
 		}
 	}
 
-	for _, artifact := range pack.Report.Artifacts {
-		seenRelated := make(map[string]struct{}, len(artifact.RelatedArtifactIDs))
-		for _, relatedID := range artifact.RelatedArtifactIDs {
-			if relatedID == artifact.ID {
-				diagnostics = append(diagnostics, diagnostic(
-					reportPath,
-					"related_artifacts",
-					fmt.Sprintf("artifact %s cannot relate to itself", artifact.ID),
-					"remove the self relationship",
-				))
-			}
-			if _, duplicate := seenRelated[relatedID]; duplicate {
-				diagnostics = append(diagnostics, diagnostic(
-					reportPath,
-					"related_artifacts",
-					fmt.Sprintf("artifact %s repeats relationship %s", artifact.ID, relatedID),
-					"list each related artifact once",
-				))
-			}
-			seenRelated[relatedID] = struct{}{}
-			if _, exists := entriesByID[relatedID]; !exists {
-				diagnostics = append(diagnostics, diagnostic(
-					reportPath,
-					"related_artifacts",
-					fmt.Sprintf("artifact %s references missing related artifact %s", artifact.ID, relatedID),
-					"restore the related artifact or remove the dangling relationship",
-				))
-			}
-		}
-	}
+	diagnostics = append(diagnostics, validateRelationships(reportPath, pack.Report.Artifacts, entriesByID)...)
 
 	unlisted, scanDiagnostics, scanErr := unlistedNativeArtifacts(repo.Root(), entriesByPath)
 	if scanErr != nil {
@@ -564,7 +1389,7 @@ func validateReport(repo *workspace.Repository, report Report, retained bool) []
 	if report.Schema != ReportSchema {
 		add("schema", "schema must be "+ReportSchema, "update the report schema value")
 	}
-	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(report.BaselineCommit) {
+	if !commitPattern.MatchString(report.BaselineCommit) {
 		add("baseline_commit", "baseline_commit must be a 40-character lowercase Git object id", "copy the exact commit from ssb inspect")
 	} else if !retained && report.BaselineCommit != repo.Baseline() {
 		add(
@@ -573,11 +1398,19 @@ func validateReport(repo *workspace.Repository, report Report, retained bool) []
 			"reinspect the new commit and refresh the report and every evidence hash",
 		)
 	}
-	reportInventory := report.Inventory
+	diagnostics = append(diagnostics, validateInventoryMetadata(reportPath, report.BaselineCommit, report.Inventory)...)
+	return diagnostics
+}
+
+func validateInventoryMetadata(sourcePath, baselineCommit string, reportInventory ReportInventory) []Diagnostic {
+	diagnostics := make([]Diagnostic, 0)
+	add := func(field, message, recovery string) {
+		diagnostics = append(diagnostics, diagnostic(sourcePath, field, message, recovery))
+	}
 	if reportInventory.SchemaVersion != 2 || reportInventory.InventoryVersion != "ssb-inventory-v2" {
 		add("inventory", "inventory must preserve schema 2 ssb-inventory-v2 accounting", "copy the complete successful ssb inspect inventory")
 	}
-	if reportInventory.BaselineCommit != report.BaselineCommit {
+	if reportInventory.BaselineCommit != baselineCommit {
 		add("inventory.baseline_commit", "inventory baseline_commit must match the report baseline_commit", "copy one complete inventory for the report baseline")
 	}
 	if reportInventory.Truncated {
@@ -616,6 +1449,7 @@ func validateReportInventory(
 	ctx context.Context,
 	repo *workspace.Repository,
 	recorded ReportInventory,
+	sourcePath string,
 ) ([]Diagnostic, error) {
 	actual, err := inventory.ScanAtBaseline(ctx, repo, inventory.Limits{
 		MaxCandidateFiles: recorded.Limits.MaxCandidateFiles,
@@ -629,7 +1463,7 @@ func validateReportInventory(
 		return nil, nil
 	}
 	return []Diagnostic{diagnostic(
-		".software-standards/report.md",
+		sourcePath,
 		"inventory",
 		"recorded inventory does not exactly match the pinned baseline and limits",
 		"copy the complete unedited schema 2 response from ssb inspect for this baseline",
