@@ -463,7 +463,7 @@ func verifyPlanPoststate(repoRoot string, plan applicationPlan) error {
 	}
 	expectedGoverned := make(map[string]plannedFile, len(expected))
 	for itemPath, file := range expected {
-		if itemPath == actionableReportPath {
+		if itemPath == actionableReportPath || itemPath == actionableManifestPath {
 			continue
 		}
 		expectedGoverned[itemPath] = file

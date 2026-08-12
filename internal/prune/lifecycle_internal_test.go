@@ -1,6 +1,7 @@
 package prune
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -474,6 +475,71 @@ func TestApplicationRollbackRemovesCreatedDirectories(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, ".agents")); !os.IsNotExist(err) {
 		t.Fatalf("rollback left created directory tree: %v", err)
+	}
+}
+
+func TestSplitManifestPublicationFailureRestoresExactPackPrestate(t *testing.T) {
+	root := t.TempDir()
+	rulePath := filepath.Join(root, ".software-standards", "rules", "keep-rule.md")
+	skillPath := filepath.Join(root, ".agents", "skills", "orphan-skill", "SKILL.md")
+	manifestPath := filepath.Join(root, filepath.FromSlash(actionableManifestPath))
+	ruleBefore := []byte("# Keep the rule\n\nBefore.\n")
+	ruleAfter := []byte("# Keep the rule\n\nAfter.\n")
+	skillBefore := []byte("skill before\n")
+	manifestBefore := []byte("schema: ssb.dev/manifest/v1\nstate: before\n")
+	manifestAfter := []byte("schema: ssb.dev/manifest/v1\nstate: after\n")
+	for itemPath, content := range map[string][]byte{
+		rulePath: ruleBefore, skillPath: skillBefore, manifestPath: manifestBefore,
+	} {
+		if err := os.MkdirAll(filepath.Dir(itemPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(itemPath, content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	operations := []operation{
+		{
+			Change:  Change{Path: ".software-standards/rules/keep-rule.md", Kind: "write", Prestate: FileState{Exists: true, SHA256: digestBytes(ruleBefore), Mode: "100644"}, Poststate: FileState{Exists: true, SHA256: digestBytes(ruleAfter), Mode: "100644"}},
+			Content: ruleAfter, ExpectedSHA256: digestBytes(ruleBefore), Mode: 0o644,
+		},
+		{
+			Change:         Change{Path: ".agents/skills/orphan-skill/SKILL.md", Kind: "remove", Prestate: FileState{Exists: true, SHA256: digestBytes(skillBefore), Mode: "100644"}, Poststate: FileState{}},
+			ExpectedSHA256: digestBytes(skillBefore),
+		},
+		{
+			Change:  Change{Path: actionableManifestPath, Kind: "write", Prestate: FileState{Exists: true, SHA256: digestBytes(manifestBefore), Mode: "100644"}, Poststate: FileState{Exists: true, SHA256: digestBytes(manifestAfter), Mode: "100644"}},
+			Content: manifestAfter, ExpectedSHA256: digestBytes(manifestBefore), Mode: 0o644,
+		},
+	}
+	journal := applicationJournal{Entries: []journalEntry{
+		{Path: ".software-standards/rules/keep-rule.md", Existed: true, Mode: 0o644, Content: ruleBefore},
+		{Path: ".agents/skills/orphan-skill/SKILL.md", Existed: true, Mode: 0o644, Content: skillBefore},
+		{Path: actionableManifestPath, Existed: true, Mode: 0o644, Content: manifestBefore},
+	}}
+	originalPublish := publishApplicationFile
+	publishApplicationFile = func(staging, target string) error {
+		if strings.HasSuffix(filepath.ToSlash(target), actionableManifestPath) {
+			return errors.New("injected manifest publication failure")
+		}
+		return originalPublish(staging, target)
+	}
+	t.Cleanup(func() { publishApplicationFile = originalPublish })
+
+	completed, executeErr := executeOperations(root, operations)
+	if executeErr == nil || !strings.Contains(executeErr.Error(), "injected manifest publication failure") {
+		t.Fatalf("execute error = %v, want injected manifest failure", executeErr)
+	}
+	if err := restoreJournalPaths(root, journal, completed, operationPoststates(operations)); err != nil {
+		t.Fatalf("rollback split pack: %v", err)
+	}
+	for itemPath, want := range map[string][]byte{
+		rulePath: ruleBefore, skillPath: skillBefore, manifestPath: manifestBefore,
+	} {
+		got, err := os.ReadFile(itemPath)
+		if err != nil || !bytes.Equal(got, want) {
+			t.Fatalf("restored %s = %q, %v; want %q", itemPath, got, err, want)
+		}
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/inventory"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/rulepack"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/workspace"
+	"go.yaml.in/yaml/v4"
 )
 
 func TestValidateAcceptsActionableReportAndSemanticRule(t *testing.T) {
@@ -379,6 +380,79 @@ func TestValidateSplitPackAppliesSizeLimitsBeforeParsing(t *testing.T) {
 				t.Fatalf("diagnostics = %#v", diagnostics)
 			}
 		})
+	}
+}
+
+func TestUpdateSplitManifestArtifactsRefreshesDigestsAndRemovesRelationships(t *testing.T) {
+	input := []byte(`schema: ssb.dev/manifest/v1
+baseline_commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+inventory:
+  path: .software-standards/inventory.json
+  sha256: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+report:
+  path: .software-standards/report.md
+  sha256: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+artifacts:
+  - id: keep-rule
+    kind: rule
+    path: .software-standards/rules/keep-rule.md
+    sha256: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    category: maintainability
+    lenses: [{kind: base}]
+    directive: prefer
+    scopes: ["**"]
+    derivation: extracted
+    evidence:
+      - role: declares
+        path: README.md
+        lines: 1-1
+        excerpt_sha256: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    confidence: high
+    utility:
+      method: ssb-utility-v1
+      total: 70
+      factors: {marginal_value: 20, risk_reduction: 15, actionability: 15, applicability: 10, earlier_feedback: 10}
+    related_artifacts: [remove-skill]
+  - id: remove-skill
+    kind: skill
+    path: .agents/skills/remove-skill/SKILL.md
+    sha256: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    category: maintainability
+    lenses: [{kind: base}]
+    scopes: ["**"]
+    derivation: extracted
+    evidence:
+      - role: declares
+        path: README.md
+        lines: 1-1
+        excerpt_sha256: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    confidence: medium
+    utility:
+      method: ssb-utility-v1
+      total: 50
+      factors: {marginal_value: 15, risk_reduction: 10, actionability: 10, applicability: 10, earlier_feedback: 5}
+`)
+	updatedDigest := "sha256:" + strings.Repeat("f", 64)
+	result, err := rulepack.UpdateSplitManifestArtifacts(
+		input,
+		map[string]struct{}{"remove-skill": {}},
+		map[string]string{"keep-rule": updatedDigest},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest rulepack.Manifest
+	if err := yaml.Load(result, &manifest, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Artifacts) != 1 || manifest.Artifacts[0].ID != "keep-rule" ||
+		manifest.Artifacts[0].SHA256 != updatedDigest ||
+		len(manifest.Artifacts[0].RelatedArtifactIDs) != 0 ||
+		manifest.Artifacts[0].Category != "maintainability" ||
+		manifest.Artifacts[0].Directive != "prefer" ||
+		manifest.Inventory.SHA256 != "sha256:"+strings.Repeat("a", 64) ||
+		manifest.Report.SHA256 != "sha256:"+strings.Repeat("b", 64) {
+		t.Fatalf("unexpected split manifest mutation: %#v", manifest)
 	}
 }
 

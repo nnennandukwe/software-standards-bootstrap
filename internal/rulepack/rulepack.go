@@ -210,6 +210,76 @@ func RemoveManifestArtifacts(data []byte, removedIDs map[string]struct{}) ([]byt
 	return result, nil
 }
 
+// UpdateSplitManifestArtifacts removes accepted artifacts, clears dangling
+// relationships, and refreshes primary-file digests without changing semantic
+// metadata. Governed prune includes the returned bytes in its atomic write set.
+func UpdateSplitManifestArtifacts(
+	data []byte,
+	removedIDs map[string]struct{},
+	updatedDigests map[string]string,
+) ([]byte, error) {
+	if len(removedIDs) == 0 && len(updatedDigests) == 0 {
+		return data, nil
+	}
+	var manifest Manifest
+	if err := yaml.Load(data, &manifest, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+		return nil, fmt.Errorf("parse split manifest: %w", err)
+	}
+	if manifest.Schema != ManifestSchema {
+		return nil, fmt.Errorf("split manifest schema must be %s", ManifestSchema)
+	}
+	foundRemoved := make(map[string]struct{}, len(removedIDs))
+	foundUpdated := make(map[string]struct{}, len(updatedDigests))
+	artifacts := make([]ManifestArtifact, 0, len(manifest.Artifacts))
+	for _, artifact := range manifest.Artifacts {
+		if _, removed := removedIDs[artifact.ID]; removed {
+			if _, alsoUpdated := updatedDigests[artifact.ID]; alsoUpdated {
+				return nil, fmt.Errorf("artifact %s cannot be removed and digest-updated", artifact.ID)
+			}
+			foundRemoved[artifact.ID] = struct{}{}
+			continue
+		}
+		if updated, exists := updatedDigests[artifact.ID]; exists {
+			if !digestPattern.MatchString(updated) {
+				return nil, fmt.Errorf("updated digest for artifact %s is invalid", artifact.ID)
+			}
+			artifact.SHA256 = updated
+			foundUpdated[artifact.ID] = struct{}{}
+		}
+		relationships := artifact.RelatedArtifactIDs[:0]
+		for _, relatedID := range artifact.RelatedArtifactIDs {
+			if _, removed := removedIDs[relatedID]; !removed {
+				relationships = append(relationships, relatedID)
+			}
+		}
+		artifact.RelatedArtifactIDs = relationships
+		artifacts = append(artifacts, artifact)
+	}
+	if missing := missingManifestIDs(removedIDs, foundRemoved); len(missing) != 0 {
+		return nil, fmt.Errorf("split manifest does not list artifact %s", missing[0])
+	}
+	if missing := missingManifestIDs(updatedDigests, foundUpdated); len(missing) != 0 {
+		return nil, fmt.Errorf("split manifest does not list updated artifact %s", missing[0])
+	}
+	manifest.Artifacts = artifacts
+	encoded, err := yaml.Marshal(manifest)
+	if err != nil {
+		return nil, fmt.Errorf("encode split manifest: %w", err)
+	}
+	return encoded, nil
+}
+
+func missingManifestIDs[T any](expected map[string]T, found map[string]struct{}) []string {
+	missing := make([]string, 0)
+	for id := range expected {
+		if _, exists := found[id]; !exists {
+			missing = append(missing, id)
+		}
+	}
+	sort.Strings(missing)
+	return missing
+}
+
 // Lens identifies one context dimension used to select a rule. Values within
 // one kind are alternatives; represented kinds are matched together.
 type Lens struct {
@@ -2191,6 +2261,77 @@ func ValidateCandidateRule(
 	manifestID := strings.TrimSuffix(path.Base(relative), path.Ext(relative))
 	manifest := ManifestArtifact{ID: manifestID, Kind: "rule", Path: relative}
 	return rule, validateActionableRule(ctx, repo, rule, manifest)
+}
+
+// ValidateSplitCandidateRule validates human-first rule bytes while retaining
+// immutable semantic metadata from the existing split manifest entry.
+func ValidateSplitCandidateRule(
+	relative string,
+	manifest ManifestArtifact,
+	data []byte,
+) (Rule, []Diagnostic) {
+	title, body, diagnostics := parseHumanRule(relative, data)
+	if manifest.Kind != "rule" || manifest.Path != relative {
+		diagnostics = append(diagnostics, diagnostic(
+			relative,
+			"manifest",
+			"candidate rule does not match its split manifest entry",
+			"keep the existing canonical rule ID and path",
+		))
+	}
+	return Rule{
+		Schema:     RuleSchema,
+		ID:         manifest.ID,
+		Title:      title,
+		Category:   manifest.Category,
+		Lenses:     manifest.Lenses,
+		Directive:  manifest.Directive,
+		Scopes:     manifest.Scopes,
+		Derivation: manifest.Derivation,
+		Evidence:   manifest.Evidence,
+		SourcePath: relative,
+		Body:       body,
+	}, diagnostics
+}
+
+// ValidateSplitCandidateSkill validates portable Agent Skill bytes while
+// retaining SSB-owned metadata from the existing split manifest entry.
+func ValidateSplitCandidateSkill(
+	relative string,
+	manifest ManifestArtifact,
+	data []byte,
+) (Skill, []Diagnostic) {
+	diagnostics := make([]Diagnostic, 0)
+	frontmatter, body, splitErr := splitFrontmatter(data)
+	if splitErr != nil {
+		return Skill{}, append(diagnostics, diagnostic(relative, "frontmatter", splitErr.Error(), "add portable Agent Skill YAML frontmatter"))
+	}
+	var metadata skillFrontmatter
+	if err := yaml.Load(frontmatter, &metadata, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+		return Skill{}, append(diagnostics, yamlDiagnostic(relative, err, "use only Agent Skills core specification fields"))
+	}
+	diagnostics = append(diagnostics, validatePortableSplitSkill(relative, metadata, body)...)
+	if manifest.Kind != "skill" || manifest.Path != relative || metadata.Name != manifest.ID {
+		diagnostics = append(diagnostics, diagnostic(
+			relative,
+			"manifest",
+			"candidate skill name and path must match its split manifest entry",
+			"keep the existing canonical skill ID and path",
+		))
+	}
+	if len(metadata.Name) > 64 {
+		diagnostics = append(diagnostics, diagnostic(relative, "name", "skill name must be at most 64 characters", "shorten the portable skill name"))
+	}
+	if strings.TrimSpace(metadata.Description) == "" || len(metadata.Description) > 1024 {
+		diagnostics = append(diagnostics, diagnostic(relative, "description", "skill description must contain 1-1024 characters", "describe what the skill does and when to use it"))
+	}
+	return Skill{
+		ID:          manifest.ID,
+		Description: metadata.Description,
+		Category:    manifest.Category,
+		SourcePath:  relative,
+		Body:        string(body),
+	}, diagnostics
 }
 
 // ValidateRetainedRule validates a proposed update against the historical

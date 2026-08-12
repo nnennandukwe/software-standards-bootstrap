@@ -13,6 +13,7 @@ import (
 
 const applicationPlanSchema = "ssb.dev/prune-application-plan/v1"
 const actionableReportPath = ".software-standards/report.md"
+const actionableManifestPath = ".software-standards/manifest.yaml"
 
 // FileState identifies exact governed bytes and mode, or explicit absence.
 type FileState struct {
@@ -140,7 +141,7 @@ func buildApplicationPlan(
 			write(supporting.TargetPath, supporting.SHA256, supporting.Mode)
 		}
 	}
-	reportChange, _, err := actionableReportChange(review, approval)
+	reportChange, _, err := actionableMetadataChange(review, approval)
 	if err != nil {
 		return applicationPlan{}, err
 	}
@@ -202,7 +203,7 @@ func buildApplicationPlan(
 	return plan, nil
 }
 
-func actionableReportChange(
+func actionableMetadataChange(
 	review Review,
 	approval ApprovalPayload,
 ) (*Change, []byte, error) {
@@ -214,6 +215,7 @@ func actionableReportChange(
 		approved[id] = struct{}{}
 	}
 	removedIDs := make(map[string]struct{})
+	updatedDigests := make(map[string]string)
 	for _, action := range review.Proposal.Actions {
 		if _, ok := approved[action.ID]; !ok || action.Disposition == DispositionKeep {
 			continue
@@ -235,62 +237,85 @@ func actionableReportChange(
 		}
 		if !retainsManifestEntry {
 			return nil, nil, fmt.Errorf(
-				"action %s changes the canonical artifact id or path; create a new actionable pack so report.md can record fresh provenance, confidence, and utility",
+				"action %s changes the canonical artifact id or path; create a new actionable pack so its manifest can record fresh provenance, confidence, and utility",
 				action.ID,
 			)
 		}
 		delete(removedIDs, action.Target.ID)
+		updatedDigests[action.Target.ID] = action.Target.SHA256
 	}
-	if len(removedIDs) == 0 {
+	if len(removedIDs) == 0 && len(updatedDigests) == 0 {
 		return nil, nil, nil
 	}
 
 	repo, err := workspace.Open(context.Background(), review.RepoRoot)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open repository for report manifest update: %w", err)
+		return nil, nil, fmt.Errorf("open repository for pack metadata update: %w", err)
 	}
 	reviewBaseline, err := repo.AtCommit(context.Background(), review.Context.BaselineCommit)
 	if err != nil {
 		return nil, nil, fmt.Errorf(
-			"open actionable report at review baseline %s: %w",
+			"open actionable pack at review baseline %s: %w",
 			review.Context.BaselineCommit,
 			err,
 		)
 	}
-	reportData, err := reviewBaseline.ReadBaselineFile(context.Background(), actionableReportPath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("read actionable report at review baseline: %w", err)
-	}
-	reportEntry, exists, err := reviewBaseline.EntryAtBaseline(context.Background(), actionableReportPath)
+	metadataPath := actionableReportPath
+	manifestEntry, manifestExists, err := reviewBaseline.EntryAtBaseline(context.Background(), actionableManifestPath)
 	if err != nil {
 		return nil, nil, err
 	}
-	if !exists || reportEntry.Kind != "blob" ||
-		(reportEntry.Mode != "100644" && reportEntry.Mode != "100755") {
-		return nil, nil, fmt.Errorf("actionable report is not a tracked regular file")
+	if manifestExists {
+		if manifestEntry.Kind != "blob" || (manifestEntry.Mode != "100644" && manifestEntry.Mode != "100755") {
+			return nil, nil, fmt.Errorf("actionable manifest is not a tracked regular file")
+		}
+		metadataPath = actionableManifestPath
 	}
-	updated, err := rulepack.RemoveManifestArtifacts(reportData, removedIDs)
+	metadataData, err := reviewBaseline.ReadBaselineFile(context.Background(), metadataPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("update actionable report manifest: %w", err)
+		return nil, nil, fmt.Errorf("read actionable pack metadata at review baseline: %w", err)
 	}
-	if bytes.Equal(updated, reportData) {
+	metadataEntry, exists, err := reviewBaseline.EntryAtBaseline(context.Background(), metadataPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !exists || metadataEntry.Kind != "blob" ||
+		(metadataEntry.Mode != "100644" && metadataEntry.Mode != "100755") {
+		return nil, nil, fmt.Errorf("actionable pack metadata is not a tracked regular file")
+	}
+	var updated []byte
+	if metadataPath == actionableManifestPath {
+		updated, err = rulepack.UpdateSplitManifestArtifacts(metadataData, removedIDs, updatedDigests)
+		if err != nil {
+			return nil, nil, fmt.Errorf("update actionable split manifest: %w", err)
+		}
+	} else {
+		if len(removedIDs) == 0 {
+			return nil, nil, nil
+		}
+		updated, err = rulepack.RemoveManifestArtifacts(metadataData, removedIDs)
+		if err != nil {
+			return nil, nil, fmt.Errorf("update actionable report manifest: %w", err)
+		}
+	}
+	if bytes.Equal(updated, metadataData) {
 		return nil, nil, fmt.Errorf(
-			"report.md does not list the approved artifact removal; refresh the review from a valid actionable pack",
+			"pack metadata does not reflect the approved artifact change; refresh the review from a valid actionable pack",
 		)
 	}
 	change := &Change{
-		ActionID: "report-manifest",
-		Path:     actionableReportPath,
+		ActionID: "pack-manifest",
+		Path:     metadataPath,
 		Kind:     "write",
 		Prestate: FileState{
 			Exists: true,
-			SHA256: digestBytes(reportData),
-			Mode:   reportEntry.Mode,
+			SHA256: digestBytes(metadataData),
+			Mode:   metadataEntry.Mode,
 		},
 		Poststate: FileState{
 			Exists: true,
 			SHA256: digestBytes(updated),
-			Mode:   reportEntry.Mode,
+			Mode:   metadataEntry.Mode,
 		},
 	}
 	return change, updated, nil
