@@ -6,6 +6,18 @@ All notable changes are documented here. The project follows semantic versioning
 
 ### Added
 
+- Optional, digest-bound `ssb.dev/orientation/v1` repository context with
+  authoritative evidence, bounded collections, strict path validation, and
+  validation-response schema 3 projection outside artifact and ADR counts.
+- Strict `ssb.dev/verification/v2` recipes with required per-step
+  `working_directory`, plus strict `ssb.dev/verification/v1` read compatibility
+  normalized to repository root.
+- An action-first root `AGENTS.md` projection with explicit lifecycle language,
+  repository orientation, exact inert commands and expected results, precise
+  relationship labels, and scannable Agent Skills.
+- Bundled Agent Skill metadata version `0.6.0`, generating optional
+  orientation-v1 context and verification-v2 recipes while retaining strict
+  v1 consumption guidance.
 - Human-first manifest-layout packs with `ssb.dev/manifest/v1`, a complete
   `inventory.json`, frontmatter-free reports and semantic rules, raw-byte
   digest binding, strict dual-layout validation, and validation JSON response

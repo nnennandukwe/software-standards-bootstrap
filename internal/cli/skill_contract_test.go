@@ -121,6 +121,10 @@ func TestSchemaReferenceDefinesAllActionableContracts(t *testing.T) {
 		"ssb.dev/report/v1",
 		"ssb.dev/rule/v2",
 		"ssb.dev/verification/v1",
+		"ssb.dev/verification/v2",
+		"working_directory: .",
+		"ssb.dev/orientation/v1",
+		".software-standards/orientation.yaml",
 		"ssb.dev/automation/v1",
 		"metadata.category",
 		"ssb-utility-v1",
@@ -157,6 +161,70 @@ func TestSchemaReferenceDefinesAllActionableContracts(t *testing.T) {
 	}
 }
 
+func TestAgentSkillGeneratesEvidenceBackedOrientationAndVerificationV2(t *testing.T) {
+	root := repositoryRoot(t)
+	skill := normalizedText(t, filepath.Join(
+		root,
+		"skills",
+		"software-standards-bootstrap",
+		"SKILL.md",
+	))
+	evidence := normalizedText(t, filepath.Join(
+		root,
+		"skills",
+		"software-standards-bootstrap",
+		"references",
+		"evidence-workflow.md",
+	))
+
+	for _, required := range []string{
+		"concise repository orientation",
+		"ssb.dev/orientation/v1",
+		".software-standards/orientation.yaml",
+		"write no orientation file or manifest reference",
+		"`declares` or `enforces` evidence",
+		"New verification recipes use only `ssb.dev/verification/v2`",
+		"`working_directory`",
+		"existing v1 recipes remain readable",
+	} {
+		if !strings.Contains(skill, required) {
+			t.Errorf("Agent Skill missing orientation or verification-v2 generation contract %q", required)
+		}
+	}
+	for _, required := range []string{
+		"Orientation statements use only `declares` or `enforces`",
+		"working directory resolves to a tracked tree",
+	} {
+		if !strings.Contains(evidence, required) {
+			t.Errorf("evidence workflow missing orientation or working-directory contract %q", required)
+		}
+	}
+}
+
+func TestPublicDocsDefineOrientationAndVerificationCompatibility(t *testing.T) {
+	root := repositoryRoot(t)
+	documents := []string{
+		"README.md",
+		"docs/architecture.md",
+		"docs/rule-format.md",
+		"docs/verification.md",
+	}
+
+	for _, relative := range documents {
+		content := normalizedText(t, filepath.Join(root, filepath.FromSlash(relative)))
+		for _, required := range []string{
+			"ssb.dev/orientation/v1",
+			"ssb.dev/verification/v2",
+			"working_directory",
+			"verification/v1",
+		} {
+			if !strings.Contains(content, required) {
+				t.Errorf("%s missing orientation or verification compatibility contract %q", relative, required)
+			}
+		}
+	}
+}
+
 func TestAgentSkillSupportsActionablePackConsumptionAndMaintenance(t *testing.T) {
 	root := repositoryRoot(t)
 	skill := normalizedText(t, filepath.Join(
@@ -176,6 +244,7 @@ func TestAgentSkillSupportsActionablePackConsumptionAndMaintenance(t *testing.T)
 		"every represented lens dimension matches",
 		"Report active artifact IDs",
 		"Run recipe commands only when",
+		"Do not load the complete raw inventory into context",
 		"ssb validate --repo . --format text",
 		"ssb render --repo . --dry-run",
 		"ssb adr --repo . --dry-run",

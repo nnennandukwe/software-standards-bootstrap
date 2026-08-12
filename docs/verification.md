@@ -33,21 +33,32 @@ Tests cover:
 - literal paths, safe Git invocation, binary/generated/resource exclusions,
   and complete inventory accounting;
 - exact replay of the report inventory at its pinned baseline and limits;
-- strict report, semantic-rule, verification-recipe, Agent Skill, and
-  automation-proposal schemas;
+- strict report, semantic-rule, Agent Skill, and automation-proposal schemas;
+- strict `ssb.dev/verification/v1` compatibility, rejection of v2-only fields
+  in v1, and `ssb.dev/verification/v2` `working_directory` validation for root,
+  nested, missing, file-valued, submodule, traversal, absolute, alternate
+  separator, and Windows-volume paths;
+- bounded `ssb.dev/orientation/v1` summary, areas, prerequisites, documents,
+  task guidance, authoritative evidence, exact digest binding, relationship
+  targets, duplicates, symlinks, paths, and schema-only behavior;
 - global IDs, canonical paths, category, lenses, scopes, derivation, exact
   evidence, confidence, utility, and relationships;
 - extracted and inferred evidence thresholds;
 - recipe step references to exact `enforces` evidence;
 - rejection of prior rule contracts and rule-owned command/check metadata;
-- normalized JSON containing all four artifact kinds;
-- base-rule inlining, contextual rule/recipe links, Agent Skill indexing, and
-  automation omission in `AGENTS.md`;
+- normalized response-schema-3 JSON containing orientation and all four
+  artifact kinds, with `working_directory: .` for verification/v1 steps;
+- lifecycle-first orientation, action-first base rules, contextual links,
+  exact inert verification commands, working directories, expected results,
+  relationship labels, Agent Skill indexing, and automation omission in
+  `AGENTS.md`;
 - ADR inclusion of rules, recipes, and skills and exclusion of automation
   proposals;
-- zero-artifact and automation-only no-write behavior;
-- drift, malformed markers, unsafe targets, collision-safe ADR creation, dry
-  runs, and atomic write failures; and
+- zero-artifact, orientation-only, and automation-only no-write behavior;
+- orientation exclusion from artifact denominators and ADR eligibility;
+- drift, reserved or malformed markers, dynamically safe Markdown fences,
+  unsafe targets, collision-safe ADR creation, dry runs, and atomic write
+  failures; and
 - no mutation from inspection, validation, dry runs, or failed operations.
 
 ## Benchmark evidence
@@ -61,6 +72,11 @@ its exact version. A pooled cross-repository average is not acceptance. Use
 every final artifact emitted before developer review as that fixture's
 denominator; deferred and rejected artifacts remain in it, and the exact
 fraction must meet the threshold without rounding.
+
+Orientation is repository context, not an actionable artifact. It does not
+enter the benchmark denominator or ADR eligibility. Contract snapshots for a
+generated root file use `proposal/AGENTS.proposed.md`; that inert filename
+prevents a retained benchmark fixture from becoming host instructions.
 
 Historical result files under
 [`docs/benchmarks/results/2026-07-23/`](benchmarks/results/2026-07-23/README.md)

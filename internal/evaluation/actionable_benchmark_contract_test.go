@@ -15,6 +15,8 @@ func TestBenchmarkAcceptanceCountsEveryActionableArtifact(t *testing.T) {
 	benchmark := strings.Join(strings.Fields(string(content)), " ")
 	for _, required := range []string{
 		"counts for every emitted rule, verification recipe, Agent Skill, and automation proposal",
+		"Orientation is repository context, not an actionable artifact",
+		"does not enter the artifact denominator or ADR eligibility",
 		"100% of emitted artifacts have resolvable evidence",
 		"Every accepted candidate has exactly one actionable artifact kind",
 		"At least 70% of final artifacts are judged “keep” or “edit and keep” in each pinned repository independently",

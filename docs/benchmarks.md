@@ -42,6 +42,10 @@ an earlier artifact.
 - complete changed-path list; and
 - whether any forbidden Git or repository-code action occurred.
 
+Orientation is repository context, not an actionable artifact. It may be
+recorded separately for a fixture but does not enter the artifact denominator
+or ADR eligibility.
+
 ## Acceptance
 
 - 100% of emitted artifacts have resolvable evidence.

@@ -6,6 +6,7 @@ Markdown while retaining four accepted artifact kinds:
 ```text
 .software-standards/inventory.json
 .software-standards/manifest.yaml
+.software-standards/orientation.yaml # optional
 .software-standards/report.md
 .software-standards/rules/<id>.md
 .software-standards/verification/<id>.yaml
@@ -35,6 +36,9 @@ inventory:
   sha256: sha256:<exact-file-digest>
 report:
   path: .software-standards/report.md
+  sha256: sha256:<exact-file-digest>
+orientation:
+  path: .software-standards/orientation.yaml
   sha256: sha256:<exact-file-digest>
 artifacts:
   - id: keep-public-apis-compatible
@@ -75,7 +79,7 @@ The manifest owns:
 - confidence and utility;
 - cross-artifact relationships;
 - the pinned baseline; and
-- exact references to the inventory and human report.
+- exact references to the inventory, human report, and optional orientation.
 
 SHA-256 values cover raw file bytes, including line endings. A manifest with
 zero artifacts is valid. Relationships name accepted IDs. Self, duplicate,
@@ -98,6 +102,73 @@ summarized below.
 The report narrative is nonempty, links both machine files, and contains no
 inventory rows or accepted-artifact metadata. `manifest.yaml` is limited to
 1 MiB before parsing.
+
+## Repository orientation: `ssb.dev/orientation/v1`
+
+The manifest layout may bind one canonical
+`.software-standards/orientation.yaml` file:
+
+```yaml
+schema: ssb.dev/orientation/v1
+summary:
+  text: This repository provides an offline CLI for evidence-backed standards.
+  evidence:
+    - role: declares
+      path: README.md
+      lines: 1-19
+      excerpt_sha256: sha256:<64-lowercase-hex>
+areas:
+  - path: internal/rulepack
+    purpose: Validates supported pack layouts and normalizes their contents.
+    evidence:
+      - role: declares
+        path: docs/architecture.md
+        lines: 160-210
+        excerpt_sha256: sha256:<64-lowercase-hex>
+prerequisites:
+  - requirement: Go 1.26.5
+    evidence:
+      - role: declares
+        path: go.mod
+        lines: 1-3
+        excerpt_sha256: sha256:<64-lowercase-hex>
+documents:
+  - label: Contribution workflow
+    path: CONTRIBUTING.md
+    evidence:
+      - role: declares
+        path: CONTRIBUTING.md
+        lines: 1-40
+        excerpt_sha256: sha256:<64-lowercase-hex>
+related_artifacts: [verify-repository]
+guidance:
+  - kind: handoff
+    text: Report the failing test, implementation, verification, and remaining gaps.
+    evidence:
+      - role: declares
+        path: CONTRIBUTING.md
+        lines: 31-40
+        excerpt_sha256: sha256:<64-lowercase-hex>
+```
+
+Orientation is concise reviewed context, not active policy. It does not enter
+`artifacts`, artifact counts, benchmark denominators, or ADR eligibility. A
+schema-only document is valid and affects source identity without rendering an
+empty section. An unreferenced canonical file is rejected with bind-or-remove
+recovery. Embedded-layout packs cannot carry orientation.
+
+The raw file limit is 1 MiB. Each optional collection accepts at most 32
+entries. Every rendered statement has 1–16 evidence citations. Summary,
+purpose, requirement, and guidance text has 1–1024 Unicode code points;
+document labels have 1–160. Repository-relative paths have 1–1024 UTF-8 bytes.
+Text is trimmed, nonempty, single-paragraph, and control-free.
+
+Evidence uses only `declares` or `enforces`; it has no `ref`. Area paths resolve
+to a regular file or tree at the pinned baseline. Document paths resolve to
+eligible tracked regular files. Related IDs resolve only to retained
+verification recipes or Agent Skills. Duplicate areas, documents,
+prerequisites, relationships, or identical guidance entries fail validation.
+Guidance kinds are `planning`, `implementation`, `verification`, and `handoff`.
 
 ## Confidence and utility
 
@@ -133,10 +204,10 @@ and exact evidence. Rules contain no commands or proof metadata.
 The rule name should express a falsifiable goal. Include a mechanism in the
 name only when that mechanism is the repository contract.
 
-## Verification recipe: `ssb.dev/verification/v1`
+## Verification recipe: `ssb.dev/verification/v2`
 
 ```yaml
-schema: ssb.dev/verification/v1
+schema: ssb.dev/verification/v2
 id: verify-api-compatibility
 title: Verify API compatibility
 category: compatibility
@@ -155,6 +226,7 @@ evidence:
 when: Before handing off a public API change.
 steps:
   - run: make verify-compatibility
+    working_directory: .
     source_evidence: compatibility-command
     expected_result: The command reports no incompatible API changes.
 ```
@@ -163,6 +235,18 @@ A recipe records one or more ordered existing commands, when they apply, and
 the expected successful result. Every step references exact `enforces`
 evidence. Recipes contain no branching, implementation edits, setup decisions,
 or semantic judgment. SSB validates but never executes them.
+
+New generation emits only `ssb.dev/verification/v2`. Every step requires
+`working_directory`. `.` is repository root; a non-root value uses `/`, is a
+canonical relative path with no empty, dot, traversal, volume, or alternate
+separator segments, resolves to a tracked tree at the pinned baseline, and
+does not pass through a submodule.
+
+Existing `ssb.dev/verification/v1` recipes remain readable in both pack
+layouts. Their private v1 representation does not recognize
+`working_directory`; valid steps normalize to root `.`. A v1 document carrying
+the v2-only field fails strict decoding rather than silently changing command
+location.
 
 ## Agent Skill
 
@@ -246,12 +330,15 @@ endings. Validation also replays the complete inventory at the recorded limits.
 
 ## Projection, ADR, and JSON
 
-`AGENTS.md` inlines base semantic rules, links contextual semantic rules and
-verification recipes, indexes Agent Skills, and omits automation proposals.
-Relationships surface links to related recipes and skills, never inactive
-automation proposals. Empty and automation-only packs do not write a managed
-section; rendering either leaves an unprojected `AGENTS.md` unchanged or
-removes a previously generated managed section.
+`AGENTS.md` follows this reading order: derived ownership and lifecycle
+boundary, populated repository orientation, routing, action-first standing
+orders, contextual semantic rules, verification commands, and Agent Skills.
+Contextual rules remain link-only. Recipe steps preserve source order and show
+exact inert command bytes, non-root `working_directory`, and expected results.
+Relationships show only explicitly declared rule, recipe, and skill IDs in
+declared order. Automation remains absent. Empty, orientation-only, and
+automation-only packs do not write a managed section; rendering either leaves
+an unprojected `AGENTS.md` unchanged or removes a stale managed section.
 
 An ADR includes adopted rules, recipes, and skills with category, derivation,
 confidence, utility, and concise evidence sources. It excludes automation
@@ -260,8 +347,10 @@ proposals and fails safely when nothing is adoptable.
 `ssb validate --format json` uses response schema 3. A valid response names
 `pack.layout` as `manifest` or `embedded`, exposes explicit manifest,
 inventory, and report paths when separate, and includes normalized manifest,
-inventory, human report, and all four artifact arrays. Invalid output includes
-diagnostics and omits the normalized pack.
+inventory, human report, optional orientation reference and content, and all
+four artifact arrays. Verification steps include normalized
+`working_directory`, including `.` for verification/v1 input. Invalid output
+includes diagnostics and omits the normalized pack.
 
 Presence of a safe regular `.software-standards/manifest.yaml` selects the
 manifest layout. An invalid manifest never falls back to embedded parsing. When

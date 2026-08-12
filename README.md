@@ -9,8 +9,9 @@ for an existing Git repository:
 4. **Automation proposals** for valuable checks that do not yet exist.
 
 A machine manifest indexes accepted artifacts, while the inventory, human
-report, and human-first rules remain separate. A derived root `AGENTS.md`
-routes future coding agents to active rules, recipes, and skills.
+report, optional evidence-backed orientation, and human-first rules remain
+separate. A derived root `AGENTS.md` orients future coding agents and routes
+them to active rules, recipes, and skills.
 
 Run `ssb` in a repository whose engineering conventions are not yet documented for AI tools. A compatible coding agent analyzes the committed repository and proposes these files. Developers review, edit, delete, or approve them before adoption.
 
@@ -124,6 +125,22 @@ Before proposing artifacts, the agent reviews dependency boundaries, parallel
 implementations, platform seams, compatibility surfaces,
 source/test/documentation symmetry, and existing automatic enforcement.
 
+### Repository orientation
+
+Optional reviewed context that does not belong in an actionable artifact is
+stored at:
+
+```text
+.software-standards/orientation.yaml
+```
+
+`ssb.dev/orientation/v1` can describe the repository, important areas,
+prerequisites, canonical documents, related recipes or skills, and concise
+planning, implementation, verification, or handoff guidance. Every rendered
+statement has exact `declares` or `enforces` evidence at the pinned baseline.
+Orientation is context, not active policy: it is not counted as an artifact and
+is not eligible for the adoption ADR.
+
 ### Verification recipes
 
 Existing commands that deliver value when deliberately invoked are recorded at:
@@ -132,9 +149,13 @@ Existing commands that deliver value when deliberately invoked are recorded at:
 .software-standards/verification/<recipe-id>.yaml
 ```
 
-A recipe states when it applies, its ordered commands, exact `enforces`
-evidence, and the expected successful result. `ssb` records but never executes
-recipe commands.
+A newly generated `ssb.dev/verification/v2` recipe states when it applies, its
+ordered commands, each command's required `working_directory`, exact
+`enforces` evidence, and the expected successful result. `.` means repository
+root; another value must be a canonical tracked directory outside submodules.
+`ssb` records but never executes recipe commands. Existing strict
+`ssb.dev/verification/v1` recipes remain readable and normalize to root `.`;
+v1 never accepts the v2-only `working_directory` field.
 
 ### Agent Skills
 
@@ -171,9 +192,18 @@ change.
 
 `ssb` renders the proposed guidance into a managed section in the repository's root `AGENTS.md`.
 
-Base rules become standing orders. Contextual rules and recipes are links.
-Primary Agent Skills are indexed by activation context. Automation proposals
-are omitted because they are not active behavior.
+The section first states its derived lifecycle boundary, then presents any
+populated orientation, routing instructions, action-first standing orders,
+contextual rule links, exact inert verification commands, and scannable Agent
+Skills. Base rule bodies remain canonical Markdown. Recipe commands are shown
+byte-for-byte with working directories and expected results but are never
+executed by rendering. Automation proposals are omitted because they are not
+active behavior.
+
+An unmerged generated change is a proposal. Review and merge are the adoption
+decision; file presence alone does not prove adoption. Rendering does not
+stage, commit, push, open a pull request, execute a command, or activate another
+system, and a recorded expected result is not execution evidence.
 
 The manifest, inventory, report, and canonical artifact files are editable
 sources. `AGENTS.md` is derived.
@@ -185,15 +215,18 @@ New packs use the human-first manifest layout:
 ```text
 .software-standards/manifest.yaml
 .software-standards/inventory.json
+.software-standards/orientation.yaml # optional
 .software-standards/report.md
 ```
 
 The `ssb.dev/manifest/v1` manifest records the baseline, accepted index,
 selection and provenance metadata, confidence, utility, relationships, and
-exact raw-byte digests. `inventory.json` preserves the complete unedited
-inspection response. `report.md` opens on `# Software standards report` and
-contains only run-wide limitations and accepted-output narrative, with links
-to both machine files. A zero-artifact manifest is valid.
+exact raw-byte digests. Its optional orientation reference binds the exact
+`ssb.dev/orientation/v1` bytes without adding an artifact. `inventory.json`
+preserves the complete unedited inspection response. `report.md` opens on
+`# Software standards report` and contains only run-wide limitations and
+accepted-output narrative, with links to both machine files. A zero-artifact
+manifest is valid.
 
 Published v0.1.1 packs remain fully supported through the embedded layout:
 their `ssb.dev/report/v1` frontmatter continues to validate, render, create
@@ -311,7 +344,8 @@ ssb prune    <inspect|validate|approve|apply|recover|status|verify> [options]
 
 - `inspect` creates a safe inventory of one committed repository snapshot.
 - `validate` checks the detected pack layout, all four artifact schemas,
-  inventory, evidence, digests, confidence, utility, scopes, and relationships.
+  optional orientation, inventory, evidence, digests, confidence, utility,
+  scopes, verification-v1/v2 compatibility, and relationships.
 - `render` updates only the managed Software Standards Bootstrap section of root `AGENTS.md`, removing that section when no rule, recipe, or skill is active.
 - `adr` creates one new Proposed ADR from retained rules, recipes, and skills.
 
@@ -319,7 +353,10 @@ ssb prune    <inspect|validate|approve|apply|recover|status|verify> [options]
 
 `ssb validate --format json` uses response schema 3. Valid output identifies
 `pack.layout` as `manifest` or `embedded`; manifest-layout packs also expose
-separate manifest, inventory, and report paths. Invalid output omits `pack`.
+separate manifest, inventory, report, and optional orientation paths plus the
+normalized orientation content. Verification steps always expose normalized
+`working_directory`, including `.` for `verification/v1`. Invalid output omits
+`pack`.
 
 - `0`: success
 - `1`: actionable-pack or prune-proposal validation failure
