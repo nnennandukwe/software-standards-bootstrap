@@ -143,6 +143,7 @@ type Manifest struct {
 	BaselineCommit string             `yaml:"baseline_commit" json:"baseline_commit"`
 	Inventory      FileReference      `yaml:"inventory,omitempty" json:"inventory,omitzero"`
 	Report         FileReference      `yaml:"report,omitempty" json:"report,omitzero"`
+	Orientation    FileReference      `yaml:"orientation,omitempty" json:"orientation,omitzero"`
 	Artifacts      []AcceptedArtifact `yaml:"artifacts" json:"artifacts"`
 }
 
@@ -362,19 +363,21 @@ type AutomationProposal struct {
 // Pack contains parsed artifacts even when diagnostics are returned. Consumers
 // must not render or create an ADR unless diagnostics is empty.
 type Pack struct {
-	Layout         Layout               `json:"layout"`
-	BaselineCommit string               `json:"baseline_commit"`
-	ManifestPath   string               `json:"manifest_path,omitempty"`
-	InventoryPath  string               `json:"inventory_path,omitempty"`
-	ReportPath     string               `json:"report_path,omitempty"`
-	Manifest       Manifest             `json:"manifest"`
-	Inventory      ReportInventory      `json:"inventory"`
-	HumanReport    HumanReport          `json:"report"`
-	Report         Report               `json:"-"`
-	Rules          []Rule               `json:"rules"`
-	Recipes        []VerificationRecipe `json:"verification_recipes"`
-	Skills         []Skill              `json:"skills"`
-	Automations    []AutomationProposal `json:"automation_proposals"`
+	Layout          Layout               `json:"layout"`
+	BaselineCommit  string               `json:"baseline_commit"`
+	ManifestPath    string               `json:"manifest_path,omitempty"`
+	InventoryPath   string               `json:"inventory_path,omitempty"`
+	ReportPath      string               `json:"report_path,omitempty"`
+	OrientationPath string               `json:"orientation_path,omitempty"`
+	Manifest        Manifest             `json:"manifest"`
+	Orientation     *Orientation         `json:"orientation,omitempty"`
+	Inventory       ReportInventory      `json:"inventory"`
+	HumanReport     HumanReport          `json:"report"`
+	Report          Report               `json:"-"`
+	Rules           []Rule               `json:"rules"`
+	Recipes         []VerificationRecipe `json:"verification_recipes"`
+	Skills          []Skill              `json:"skills"`
+	Automations     []AutomationProposal `json:"automation_proposals"`
 }
 
 type skillFrontmatter struct {
@@ -483,6 +486,27 @@ func validateManifestLayoutPack(
 	}
 	pack.BaselineCommit = pack.Manifest.BaselineCommit
 	diagnostics = append(diagnostics, validateManifest(repo, pack.Manifest, retained)...)
+	if pack.Manifest.Orientation.Path == orientationPath {
+		pack.OrientationPath = orientationPath
+	}
+	if pack.Manifest.Orientation.IsZero() {
+		orientationInfo, orientationErr := os.Lstat(filepath.Join(repo.Root(), filepath.FromSlash(orientationPath)))
+		switch {
+		case orientationErr == nil:
+			message := orientationPath + " is present without a manifest reference"
+			if orientationInfo.Mode()&os.ModeSymlink != 0 {
+				message = orientationPath + " is a symlink present without a manifest reference"
+			}
+			diagnostics = append(diagnostics, diagnostic(
+				orientationPath,
+				"file",
+				message,
+				"bind it in the manifest or remove it",
+			))
+		case !errors.Is(orientationErr, os.ErrNotExist):
+			return Pack{}, nil, fmt.Errorf("inspect %s: %w", orientationPath, orientationErr)
+		}
+	}
 
 	var inventoryBytes []byte
 	if pack.Manifest.Inventory.Path == inventoryPath {
@@ -572,6 +596,19 @@ func validateManifestLayoutPack(
 		}
 		diagnostics = append(diagnostics, inventoryDiagnostics...)
 	}
+	if pack.Manifest.Orientation.Path == orientationPath {
+		orientation, orientationDiagnostics, orientationErr := loadOrientation(
+			ctx,
+			evidenceRepo,
+			repo.Root(),
+			pack.Manifest.Orientation,
+		)
+		if orientationErr != nil {
+			return Pack{}, nil, orientationErr
+		}
+		diagnostics = append(diagnostics, orientationDiagnostics...)
+		pack.Orientation = orientation
+	}
 
 	entriesByID := make(map[string]AcceptedArtifact, len(pack.Manifest.Artifacts))
 	entriesByPath := make(map[string]AcceptedArtifact, len(pack.Manifest.Artifacts))
@@ -652,6 +689,9 @@ func validateManifestLayoutPack(
 	}
 
 	diagnostics = append(diagnostics, validateRelationships(manifestPath, pack.Manifest.Artifacts, entriesByID)...)
+	if pack.Orientation != nil {
+		diagnostics = append(diagnostics, validateOrientationRelationships(orientationPath, pack.Orientation, entriesByID)...)
+	}
 	unlisted, scanDiagnostics, scanErr := unlistedNativeArtifacts(repo.Root(), entriesByPath)
 	if scanErr != nil {
 		return Pack{}, nil, scanErr
@@ -698,6 +738,14 @@ func validateManifest(repo *workspace.Repository, manifest Manifest, retained bo
 	}
 	if !digestPattern.MatchString(manifest.Report.SHA256) {
 		add("report.sha256", "report sha256 must use sha256:<64 lowercase hex characters>", "hash the exact report.md bytes")
+	}
+	if !manifest.Orientation.IsZero() {
+		if manifest.Orientation.Path != orientationPath {
+			add("orientation.path", "orientation path must be "+orientationPath, "use the canonical manifest-layout orientation path")
+		}
+		if !digestPattern.MatchString(manifest.Orientation.SHA256) {
+			add("orientation.sha256", "orientation sha256 must use sha256:<64 lowercase hex characters>", "hash the exact orientation.yaml bytes")
+		}
 	}
 	return diagnostics
 }

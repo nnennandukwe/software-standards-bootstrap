@@ -171,6 +171,7 @@ func verificationPackRepository(t *testing.T, schema, steps string) (string, man
 	writeFile(t, filepath.Join(repo, "main.go"), "package main\n\nfunc main() {}\n")
 	writeFile(t, filepath.Join(repo, "Makefile"), "verify:\n\tgo test ./...\n")
 	writeFile(t, filepath.Join(repo, "tools", "check.go"), "package tools\n")
+	writeFile(t, filepath.Join(repo, ".env"), "TOKEN=not-a-real-secret\n")
 	git(t, repo, "add", ".")
 	git(t, repo, "commit", "-m", "initial baseline")
 	gitlink := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
