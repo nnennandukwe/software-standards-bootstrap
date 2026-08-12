@@ -1,18 +1,38 @@
 # Actionable artifact schema quick reference
 
-The accepted pack is indexed by `.software-standards/report.md`. All YAML is
-strict: unknown fields and duplicate keys fail validation.
+New accepted packs are indexed by `.software-standards/manifest.yaml`. All
+YAML and JSON are strict: unknown fields and duplicate keys fail validation.
+Published legacy `ssb.dev/report/v1` packs remain readable without conversion.
 
-## Report manifest
+## Split manifest
 
 ```yaml
-schema: ssb.dev/report/v1
+schema: ssb.dev/manifest/v1
 baseline_commit: <40-character commit>
-inventory: <complete unedited schema 2 ssb-inventory-v2 response>
+inventory:
+  path: .software-standards/inventory.json
+  sha256: sha256:<exact raw file digest>
+report:
+  path: .software-standards/report.md
+  sha256: sha256:<exact raw file digest>
 artifacts:
   - id: keep-public-apis-compatible
     kind: rule
     path: .software-standards/rules/keep-public-apis-compatible.md
+    sha256: sha256:<exact raw file digest>
+    category: compatibility
+    lenses:
+      - kind: language
+        value: go
+    directive: always
+    scopes:
+      - "**/*.go"
+    derivation: extracted
+    evidence:
+      - role: declares
+        path: CONTRIBUTING.md
+        lines: 20-24
+        excerpt_sha256: sha256:<64 lowercase hex>
     confidence: high
     utility:
       method: ssb-utility-v1
@@ -27,14 +47,13 @@ artifacts:
       - verify-api-compatibility
 ```
 
-The report owns the accepted index, confidence, utility, relationships,
-complete inventory, limitations, and accepted-output summaries. It contains
-no rejected candidates, reasons, or counts. Native artifacts own their
-category, lenses, scopes, derivation, and evidence.
-
-A skill manifest entry additionally records those native fields because
-portable Agent Skill frontmatter cannot carry the complete SSB provenance
-contract. Its `category` must match the skill's `metadata.category`.
+The manifest owns the baseline, exact inventory and report references,
+accepted index, selection and provenance metadata, confidence, utility,
+relationships, and primary-file digests. SHA-256 values bind raw bytes,
+including line endings. `inventory.json` is the complete, unedited schema 2
+inspection response. `report.md` starts at byte zero with
+`# Software standards report`, contains narrative, and links both machine
+files. It has no frontmatter or inventory rows.
 
 Accepted confidence is `medium` or `high`.
 
@@ -57,30 +76,16 @@ artifact IDs and cannot dangle, repeat, or refer to the source artifact.
 
 ## Semantic rule
 
-```yaml
-schema: ssb.dev/rule/v2
-id: keep-public-apis-compatible
-title: Keep public APIs compatible
-category: compatibility
-lenses:
-  - kind: language
-    value: go
-directive: always
-scopes:
-  - "**/*.go"
-derivation: extracted
-evidence:
-  - role: declares
-    path: CONTRIBUTING.md
-    lines: 20-24
-    excerpt_sha256: sha256:<64 lowercase hex>
----
+```markdown
+# Keep public APIs compatible
+
 Keep changes to in-scope public APIs backward compatible.
 ```
 
-The Markdown body is canonical. A rule contains no classification, score,
-confidence, baseline, command, source, coverage, proves, proof-gap, or other
-verification-approach field.
+The rule has no frontmatter. Its single opening H1 supplies the normalized
+title, and nonempty actionable text follows immediately. The split manifest
+owns category, lenses, directive, scopes, derivation, and evidence. The
+normalized rule contract remains `ssb.dev/rule/v2`.
 
 `directive` is `always`, `ask-first`, `never`, or `prefer`.
 
@@ -120,14 +125,21 @@ contain no branching, edits, setup decisions, or semantic judgment.
 ---
 name: review-api-change
 description: Review a public API change and its dependent surfaces.
-metadata:
-  category: compatibility
+license: Apache-2.0
 ---
+# Review an API change
+
+## Procedure
+
+Inspect the public surface and each dependent package.
 ```
 
-The report entry owns the skill's lenses, scopes, derivation, evidence,
-confidence, utility, and relationships. Multi-step procedures with decisions,
-edits, setup, branching, or recovery belong here.
+The portable frontmatter requires `name` and `description`, plus a meaningful
+standard `license` or `compatibility` field. It omits SSB-owned
+`metadata.category`. The manifest owns lenses, scopes, derivation, evidence,
+confidence, utility, and relationships. The body begins with an H1 and a
+nonempty procedure. Multi-step procedures with decisions, edits, setup,
+branching, or recovery belong here.
 
 ## Automation proposal
 

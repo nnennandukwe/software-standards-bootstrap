@@ -8,7 +8,7 @@ Software Standards Bootstrap turns a pinned repository snapshot into a Git-revie
 host agent semantic reads
           │
           ▼
-report + four actionable artifact types
+split manifest + inventory + human report + four actionable artifact types
           │
           ├── ssb validate ── schema, inventory, evidence, confidence,
           │                   utility, and relationship checks
@@ -87,9 +87,12 @@ proposal files are immutable inputs once approved. Candidate replacements are
 complete files. Events form a digest chain binding the context, proposal,
 baseline, decision, and results.
 
-An approved removal binds the artifact bytes and the corresponding
-`.software-standards/report.md` index update into one application plan,
-journal, and rollback boundary. This preserves valid zero-rule and
+An approved removal binds the artifact bytes and the corresponding pack index
+update into one application plan, journal, and rollback boundary. For
+`split-v1`, prune updates `.software-standards/manifest.yaml`, refreshes
+primary-file digests, and removes dangling relationships without changing
+semantic metadata. For `legacy-v1`, it updates
+`.software-standards/report.md`. Both preserve valid zero-rule and
 zero-artifact packs without leaving a dangling accepted-artifact entry.
 
 Proposal validation parses replacement rule and skill contracts and evaluates
@@ -131,7 +134,7 @@ writing a non-executable file.
 Ordinary `validate`, `render`, and `adr` commands continue to require rule
 evidence pinned to current `HEAD`. After an approved prune application,
 review-aware `render --review` and `adr --review` instead validate resulting
-artifacts against the report's recorded historical baseline. A baseline that
+artifacts against the pack's recorded historical baseline. A baseline that
 is not a reachable ancestor of current `HEAD` is a hard evidence
 failure, even if its Git object remains locally resolvable. The rerender event binds
 both the managed-section digest and the complete `AGENTS.md` output digest;
@@ -163,21 +166,31 @@ poststate before recording its event.
 
 ### Actionable pack
 
-`rulepack.Validate` is the single public validation seam over the report and all
-four artifact types. Strict YAML uses known-field and unique-key validation.
-Artifact-specific parsers normalize into one pack consumed by rendering, JSON,
-and ADR creation.
+`rulepack.Validate` detects the source layout once and is the single public
+validation seam over all pack files and four artifact types. Presence of a
+safe regular `.software-standards/manifest.yaml` selects `split-v1`; an
+invalid split manifest never falls back. Without it, `ssb.dev/report/v1`
+frontmatter selects `legacy-v1`. Strict YAML and JSON reject unknown and
+duplicate fields. Both layouts normalize into one pack consumed by rendering,
+JSON, ADR creation, and governed prune.
+
+Split loading checks file type, symlinks, and canonical paths before parsing.
+`manifest.yaml` is limited to 1 MiB and `inventory.json` to 128 MiB. The
+manifest binds the exact raw bytes of the inventory, human report, and each
+primary artifact, including line endings. Human report and rule presentation
+are validated rather than silently normalized.
 
 The module owns:
 
-- report schema, accepted index, global IDs, kinds, and canonical paths;
+- `ssb.dev/manifest/v1` and `ssb.dev/report/v1` schemas, accepted index, global
+  IDs, kinds, canonical paths, and exact raw-byte digests;
 - exact replay of the complete schema 2 inventory at the pinned baseline;
 - confidence gates, utility factor bounds, arithmetic, and threshold;
 - category, lenses, scopes, directive, and derivation validation;
 - evidence roles, thresholds, exact line-range hashing, and inventory
   eligibility;
 - recipe step-to-`enforces` evidence references;
-- portable Agent Skill frontmatter and report category agreement;
+- portable Agent Skill frontmatter and manifest-owned SSB metadata;
 - automation proposal completeness;
 - cross-artifact relationship integrity; and
 - symlink and traversal rejection.
@@ -187,8 +200,10 @@ good. Those remain host-agent judgments reviewed by a developer. It never
 executes a recipe or implements an automation proposal.
 
 Valid `ssb validate --format json` output includes the normalized pack in
-response schema 2. Invalid output omits the pack. This is a local interchange
-boundary, not a catalog import or synchronization mechanism.
+response schema 3. It reports `pack.format` as `split-v1` or `legacy-v1` and
+exposes separate manifest, inventory, and report paths only when they exist.
+Invalid output omits the pack. This is a local interchange boundary, not a
+catalog import or synchronization mechanism.
 
 ### Renderer
 
@@ -230,8 +245,10 @@ status.
 
 | Artifact | Role | Editable | Evidence state |
 |---|---|---:|---:|
-| `.software-standards/report.md` | Accepted index, complete inventory, confidence, utility, relationships, and run narrative | Yes | Exact inventory accounting |
-| `.software-standards/rules/*.md` | Canonical semantic rules and local evidence | Yes | Evidence mapping only |
+| `.software-standards/manifest.yaml` | Split-pack accepted index, selection metadata, provenance, relationships, and primary-file digests | Yes | Exact file and evidence binding |
+| `.software-standards/inventory.json` | Complete unedited inspection response | Yes | Exact baseline inventory accounting |
+| `.software-standards/report.md` | Human limitations and accepted-output narrative; legacy packs also retain their `ssb.dev/report/v1` machine contract here | Yes | Split: digest-bound narrative; legacy: inventory and evidence index |
+| `.software-standards/rules/*.md` | Human-first semantic rules; legacy files retain `ssb.dev/rule/v2` frontmatter | Yes | Manifest-owned evidence mapping |
 | `.software-standards/verification/*.yaml` | Canonical existing-command recipes | Yes | Records commands, never a run result |
 | `.agents/skills/*/SKILL.md` | Canonical procedural workflows | Yes | No |
 | `.software-standards/automation/*.yaml` | Reviewable proposed-check designs | Yes | Not implemented or adopted |

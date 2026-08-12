@@ -8,7 +8,8 @@ for an existing Git repository:
 3. **Agent Skills** for multi-step engineering workflows.
 4. **Automation proposals** for valuable checks that do not yet exist.
 
-A required run report indexes accepted artifacts. A derived root `AGENTS.md`
+A machine manifest indexes accepted artifacts, while the inventory, human
+report, and human-first rules remain separate. A derived root `AGENTS.md`
 routes future coding agents to active rules, recipes, and skills.
 
 Run `ssb` in a repository whose engineering conventions are not yet documented for AI tools. A compatible coding agent analyzes the committed repository and proposes these files. Developers review, edit, delete, or approve them before adoption.
@@ -103,11 +104,10 @@ Each proposed rule is stored at:
 ```
 
 Rules tell future AI tools what to `always`, `never`, or `prefer`, and when to
-ask a developer before proceeding.
-
-Every rule carries its engineering category, activation lenses, path scopes,
-derivation, exact repository evidence, and actionable body. Commands and check
-metadata never live in a semantic rule.
+ask a developer before proceeding. Each file opens on its H1 title and
+actionable body. The manifest carries category, activation lenses, path
+scopes, derivation, and exact evidence; commands and check metadata never live
+in a semantic rule.
 
 For example:
 
@@ -175,20 +175,30 @@ Base rules become standing orders. Contextual rules and recipes are links.
 Primary Agent Skills are indexed by activation context. Automation proposals
 are omitted because they are not active behavior.
 
-The report and canonical artifact files are editable sources. `AGENTS.md` is
-derived.
+The manifest, inventory, report, and canonical artifact files are editable
+sources. `AGENTS.md` is derived.
 
 ### Report and ADR
 
-Every pack requires:
+New packs use the human-first `split-v1` layout:
 
 ```text
+.software-standards/manifest.yaml
+.software-standards/inventory.json
 .software-standards/report.md
 ```
 
-The report records the complete inventory, accepted artifact index, confidence,
-utility, relationships, run-wide limitations, and accepted-output summaries.
-It contains no rejected candidates or reasons. A zero-artifact report is valid.
+The `ssb.dev/manifest/v1` manifest records the baseline, accepted index,
+selection and provenance metadata, confidence, utility, relationships, and
+exact raw-byte digests. `inventory.json` preserves the complete unedited
+inspection response. `report.md` opens on `# Software standards report` and
+contains only run-wide limitations and accepted-output narrative, with links
+to both machine files. A zero-artifact manifest is valid.
+
+Published v0.1.1 packs remain fully supported as `legacy-v1`: their
+`ssb.dev/report/v1` frontmatter continues to validate, render, create ADRs,
+and participate in governed prune without conversion. Validation never
+rewrites or migrates either layout.
 
 After developer review, `ssb` can create an optional ADR:
 
@@ -265,9 +275,10 @@ The agent runs the inventory, analyzes repository evidence, writes the proposal,
 
 ### 3. Review and rerender
 
-Review the report, every canonical artifact, and the generated `AGENTS.md`
-section. Do not edit the managed section directly. Edit canonical sources and
-the report together, then rerun validation and rendering.
+Review the manifest, inventory, human report, every canonical artifact, and
+the generated `AGENTS.md` section. Do not edit the managed section directly.
+When a digest-bound source changes, update its matching manifest digest, then
+rerun validation and rendering.
 
 ```bash
 ssb validate --repo .
@@ -299,12 +310,16 @@ ssb prune    <inspect|validate|approve|apply|recover|status|verify> [options]
 ```
 
 - `inspect` creates a safe inventory of one committed repository snapshot.
-- `validate` checks the report, all four artifact schemas, inventory, evidence,
-  confidence, utility, scopes, and relationships.
+- `validate` checks the detected pack layout, all four artifact schemas,
+  inventory, evidence, digests, confidence, utility, scopes, and relationships.
 - `render` updates only the managed Software Standards Bootstrap section of root `AGENTS.md`, removing that section when no rule, recipe, or skill is active.
 - `adr` creates one new Proposed ADR from retained rules, recipes, and skills.
 
 `inspect` supports `--max-candidate-files` and `--max-candidate-bytes`. `--allow-partial` permits diagnostic output from an incomplete inventory, but that output cannot be used to generate a proposal. Exit code `4`: inventory coverage incomplete.
+
+`ssb validate --format json` uses response schema 3. Valid output identifies
+`pack.format` as `split-v1` or `legacy-v1`; split packs also expose separate
+manifest, inventory, and report paths. Invalid output omits `pack`.
 
 - `0`: success
 - `1`: actionable-pack or prune-proposal validation failure
@@ -355,7 +370,7 @@ The `ssb` CLI:
 - pins prune capability evidence and preserves unknown provenance as unknown;
 - keeps prune application dry-run by default and journals approved writes for
   recovery;
-- binds artifact removals and their `report.md` index updates into one
+- binds artifact removals and their pack index updates into one
   recoverable plan;
 - rejects portable-path escapes and case-fold collisions before mutation; and
 - binds verification to the exact application, governed poststate, rerender,

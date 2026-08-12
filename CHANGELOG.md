@@ -6,6 +6,14 @@ All notable changes are documented here. The project follows semantic versioning
 
 ### Added
 
+- Human-first `split-v1` packs with `ssb.dev/manifest/v1`, a complete
+  `inventory.json`, frontmatter-free reports and semantic rules, raw-byte
+  digest binding, strict dual-layout validation, and validation JSON response
+  schema 3.
+- Permanent `legacy-v1` read support for published v0.1.1 packs across
+  validation, rendering, ADR creation, and governed lifecycle review.
+- Atomic split-manifest maintenance for governed prune updates, removals,
+  relationship cleanup, and rollback.
 - A checksum-verifying `install.ps1` for Windows, matching the `install.sh`
   guarantees: architecture and release-tag validation before any download,
   SHA-256 verification before the binary reaches its destination, refusal to

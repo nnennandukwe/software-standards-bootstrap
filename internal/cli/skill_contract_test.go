@@ -36,6 +36,31 @@ func TestAgentSkillRequiresActionableCandidateRouting(t *testing.T) {
 	}
 }
 
+func TestAgentSkillGeneratesHumanFirstSplitPack(t *testing.T) {
+	root := repositoryRoot(t)
+	skill := normalizedText(t, filepath.Join(
+		root,
+		"skills",
+		"software-standards-bootstrap",
+		"SKILL.md",
+	))
+
+	for _, required := range []string{
+		".software-standards/inventory.json",
+		".software-standards/manifest.yaml",
+		"complete, unedited `ssb inspect --format json` response",
+		"exact raw file bytes, including line endings",
+		"begins at byte zero with `# Software standards report`",
+		"Semantic-rule Markdown has no frontmatter",
+		"Generation omits `metadata.category`",
+		"Write `manifest.yaml` last",
+	} {
+		if !strings.Contains(skill, required) {
+			t.Errorf("Agent Skill missing human-first split-pack contract %q", required)
+		}
+	}
+}
+
 func TestAgentSkillRequiresStructuralAndExistingCheckReview(t *testing.T) {
 	root := repositoryRoot(t)
 	skill := normalizedText(t, filepath.Join(
@@ -224,6 +249,28 @@ func TestPublicDocumentationUsesOnlyActionableContracts(t *testing.T) {
 		} {
 			if strings.Contains(content, forbidden) {
 				t.Errorf("%s retains removed contract %q", relative, forbidden)
+			}
+		}
+	}
+}
+
+func TestPublicDocumentationDefinesSplitGenerationAndLegacyCompatibility(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, relative := range []string{
+		"README.md",
+		"docs/architecture.md",
+		"docs/rule-format.md",
+	} {
+		content := normalizedText(t, filepath.Join(root, filepath.FromSlash(relative)))
+		for _, required := range []string{
+			"ssb.dev/manifest/v1",
+			"split-v1",
+			"legacy-v1",
+			"ssb.dev/report/v1",
+			"response schema 3",
+		} {
+			if !strings.Contains(content, required) {
+				t.Errorf("%s missing split/legacy contract %q", relative, required)
 			}
 		}
 	}

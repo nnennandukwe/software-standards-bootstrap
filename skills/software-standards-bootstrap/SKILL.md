@@ -5,9 +5,9 @@ license: Apache-2.0
 compatibility: Requires the ssb CLI, Git 2.39 or newer, a commit-backed branch, and host access to read and write the target repository.
 metadata:
   project: software-standards-bootstrap
-  schema: ssb.dev/report/v1
+  schema: ssb.dev/manifest/v1
   category: developer-experience
-  version: 0.4.0
+  version: 0.5.0
 ---
 
 # Software Standards Bootstrap
@@ -30,8 +30,10 @@ prune proposal.
 
 ## Choose the mode
 
-If `.software-standards/report.md` does not exist, use generation mode. When it
-does exist:
+If neither `.software-standards/manifest.yaml` nor
+`.software-standards/report.md` exists, use generation mode. A safe regular
+`manifest.yaml` selects the split layout; otherwise a frontmatter-based
+`ssb.dev/report/v1` report selects the legacy layout. When either pack exists:
 
 - use reviewed-pack maintenance mode only for an explicit request to validate
   or rerender developer-edited sources;
@@ -46,12 +48,14 @@ does exist:
 Do not run `ssb inspect`, `ssb validate`, or `ssb render`, and do not rewrite
 the pack.
 
-1. Read `.software-standards/report.md` and its accepted artifact index.
+1. Read `.software-standards/manifest.yaml` and the linked human report and
+   inventory for a split pack. For a legacy pack, read
+   `.software-standards/report.md` and its accepted artifact index.
 2. If the pack contains no rule, verification recipe, or Agent Skill, report
    that it has no active guidance. Automation proposals are not active policy.
 3. Otherwise read the managed Software Standards Bootstrap section in root
    `AGENTS.md`. Stop as stale if it is missing, malformed, or disagrees with
-   the report or canonical sources.
+   the detected manifest, human report, or canonical sources.
 4. Identify affected repository-relative paths and classify the request as
    `planning`, `implementation`, or `verification`.
 5. Identify languages and frameworks only from the request and repository
@@ -148,6 +152,10 @@ report recovery guidance verbatim. Record the exact `baseline_commit`, the
 complete schema 2 inventory response, confirmation that `truncated` is false,
 and the safe tracked paths available for semantic reads.
 
+Preserve the command's complete, unedited `ssb inspect --format json` response
+for `.software-standards/inventory.json`. Do not parse and re-encode it. Its
+digest binds the exact raw file bytes, including line endings.
+
 ### 2. Perform targeted semantic reads
 
 Read only inventory-listed paths. Never execute repository files, hooks, build
@@ -187,7 +195,9 @@ Before presenting final candidates:
    total below 45.
 8. Review each semantic name. A rule name must express a falsifiable goal and
    include a mechanism only when that mechanism is the repository contract.
-9. Write accepted artifacts and then the final report manifest.
+9. Write accepted artifacts and then the final report manifest. For the split
+   layout, Write `manifest.yaml` last, after every digest-bound primary file is
+   final.
 
 Do not persist rejected candidates, rejection reasons, or rejection counts.
 Do not split a compound observation unless semantic clarity requires it.
@@ -197,6 +207,8 @@ Do not split a compound observation unless semantic clarity requires it.
 Create only accepted outputs:
 
 ```text
+.software-standards/inventory.json
+.software-standards/manifest.yaml
 .software-standards/report.md
 .software-standards/rules/<rule-id>.md
 .software-standards/verification/<recipe-id>.yaml
@@ -204,9 +216,12 @@ Create only accepted outputs:
 .software-standards/automation/<proposal-id>.yaml
 ```
 
-Every accepted artifact has a globally unique stable kebab-case ID, one
-category, activation lenses, repository-relative scopes, derivation, exact
-evidence, `medium` or `high` confidence, and utility of at least 45.
+`manifest.yaml` uses `ssb.dev/manifest/v1`. It owns the baseline, exact
+inventory and report references, accepted index, category, activation lenses,
+repository-relative scopes, directive where applicable, derivation, exact
+evidence, `medium` or `high` confidence, utility of at least 45,
+relationships, and each primary file's SHA-256 digest. Hash exact raw file
+bytes, including line endings. IDs are globally unique stable kebab-case.
 
 Evidence roles are:
 
@@ -223,26 +238,32 @@ across at least two files.
 actionability 0–20, applicability 0–15, and earlier feedback 0–10. Bands are
 80–100 very-high, 65–79 high, and 45–64 medium.
 
-Semantic rules contain only category, lenses, directive, scopes, derivation,
-evidence, and an actionable body. They contain no commands or proof metadata.
+Semantic-rule Markdown has no frontmatter. It begins with one H1 title, then
+immediately presents nonempty actionable text. The H1 supplies the normalized
+title; machine metadata lives only in `manifest.yaml`.
 
 Verification recipes contain ordered existing commands, exact `enforces`
 evidence references, when they apply, and expected successful results. They
 contain no branching, edits, or semantic judgment.
 
-Agent Skills use portable frontmatter with `metadata.category`. The report
-stores their SSB lenses, scopes, derivation, evidence, confidence, utility, and
-relationships.
+Agent Skills use portable `name` and `description` frontmatter plus a
+meaningful standard `license` or `compatibility` field. Generation omits
+`metadata.category`; the manifest stores all SSB selection and provenance
+metadata. The body begins with an H1 and contains a nonempty `## Procedure`
+section.
 
 Automation proposals describe a condition, suggested check, trigger, and
 expected success and failure. They are designs, not implemented checks or
 adopted standards.
 
-The report records the exact complete inventory, accepted artifact index,
-confidence, utility, relationships, limitations, and accepted-output
-summaries. Native artifacts own their category, lenses, scopes, derivation,
-and evidence. The report duplicates those fields only for Agent Skills. A
-zero-artifact report is valid.
+`inventory.json` is the complete, unedited inspection response. `report.md`
+has no frontmatter, begins at byte zero with `# Software standards report`,
+contains nonempty narrative, and links to `manifest.yaml` and
+`inventory.json`. It summarizes limitations and accepted outputs without
+inventory rows or machine metadata. A zero-artifact manifest is valid.
+
+Verification recipes and automation proposals retain their existing native
+YAML schemas. Their exact primary bytes are digest-bound by the manifest.
 
 If any target exists, stop instead of overwriting developer work.
 
@@ -257,7 +278,8 @@ ssb render --repo .
 ```
 
 Stop on diagnostics before projection. Do not edit the managed `AGENTS.md`
-section. Edit canonical sources and the report together, then rerun.
+section. When a digest-bound source changes, update its exact manifest digest,
+then rerun.
 
 The projection inlines base semantic rules, links contextual rules and recipes,
 indexes primary Agent Skills, and omits automation proposals. An empty or
@@ -278,7 +300,8 @@ List every changed and untracked path. State explicitly:
 - no automation proposal was implemented;
 - no Git mutation was performed;
 - `AGENTS.md` is derived; and
-- the report and canonical artifact files are the editable sources.
+- the manifest, inventory, report, and canonical artifact files are the
+  editable sources.
 
 Stop before the ADR. The developer-created pull request and its merge are the
 adoption decision.

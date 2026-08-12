@@ -1,9 +1,11 @@
 # Actionable pack format
 
-Software Standards Bootstrap uses one required report manifest and four
-accepted artifact kinds:
+New Software Standards Bootstrap packs separate machine metadata from human
+Markdown while retaining four accepted artifact kinds:
 
 ```text
+.software-standards/inventory.json
+.software-standards/manifest.yaml
 .software-standards/report.md
 .software-standards/rules/<id>.md
 .software-standards/verification/<id>.yaml
@@ -11,28 +13,47 @@ accepted artifact kinds:
 .software-standards/automation/<id>.yaml
 ```
 
-This is an intentional pre-release cutover. Semantic rules use the rewritten
-`ssb.dev/rule/v2` contract. Earlier rule contracts and proof-oriented fields
-are unsupported.
+The new layout is `split-v1` and uses `ssb.dev/manifest/v1`. The published
+`legacy-v1` layout embeds `ssb.dev/report/v1` frontmatter in `report.md` and
+keeps `ssb.dev/rule/v2` frontmatter in semantic rules. It remains fully
+readable for validation, rendering, ADR creation, and governed prune without
+conversion. New generation always writes the split layout.
 
-All YAML is strict. Unknown fields and duplicate keys fail validation. IDs are
-globally unique lower-case kebab-case and each artifact kind has one canonical
-path.
+All YAML and JSON are strict. Unknown fields and duplicate keys fail
+validation. IDs are globally unique lower-case kebab-case and each artifact
+kind has one canonical path.
 
-## Report: `ssb.dev/report/v1`
+## Manifest: `ssb.dev/manifest/v1`
 
-`.software-standards/report.md` is the required pack manifest and run
-narrative:
+`.software-standards/manifest.yaml` owns machine metadata:
 
 ```yaml
----
-schema: ssb.dev/report/v1
+schema: ssb.dev/manifest/v1
 baseline_commit: 0123456789abcdef0123456789abcdef01234567
-inventory: <complete unedited schema 2 ssb-inventory-v2 response>
+inventory:
+  path: .software-standards/inventory.json
+  sha256: sha256:<exact-file-digest>
+report:
+  path: .software-standards/report.md
+  sha256: sha256:<exact-file-digest>
 artifacts:
   - id: keep-public-apis-compatible
     kind: rule
     path: .software-standards/rules/keep-public-apis-compatible.md
+    sha256: sha256:<exact-file-digest>
+    category: compatibility
+    lenses:
+      - kind: language
+        value: go
+    directive: always
+    scopes:
+      - "**/*.go"
+    derivation: extracted
+    evidence:
+      - role: declares
+        path: CONTRIBUTING.md
+        lines: 20-24
+        excerpt_sha256: sha256:<64-lowercase-hex>
     confidence: high
     utility:
       method: ssb-utility-v1
@@ -43,33 +64,40 @@ artifacts:
         actionability: 15
         applicability: 10
         earlier_feedback: 10
-    related_artifacts:
-      - verify-api-compatibility
----
-# Software standards report
-
-Inventory coverage was complete. Accepted outputs and run-wide limitations
-are summarized here.
+    related_artifacts: [verify-api-compatibility]
 ```
 
-The report owns:
+The manifest owns:
 
 - the exact accepted artifact index, kind, and canonical path;
+- the exact SHA-256 digest of every primary artifact's raw bytes;
+- category, activation, scope, directive, derivation, and evidence;
 - confidence and utility;
 - cross-artifact relationships;
-- complete inventory and run-wide limitations; and
-- accepted-output summaries.
+- the pinned baseline; and
+- exact references to the inventory and human report.
 
-It does not duplicate native artifact provenance and contains no rejected
-candidates, reasons, or counts. A report with zero artifacts is valid.
+SHA-256 values cover raw file bytes, including line endings. A manifest with
+zero artifacts is valid. Relationships name accepted IDs. Self, duplicate,
+and dangling relationships fail validation.
 
-Agent Skills are the exception to provenance locality. Portable frontmatter
-cannot carry the complete SSB contract, so each skill manifest entry also
-records `category`, `lenses`, `scopes`, `derivation`, and `evidence`. Its
-category must match `metadata.category` in the skill.
+`inventory.json` is the complete, unedited `ssb inspect --format json`
+response. Validation rejects unknown or duplicate JSON fields, enforces its
+128 MiB pre-parse limit, and replays it against the pinned baseline.
 
-Relationships name accepted IDs. Self, duplicate, and dangling relationships
-fail validation.
+`report.md` has no frontmatter and begins at byte zero with:
+
+```markdown
+# Software standards report
+
+Inventory coverage was complete. See [manifest.yaml](manifest.yaml) and
+[inventory.json](inventory.json). Accepted outputs and limitations are
+summarized below.
+```
+
+The report narrative is nonempty, links both machine files, and contains no
+inventory rows or accepted-artifact metadata. `manifest.yaml` is limited to
+1 MiB before parsing.
 
 ## Confidence and utility
 
@@ -89,34 +117,18 @@ candidates are removed.
 Bands are `very-high` for 80–100, `high` for 65–79, and `medium` for 45–64.
 Candidates below 45 are removed.
 
-## Semantic rule: `ssb.dev/rule/v2`
+## Semantic rule: normalized `ssb.dev/rule/v2`
 
 ```markdown
----
-schema: ssb.dev/rule/v2
-id: keep-public-apis-compatible
-title: Keep public APIs compatible
-category: compatibility
-lenses:
-  - kind: language
-    value: go
-directive: always
-scopes:
-  - "**/*.go"
-derivation: extracted
-evidence:
-  - role: declares
-    path: CONTRIBUTING.md
-    lines: 20-24
-    excerpt_sha256: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
----
+# Keep public APIs compatible
+
 Keep in-scope public API changes backward compatible.
 ```
 
-A rule owns category, activation, directive, scope, derivation, exact evidence,
-and an actionable body. It does not contain classification, confidence,
-utility, baseline, commands, command sources, coverage, proved properties,
-gaps, or replacement verification-approach metadata.
+A split rule has no frontmatter. It starts with exactly one H1 whose text
+supplies the normalized title, followed immediately by nonempty actionable
+text. The manifest owns category, activation, directive, scope, derivation,
+and exact evidence. Rules contain no commands or proof metadata.
 
 The rule name should express a falsifiable goal. Include a mechanism in the
 name only when that mechanism is the repository contract.
@@ -161,13 +173,20 @@ portable Agent Skills:
 ---
 name: review-api-change
 description: Review a public API change and its dependent surfaces.
-metadata:
-  category: compatibility
+license: Apache-2.0
 ---
+# Review an API change
+
+## Procedure
+
+Inspect the public surface and each dependent package.
 ```
 
-The entrypoint remains `.agents/skills/<id>/SKILL.md`. The report records its
-SSB provenance, selection metadata, confidence, utility, and relationships.
+The entrypoint remains `.agents/skills/<id>/SKILL.md`. Split-pack skills keep
+portable `name` and `description` frontmatter plus a meaningful standard
+`license` or `compatibility` field. They omit SSB-owned `metadata.category`.
+The body begins with an H1 and a nonempty procedure. The manifest records SSB
+provenance, selection metadata, confidence, utility, and relationships.
 
 ## Automation proposal: `ssb.dev/automation/v1`
 
@@ -221,7 +240,7 @@ Evidence roles are:
 `inferred` artifacts require three distinct `demonstrates` citations across at
 least two files.
 
-Paths identify eligible tracked regular files at the report baseline. Ranges
+Paths identify eligible tracked regular files at the manifest baseline. Ranges
 are one-based and inclusive. Digests hash exact cited bytes including line
 endings. Validation also replays the complete inventory at the recorded limits.
 
@@ -238,6 +257,14 @@ An ADR includes adopted rules, recipes, and skills with category, derivation,
 confidence, utility, and concise evidence sources. It excludes automation
 proposals and fails safely when nothing is adoptable.
 
-`ssb validate --format json` uses response schema 2. A valid response includes
-the normalized report and all four artifact arrays. Invalid output includes
+`ssb validate --format json` uses response schema 3. A valid response names
+`pack.format` as `split-v1` or `legacy-v1`, exposes explicit manifest,
+inventory, and report paths when separate, and includes normalized manifest,
+inventory, human report, and all four artifact arrays. Invalid output includes
 diagnostics and omits the normalized pack.
+
+Presence of a safe regular `.software-standards/manifest.yaml` selects the
+split layout. An invalid manifest never falls back to legacy parsing. When it
+is absent, `ssb.dev/report/v1` frontmatter selects `legacy-v1`. Split packs
+reject legacy report and rule frontmatter. Validation never rewrites, repairs,
+or migrates either format.

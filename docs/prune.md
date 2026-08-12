@@ -80,14 +80,17 @@ Approval is a single event that lists every action as approved or rejected and
 binds the exact proposal digest. Dependencies must be approved together.
 Unable-to-determine cannot be approved. Approval is not recorded when its
 decisions cannot produce a safe application plan. Removing an artifact also
-removes its accepted index entry and inbound relationships from
-`.software-standards/report.md` in the same plan. A valid skill-only or
-zero-artifact result is allowed. Replacement actions that change a canonical
-artifact ID or path are rejected because lifecycle review cannot invent fresh
-provenance, confidence, or utility for the new manifest entry. Application
-refuses a changed `HEAD`, tracked/staged drift, changed sources, changed
-candidates, and path collisions. It writes an application recovery journal
-before any file operation.
+removes its accepted index entry and inbound relationships in the same plan.
+In a `split-v1` pack this updates `.software-standards/manifest.yaml`; in a
+`legacy-v1` pack it updates `.software-standards/report.md`. Split updates
+refresh the exact primary-file digest while leaving category, directive,
+scopes, derivation, evidence, confidence, and utility unchanged. A valid
+skill-only or zero-artifact result is allowed. Replacement actions that change
+a canonical artifact ID or path are rejected because lifecycle review cannot
+invent fresh provenance, confidence, or utility for the new manifest entry.
+Application refuses a changed `HEAD`, tracked/staged drift, changed sources,
+changed candidates, and path collisions. It writes an application recovery
+journal before any file operation.
 
 Dry run and write derive the same canonical application plan. Each operation
 contains the exact prestate and poststate, including presence, digest, and
