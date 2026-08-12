@@ -1,6 +1,6 @@
 <!-- software-standards-bootstrap:start -->
 <!-- source-digest: sha256:8e7ac51d033b957b03b4752bc1cf262a35c0e80198ab81a5283ea555f7774708 -->
-<!-- content-digest: sha256:aa58c900d669ac99a8da050848bc91e188ff7393e3ec0b097353c186e790c3dc -->
+<!-- content-digest: sha256:af1be1a5393a1028719a66c9952e3c5476a7f259e7fdc8f217f18bd16e732204 -->
 ## Software Standards Bootstrap
 
 This managed section is derived from retained canonical sources. An unmerged generated change is a proposal; repository review and merge are the adoption decision. File presence alone does not prove adoption.
@@ -71,7 +71,7 @@ Hoop is an open-source layer 7 gateway that governs access to infrastructure at 
 
 ##### Keep libhoop independent (`keep-libhoop-independent`)
 
-Do not import packages from `gateway/`, `agent/`, `client/`, or `common/` into `_libhoop/`. Bridge across the library boundary with standard-library types.
+> Do not import packages from `gateway/`, `agent/`, `client/`, or `common/` into `_libhoop/`. Bridge across the library boundary with standard-library types.
 
 - Applies to: `_libhoop/**/*.go`
 - Category: `architecture`
@@ -82,7 +82,7 @@ Do not import packages from `gateway/`, `agent/`, `client/`, or `common/` into `
 
 ##### Preserve analytics event continuity (`preserve-analytics-event-continuity`)
 
-When a route is added, duplicated, or superseded for an already tracked action, preserve its analytics event or document an intentional successor. Use constants from `gateway/analytics/events.go`; never replace them with event-name string literals or silently remove the final emission site.
+> When a route is added, duplicated, or superseded for an already tracked action, preserve its analytics event or document an intentional successor. Use constants from `gateway/analytics/events.go`; never replace them with event-name string literals or silently remove the final emission site.
 
 - Applies to: `gateway/api/**/*.go`, `gateway/analytics/**/*.go`
 - Related skill: [Change gateway api route](.agents/skills/change-gateway-api-route/SKILL.md)
@@ -92,7 +92,7 @@ When a route is added, duplicated, or superseded for an already tracked action, 
 
 ##### Synchronize environment configuration (`synchronize-environment-configuration`)
 
-Keep runtime environment-variable reads synchronized with the matching gateway or agent Helm values, secret pass-through, user-facing chart documentation, and `.env.sample` in the same change.
+> Keep runtime environment-variable reads synchronized with the matching gateway or agent Helm values, secret pass-through, user-facing chart documentation, and `.env.sample` in the same change.
 
 - Applies to: `.env.sample`, `gateway/**/*.go`, `agent/**/*.go`, `deploy/helm-chart/chart/gateway/**/*`, `deploy/helm-chart/chart/agent/**/*`
 - Category: `operability`
@@ -101,7 +101,7 @@ Keep runtime environment-variable reads synchronized with the matching gateway o
 
 ##### Preserve transport plugin order (`preserve-transport-plugin-order`)
 
-Preserve transport plugin registration in this order: review, audit, DLP, access control, webhooks, then Slack. Treat any reordering as a behavior change that requires explicit lifecycle analysis.
+> Preserve transport plugin registration in this order: review, audit, DLP, access control, webhooks, then Slack. Treat any reordering as a behavior change that requires explicit lifecycle analysis.
 
 - Applies to: `gateway/main.go`
 - Category: `correctness`
@@ -110,7 +110,7 @@ Preserve transport plugin registration in this order: review, audit, DLP, access
 
 ##### Use protocol packet constants (`use-protocol-packet-constants`)
 
-Represent protocol packet types with constants from `common/proto/{agent,client,gateway,system}`. Extend the appropriate constant package instead of introducing packet-type string literals.
+> Represent protocol packet types with constants from `common/proto/{agent,client,gateway,system}`. Extend the appropriate constant package instead of introducing packet-type string literals.
 
 - Applies to: `agent/**/*.go`, `client/**/*.go`, `gateway/**/*.go`, `common/**/*.go`
 - Category: `compatibility`

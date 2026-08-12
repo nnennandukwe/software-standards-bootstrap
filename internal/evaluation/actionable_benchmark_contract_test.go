@@ -164,7 +164,7 @@ func TestHoopAgentsContractSnapshotBindsInertProposalAndHostRouting(t *testing.T
 	if run.Schema != "ssb.dev/benchmark-run/v1" ||
 		run.Target.Repository != "hoophq/hoop" ||
 		run.Target.Commit != "3e0091b89fdaa3912f4f8e7b33fbb3104e47d71e" ||
-		run.SSB.SourceCommit != "fb28fedf9ef4eb5d343427915e4fe1da75972505" {
+		run.SSB.SourceCommit != "0a0dc33c52d1b51513545166d40b39d444512856" {
 		t.Fatalf("unexpected pinned run identity: %#v", run)
 	}
 	if run.Host.Name != "Codex CLI" || run.Host.Version != "0.145.0" || run.Host.Model != "gpt-5.6-sol" {
