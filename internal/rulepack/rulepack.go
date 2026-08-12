@@ -125,13 +125,19 @@ type FileReference struct {
 	SHA256 string `yaml:"sha256" json:"sha256"`
 }
 
+// IsZero lets validation JSON omit split-only file references for legacy
+// packs while preserving one normalized manifest shape.
+func (reference FileReference) IsZero() bool {
+	return reference.Path == "" && reference.SHA256 == ""
+}
+
 // Manifest owns split-pack machine metadata. Legacy reports are normalized
 // into the same shape without separate file references.
 type Manifest struct {
 	Schema         string             `yaml:"schema" json:"schema"`
 	BaselineCommit string             `yaml:"baseline_commit" json:"baseline_commit"`
-	Inventory      FileReference      `yaml:"inventory,omitempty" json:"inventory,omitempty"`
-	Report         FileReference      `yaml:"report,omitempty" json:"report,omitempty"`
+	Inventory      FileReference      `yaml:"inventory,omitempty" json:"inventory,omitzero"`
+	Report         FileReference      `yaml:"report,omitempty" json:"report,omitzero"`
 	Artifacts      []ManifestArtifact `yaml:"artifacts" json:"artifacts"`
 }
 
@@ -280,15 +286,15 @@ type AutomationProposal struct {
 // Pack contains parsed artifacts even when diagnostics are returned. Consumers
 // must not render or create an ADR unless diagnostics is empty.
 type Pack struct {
-	Format         string               `json:"-"`
+	Format         string               `json:"format"`
 	BaselineCommit string               `json:"baseline_commit"`
-	ManifestPath   string               `json:"-"`
-	InventoryPath  string               `json:"-"`
+	ManifestPath   string               `json:"manifest_path,omitempty"`
+	InventoryPath  string               `json:"inventory_path,omitempty"`
 	ReportPath     string               `json:"report_path,omitempty"`
-	Manifest       Manifest             `json:"-"`
-	Inventory      ReportInventory      `json:"-"`
-	HumanReport    HumanReport          `json:"-"`
-	Report         Report               `json:"report,omitempty"`
+	Manifest       Manifest             `json:"manifest"`
+	Inventory      ReportInventory      `json:"inventory"`
+	HumanReport    HumanReport          `json:"report"`
+	Report         Report               `json:"-"`
 	Rules          []Rule               `json:"rules"`
 	Recipes        []VerificationRecipe `json:"verification_recipes"`
 	Skills         []Skill              `json:"skills"`

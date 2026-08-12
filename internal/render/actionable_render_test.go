@@ -2,6 +2,8 @@ package render_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -57,6 +59,73 @@ func TestApplyProjectsRulesRecipesAndSkillsWithoutAutomationOrCommands(t *testin
 		if strings.Contains(strings.ToLower(content), strings.ToLower(forbidden)) {
 			t.Errorf("projection contains forbidden %q:\n%s", forbidden, content)
 		}
+	}
+}
+
+func TestApplySplitPackNamesAllCanonicalSourcesAndBindsTheirDigests(t *testing.T) {
+	repo := committedRepository(t)
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := actionableProjectionPack(ws.Baseline())
+	legacy.Format = rulepack.FormatLegacyV1
+	legacyResult, err := render.Apply(ws, legacy, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	split := actionableProjectionPack(ws.Baseline())
+	split.Format = rulepack.FormatSplitV1
+	split.ManifestPath = ".software-standards/manifest.yaml"
+	split.InventoryPath = ".software-standards/inventory.json"
+	split.Manifest = rulepack.Manifest{
+		Schema:         rulepack.ManifestSchema,
+		BaselineCommit: ws.Baseline(),
+		Inventory: rulepack.FileReference{
+			Path: ".software-standards/inventory.json", SHA256: "sha256:" + strings.Repeat("1", 64),
+		},
+		Report: rulepack.FileReference{
+			Path: ".software-standards/report.md", SHA256: "sha256:" + strings.Repeat("2", 64),
+		},
+		Artifacts: split.Report.Artifacts,
+	}
+	splitResult, err := render.Apply(ws, split, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(splitResult.Content)
+	for _, source := range []string{
+		"`.software-standards/manifest.yaml`",
+		"`.software-standards/inventory.json`",
+		"`.software-standards/report.md`",
+	} {
+		if !strings.Contains(content, source) {
+			t.Errorf("split projection missing source %s:\n%s", source, content)
+		}
+	}
+	if splitResult.SourceDigest == legacyResult.SourceDigest {
+		t.Fatal("split source digest did not bind split manifest file references")
+	}
+}
+
+func TestApplyLegacyProjectionBytesRemainStable(t *testing.T) {
+	repo := committedRepository(t)
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack := actionableProjectionPack(strings.Repeat("a", 40))
+	pack.Format = rulepack.FormatLegacyV1
+	result, err := render.Apply(ws, pack, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(result.Content)
+	got := "sha256:" + hex.EncodeToString(sum[:])
+	const want = "sha256:043364ea803d1689596baa6fb10d76d42b72d0edba63ef4bd7335f5d4c159ae2"
+	if got != want {
+		t.Fatalf("legacy projection digest = %s, want %s", got, want)
 	}
 }
 

@@ -52,6 +52,9 @@ func Apply(repo *workspace.Repository, pack rulepack.Pack, dryRun bool) (Result,
 	if len(pack.Rules) == 0 && len(pack.Recipes) == 0 && len(pack.Skills) == 0 {
 		next, err := removeManagedSection(existing)
 		if err != nil {
+			if pack.Format == rulepack.FormatSplitV1 && errors.Is(err, ErrDrift) {
+				return Result{}, fmt.Errorf("%w: edit digest-bound sources and update manifest.yaml SHA-256 values instead of editing the generated section", ErrDrift)
+			}
 			return Result{}, err
 		}
 		result := Result{
@@ -79,6 +82,9 @@ func Apply(repo *workspace.Repository, pack rulepack.Pack, dryRun bool) (Result,
 	}
 	next, err := replaceManagedSection(existing, section)
 	if err != nil {
+		if pack.Format == rulepack.FormatSplitV1 && errors.Is(err, ErrDrift) {
+			return Result{}, fmt.Errorf("%w: edit digest-bound sources and update manifest.yaml SHA-256 values instead of editing the generated section", ErrDrift)
+		}
 		return Result{}, err
 	}
 	result := Result{
@@ -115,17 +121,29 @@ func buildSection(pack rulepack.Pack) ([]byte, string, string, error) {
 		manifest[artifact.ID] = artifact
 	}
 	sourceState := struct {
-		Baseline string                        `json:"baseline"`
-		Manifest []rulepack.ManifestArtifact   `json:"manifest"`
-		Rules    []rulepack.Rule               `json:"rules"`
-		Recipes  []rulepack.VerificationRecipe `json:"recipes"`
-		Skills   []rulepack.Skill              `json:"skills"`
+		Baseline       string                        `json:"baseline"`
+		Manifest       []rulepack.ManifestArtifact   `json:"manifest"`
+		Rules          []rulepack.Rule               `json:"rules"`
+		Recipes        []rulepack.VerificationRecipe `json:"recipes"`
+		Skills         []rulepack.Skill              `json:"skills"`
+		Format         string                        `json:"format,omitempty"`
+		ManifestPath   string                        `json:"manifest_path,omitempty"`
+		ManifestSchema string                        `json:"manifest_schema,omitempty"`
+		InventoryFile  *rulepack.FileReference       `json:"inventory_file,omitempty"`
+		ReportFile     *rulepack.FileReference       `json:"report_file,omitempty"`
 	}{
 		Baseline: pack.BaselineCommit,
 		Manifest: renderableManifest(pack.Report.Artifacts),
 		Rules:    rules,
 		Recipes:  recipes,
 		Skills:   skills,
+	}
+	if pack.Format == rulepack.FormatSplitV1 {
+		sourceState.Format = pack.Format
+		sourceState.ManifestPath = pack.ManifestPath
+		sourceState.ManifestSchema = pack.Manifest.Schema
+		sourceState.InventoryFile = &pack.Manifest.Inventory
+		sourceState.ReportFile = &pack.Manifest.Report
 	}
 	canonical, err := json.Marshal(sourceState)
 	if err != nil {
@@ -155,7 +173,17 @@ func buildSection(pack rulepack.Pack) ([]byte, string, string, error) {
 
 	var body strings.Builder
 	body.WriteString("## Software Standards Bootstrap\n\n")
-	body.WriteString("Generated from `.software-standards/report.md` and its accepted artifacts by `ssb render`. Edit canonical sources and the manifest together, then rerun the command.\n\n")
+	if pack.Format == rulepack.FormatSplitV1 {
+		fmt.Fprintf(
+			&body,
+			"Generated from `%s`, `%s`, `%s`, and the accepted artifacts by `ssb render`. Edit canonical sources and the manifest together, then rerun the command.\n\n",
+			pack.ManifestPath,
+			pack.InventoryPath,
+			pack.ReportPath,
+		)
+	} else {
+		body.WriteString("Generated from `.software-standards/report.md` and its accepted artifacts by `ssb render`. Edit canonical sources and the manifest together, then rerun the command.\n\n")
+	}
 	fmt.Fprintf(&body, "Baseline: `%s`\n\n", pack.BaselineCommit)
 	body.WriteString("### How to apply these standards\n\n")
 	body.WriteString("- A semantic rule is active only when its affected path scope matches. For contextual artifacts, every represented lens dimension must also match; values within one dimension are alternatives.\n")

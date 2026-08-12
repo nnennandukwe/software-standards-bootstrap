@@ -412,7 +412,11 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 	} else {
 		fmt.Fprintf(stdout, "%s requires no write for the current actionable artifacts.\n", result.Path)
 	}
-	fmt.Fprintln(stdout, "Next: review the uncommitted diff; edit canonical artifact sources and the report manifest together.")
+	if pack.Format == rulepack.FormatSplitV1 {
+		fmt.Fprintln(stdout, "Next: review the uncommitted diff; edit digest-bound sources and update manifest.yaml SHA-256 values together.")
+	} else {
+		fmt.Fprintln(stdout, "Next: review the uncommitted diff; edit canonical artifact sources and the report manifest together.")
+	}
 	return 0
 }
 
@@ -496,10 +500,10 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 		return 3
 	}
 	response := validationResponse{
-		SchemaVersion:   2,
+		SchemaVersion:   3,
 		Valid:           len(diagnostics) == 0,
 		BaselineCommit:  pack.BaselineCommit,
-		ArtifactCount:   len(pack.Report.Artifacts),
+		ArtifactCount:   len(pack.Manifest.Artifacts),
 		RuleCount:       len(pack.Rules),
 		RecipeCount:     len(pack.Recipes),
 		SkillCount:      len(pack.Skills),
@@ -695,7 +699,7 @@ func writeTextInventory(out io.Writer, report inventory.Report) {
 	if report.Truncated {
 		return
 	}
-	fmt.Fprintln(out, "Next: perform targeted semantic reads, route accepted candidates to actionable artifacts, then create .software-standards/report.md.")
+	fmt.Fprintln(out, "Next: perform targeted semantic reads, route accepted candidates to actionable artifacts, then create inventory.json, human-facing artifacts, and manifest.yaml in .software-standards.")
 }
 
 func runPrune(args []string, stdout, stderr io.Writer) int {
