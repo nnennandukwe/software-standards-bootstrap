@@ -202,6 +202,23 @@ func TestInstallPowerShellScriptRejectsChecksumMismatchBeforeReplacingBinary(t *
 	}
 }
 
+// A native launcher can pass a PowerShell 7 PSModulePath into Windows
+// PowerShell 5.1. In that environment the Core-only utility module shadows the
+// compatible Windows PowerShell module, so Get-FileHash is unavailable. The
+// installer must verify the archive without depending on that command.
+func TestInstallPowerShellScriptDoesNotDependOnGetFileHash(t *testing.T) {
+	fixture := newPowerShellInstallerFixture(t, "v1.2.3", true)
+	fixture.shadowGetFileHash(t)
+
+	output, err := fixture.run("-Version", "v1.2.3", "-InstallDir", fixture.installDir)
+	if err != nil {
+		t.Fatalf("install.ps1 depended on the shadowed Get-FileHash command: %v\n%s", err, output)
+	}
+	if _, statErr := os.Stat(filepath.Join(fixture.installDir, "ssb.exe")); statErr != nil {
+		t.Fatalf("binary was not installed: %v", statErr)
+	}
+}
+
 func TestInstallPowerShellScriptReplacesAnExistingBinary(t *testing.T) {
 	fixture := newPowerShellInstallerFixture(t, "v1.2.3", true)
 	if err := os.MkdirAll(fixture.installDir, 0o755); err != nil {
@@ -464,7 +481,13 @@ func (fixture *powerShellInstallerFixture) run(arguments ...string) (string, err
 	script := filepath.Join(repositoryRoot(fixture.t), "install.ps1")
 	command := exec.Command("powershell.exe",
 		append([]string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script}, arguments...)...)
-	command.Env = append(os.Environ(),
+	command.Env = fixture.powerShellEnvironment()
+	output, err := command.CombinedOutput()
+	return string(output), err
+}
+
+func (fixture *powerShellInstallerFixture) powerShellEnvironment() []string {
+	environment := append(os.Environ(),
 		"PATH="+fixture.fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"USERPROFILE="+fixture.home,
 		"HOME="+fixture.home,
@@ -483,9 +506,46 @@ func (fixture *powerShellInstallerFixture) run(arguments ...string) (string, err
 		"FAKE_CLONE_LOG="+fixture.cloneLog,
 		"FAKE_SKILL_SOURCE="+filepath.Join(fixture.root, "fixture-SKILL.md"),
 	)
-	command.Env = append(command.Env, fixture.environment...)
-	output, err := command.CombinedOutput()
-	return string(output), err
+	return append(environment, fixture.environment...)
+}
+
+// shadowGetFileHash prepends a module that fails if the installer tries to use
+// Get-FileHash. Other PowerShell modules remain available through the inherited
+// module path, matching the mixed PowerShell 7 / Windows PowerShell environment
+// that exposed the CI failure.
+func (fixture *powerShellInstallerFixture) shadowGetFileHash(t *testing.T) {
+	t.Helper()
+	moduleRoot := filepath.Join(fixture.root, "shadow-modules")
+	moduleDir := filepath.Join(moduleRoot, "Microsoft.PowerShell.Utility")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	module := `function Get-FileHash {
+    throw 'shadowed Get-FileHash must not be called'
+}
+Export-ModuleMember -Function Get-FileHash
+`
+	modulePath := filepath.Join(moduleDir, "Microsoft.PowerShell.Utility.psm1")
+	if err := os.WriteFile(modulePath, []byte(module), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fixture.environment = append(
+		fixture.environment,
+		"PSModulePath="+moduleRoot+string(os.PathListSeparator)+os.Getenv("PSModulePath"),
+	)
+
+	probe := exec.Command(
+		"powershell.exe",
+		"-NoProfile",
+		"-NonInteractive",
+		"-Command",
+		"Get-FileHash -LiteralPath (Join-Path $PSHOME 'powershell.exe') -Algorithm SHA256",
+	)
+	probe.Env = fixture.powerShellEnvironment()
+	output, err := probe.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "shadowed Get-FileHash must not be called") {
+		t.Fatalf("Get-FileHash shadow is not active: %v\n%s", err, output)
+	}
 }
 
 func copyFile(t *testing.T, source, destination string) {

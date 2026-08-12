@@ -148,6 +148,28 @@ function Invoke-NativeCommand {
     }
 }
 
+# Do not depend on the Get-FileHash function exported by
+# Microsoft.PowerShell.Utility. A native launcher can pass a PowerShell 7
+# PSModulePath to Windows PowerShell 5.1, where the Core-only utility module
+# shadows the compatible Windows PowerShell module and makes Get-FileHash
+# unavailable. The .NET implementation works in both shells and keeps checksum
+# verification independent of module discovery.
+function Get-SHA256Digest {
+    param([string]$Path)
+
+    $stream = $null
+    $algorithm = $null
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        $algorithm = [System.Security.Cryptography.SHA256]::Create()
+        $digest = $algorithm.ComputeHash($stream)
+        return [System.BitConverter]::ToString($digest).Replace('-', '')
+    } finally {
+        if ($stream) { $stream.Dispose() }
+        if ($algorithm) { $algorithm.Dispose() }
+    }
+}
+
 try {
     if ($Help) {
         Show-Usage
@@ -249,7 +271,7 @@ try {
         throw "checksums.txt does not contain exactly one entry for $asset"
     }
 
-    $actual = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
+    $actual = Get-SHA256Digest $archivePath
     # PowerShell string -ne is case-insensitive, which is the comparison we want.
     if ($actual -ne $expected[0]) {
         throw "checksum verification failed for $asset"
