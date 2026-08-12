@@ -56,6 +56,21 @@ func TestInspectJSONIsReadOnlyAndMachineReadable(t *testing.T) {
 	}
 }
 
+func TestInspectTextGuidesSplitPackGeneration(t *testing.T) {
+	repo := committedRepository(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{"inspect", "--repo", repo, "--format", "text"}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("inspect failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	for _, required := range []string{"inventory.json", "human-facing artifacts", "manifest.yaml"} {
+		if !strings.Contains(stdout.String(), required) {
+			t.Fatalf("split generation guidance missing %q:\n%s", required, stdout.String())
+		}
+	}
+}
+
 func TestInspectFailsClosedOnPartialCoverageUnlessExplicitlyAllowed(t *testing.T) {
 	repo := committedRepository(t)
 	writeFile(t, filepath.Join(repo, "SECOND.md"), "second\n")
@@ -811,7 +826,7 @@ func TestValidateUsesExitOneForActionablePackFailuresAndNeverWrites(t *testing.T
 	if err := json.Unmarshal(stdout.Bytes(), &validResponse); err != nil {
 		t.Fatal(err)
 	}
-	if validResponse.SchemaVersion != 2 || !validResponse.Valid || validResponse.RuleCount != 1 ||
+	if validResponse.SchemaVersion != 3 || !validResponse.Valid || validResponse.RuleCount != 1 ||
 		validResponse.Pack == nil || validResponse.Pack.BaselineCommit != baseline ||
 		len(validResponse.Pack.Rules) != 1 ||
 		validResponse.Pack.Rules[0].Schema != rulepack.RuleSchema ||
@@ -862,18 +877,25 @@ func TestValidateJSONExportsActionableInterchangeFields(t *testing.T) {
 	var stderr bytes.Buffer
 	code := cli.Run([]string{"validate", "--repo", repo, "--format", "json"}, &stdout, &stderr)
 	if code != 0 || stderr.Len() != 0 {
-		t.Fatalf("valid v2 pack failed: exit=%d stderr=%q", code, stderr.String())
+		t.Fatalf("valid legacy pack failed: exit=%d stderr=%q", code, stderr.String())
 	}
 	var response struct {
 		SchemaVersion int  `json:"schema_version"`
 		Valid         bool `json:"valid"`
 		Pack          *struct {
-			Report struct {
+			Format   string `json:"format"`
+			Manifest struct {
 				Schema    string `json:"schema"`
 				Artifacts []struct {
 					Confidence string           `json:"confidence"`
 					Utility    rulepack.Utility `json:"utility"`
 				} `json:"artifacts"`
+			} `json:"manifest"`
+			Inventory struct {
+				BaselineCommit string `json:"baseline_commit"`
+			} `json:"inventory"`
+			Report struct {
+				Body string `json:"body"`
 			} `json:"report"`
 			Rules []struct {
 				Schema     string              `json:"schema"`
@@ -888,11 +910,14 @@ func TestValidateJSONExportsActionableInterchangeFields(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.SchemaVersion != 2 || !response.Valid || response.Pack == nil ||
-		response.Pack.Report.Schema != rulepack.ReportSchema ||
-		len(response.Pack.Report.Artifacts) != 1 ||
-		response.Pack.Report.Artifacts[0].Confidence != "high" ||
-		response.Pack.Report.Artifacts[0].Utility.Method != rulepack.UtilityMethod ||
+	if response.SchemaVersion != 3 || !response.Valid || response.Pack == nil ||
+		response.Pack.Format != rulepack.FormatLegacyV1 ||
+		response.Pack.Manifest.Schema != rulepack.ReportSchema ||
+		len(response.Pack.Manifest.Artifacts) != 1 ||
+		response.Pack.Manifest.Artifacts[0].Confidence != "high" ||
+		response.Pack.Manifest.Artifacts[0].Utility.Method != rulepack.UtilityMethod ||
+		response.Pack.Inventory.BaselineCommit != baseline ||
+		!strings.HasPrefix(response.Pack.Report.Body, "# Software standards report") ||
 		len(response.Pack.Rules) != 1 ||
 		response.Pack.Rules[0].Schema != rulepack.RuleSchema ||
 		response.Pack.Rules[0].Category != "correctness" ||
@@ -904,6 +929,9 @@ func TestValidateJSONExportsActionableInterchangeFields(t *testing.T) {
 		response.Pack.Rules[0].Evidence[0].Role != "declares" {
 		t.Fatalf("unexpected actionable interchange response: %#v", response)
 	}
+	if strings.Contains(stdout.String(), `"manifest_path"`) || strings.Contains(stdout.String(), `"inventory_path"`) {
+		t.Fatalf("legacy schema 3 response exposed nonexistent split paths:\n%s", stdout.String())
+	}
 	if strings.Contains(stdout.String(), `"topic"`) ||
 		strings.Contains(stdout.String(), `"classification"`) ||
 		strings.Contains(stdout.String(), `"verification":`) ||
@@ -914,6 +942,60 @@ func TestValidateJSONExportsActionableInterchangeFields(t *testing.T) {
 		if !strings.Contains(stdout.String(), required) {
 			t.Fatalf("normalized JSON omitted artifact array %s:\n%s", required, stdout.String())
 		}
+	}
+}
+
+func TestValidateJSONSchemaThreeIdentifiesSplitLayout(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidSplitPack(t, repo, baseline)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{"validate", "--repo", repo, "--format", "json"}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("valid split pack failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	var response struct {
+		SchemaVersion int  `json:"schema_version"`
+		Valid         bool `json:"valid"`
+		Pack          *struct {
+			Format        string `json:"format"`
+			ManifestPath  string `json:"manifest_path"`
+			InventoryPath string `json:"inventory_path"`
+			ReportPath    string `json:"report_path"`
+			Manifest      struct {
+				Schema    string                      `json:"schema"`
+				Inventory rulepack.FileReference      `json:"inventory"`
+				Artifacts []rulepack.ManifestArtifact `json:"artifacts"`
+			} `json:"manifest"`
+			Inventory struct {
+				BaselineCommit string `json:"baseline_commit"`
+				IndexedFiles   int    `json:"indexed_files"`
+			} `json:"inventory"`
+			Report struct {
+				Body string `json:"body"`
+			} `json:"report"`
+			Rules []rulepack.Rule `json:"rules"`
+		} `json:"pack"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid schema 3 JSON %q: %v", stdout.String(), err)
+	}
+	if response.SchemaVersion != 3 || !response.Valid || response.Pack == nil ||
+		response.Pack.Format != rulepack.FormatSplitV1 ||
+		response.Pack.ManifestPath != ".software-standards/manifest.yaml" ||
+		response.Pack.InventoryPath != ".software-standards/inventory.json" ||
+		response.Pack.ReportPath != ".software-standards/report.md" ||
+		response.Pack.Manifest.Schema != rulepack.ManifestSchema ||
+		response.Pack.Manifest.Inventory.Path != response.Pack.InventoryPath ||
+		len(response.Pack.Manifest.Artifacts) != 1 ||
+		response.Pack.Inventory.BaselineCommit != baseline || response.Pack.Inventory.IndexedFiles != 2 ||
+		!strings.HasPrefix(response.Pack.Report.Body, "# Software standards report") ||
+		len(response.Pack.Rules) != 1 || response.Pack.Rules[0].Title != "Verify before merge" {
+		t.Fatalf("unexpected schema 3 split response: %#v\n%s", response, stdout.String())
+	}
+	if strings.Contains(stdout.String(), `"report": {\n      "schema":`) {
+		t.Fatalf("schema 3 report repeated machine frontmatter metadata:\n%s", stdout.String())
 	}
 }
 
@@ -1041,6 +1123,36 @@ func TestRenderDryRunReportsAlreadyCurrentForActivePack(t *testing.T) {
 	if !strings.Contains(stdout.String(), "AGENTS.md is already current") ||
 		strings.Contains(stdout.String(), "no active semantic rule") {
 		t.Fatalf("stable active-pack response is misleading:\n%s", stdout.String())
+	}
+}
+
+func TestRenderSplitPackGuidanceNamesManifestDigestUpdate(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidSplitPack(t, repo, baseline)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{"render", "--repo", repo}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("render failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "update manifest.yaml SHA-256 values") ||
+		strings.Contains(stdout.String(), "report manifest together") {
+		t.Fatalf("split render guidance is stale:\n%s", stdout.String())
+	}
+
+	agentsPath := filepath.Join(repo, "AGENTS.md")
+	rendered, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, agentsPath, strings.Replace(string(rendered), "Run the repository verification command", "Direct section edit", 1))
+	stdout.Reset()
+	stderr.Reset()
+	code = cli.Run([]string{"render", "--repo", repo}, &stdout, &stderr)
+	if code != 2 || !strings.Contains(stderr.String(), "update manifest.yaml SHA-256 values") ||
+		strings.Contains(stderr.String(), "sources and report.md") {
+		t.Fatalf("split drift recovery is stale: exit=%d stderr=%q", code, stderr.String())
 	}
 }
 
@@ -1242,6 +1354,69 @@ evidence:
 ---
 Run the repository verification command before merging.
 `, excerptHash("package main\n")))
+}
+
+func writeValidSplitPack(t *testing.T, repo, baseline string) {
+	t.Helper()
+	var inventoryOut bytes.Buffer
+	var inventoryErr bytes.Buffer
+	if code := cli.Run([]string{"inspect", "--repo", repo, "--format", "json"}, &inventoryOut, &inventoryErr); code != 0 {
+		t.Fatalf("inspect split fixture: exit=%d stderr=%q", code, inventoryErr.String())
+	}
+	report := []byte(`# Software standards report
+
+Inventory coverage was complete. Review the [manifest](manifest.yaml) and [inventory](inventory.json) for machine metadata.
+`)
+	rule := []byte(`# Verify before merge
+
+Run the repository verification command before merging.
+`)
+	manifest := fmt.Sprintf(`schema: ssb.dev/manifest/v1
+baseline_commit: %s
+inventory:
+  path: .software-standards/inventory.json
+  sha256: %s
+report:
+  path: .software-standards/report.md
+  sha256: %s
+artifacts:
+  - id: verify-before-merge
+    kind: rule
+    path: .software-standards/rules/verify-before-merge.md
+    sha256: %s
+    category: correctness
+    lenses:
+      - kind: base
+    directive: always
+    scopes:
+      - "**/*.go"
+    derivation: extracted
+    evidence:
+      - role: declares
+        path: main.go
+        lines: 1-1
+        excerpt_sha256: %s
+    confidence: high
+    utility:
+      method: ssb-utility-v1
+      total: 70
+      factors:
+        marginal_value: 20
+        risk_reduction: 15
+        actionability: 15
+        applicability: 10
+        earlier_feedback: 10
+`,
+		baseline,
+		excerptHash(inventoryOut.String()),
+		excerptHash(string(report)),
+		excerptHash(string(rule)),
+		excerptHash("package main\n"),
+	)
+	writeFile(t, filepath.Join(repo, ".software-standards", "manifest.yaml"), manifest)
+	writeFile(t, filepath.Join(repo, ".software-standards", "inventory.json"), inventoryOut.String())
+	writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), string(report))
+	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "verify-before-merge.md"), string(rule))
 }
 
 func removeAllArtifactsFromPack(t *testing.T, repo string) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -609,6 +610,131 @@ Follow the workflow.
 `)
 	git(t, repo, "add", ".")
 	git(t, repo, "commit", "-m", "adopt standards")
+	return repo
+}
+
+func splitLifecycleRepository(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	git(t, repo, "init", "-b", "main")
+	writeFile(t, filepath.Join(repo, "README.md"), "fixture\n")
+	git(t, repo, "add", "README.md")
+	git(t, repo, "commit", "-m", "baseline")
+	baseline := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
+	evidenceDigest := fileDigest(t, filepath.Join(repo, "README.md"))
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorded, err := inventory.ScanAtBaseline(context.Background(), ws, inventory.DefaultLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventoryData, err := json.MarshalIndent(recorded, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventoryData = append(inventoryData, '\n')
+	reportData := []byte(`# Software standards report
+
+The accepted rule and procedural skill were derived from complete baseline inventory. Review the [manifest](manifest.yaml) and [inventory](inventory.json).
+`)
+	ruleData := []byte(`# Keep the rule
+
+Keep the rule.
+`)
+	skillData := []byte(`---
+name: orphan-skill
+description: A repository-authored primary Agent Skill indexed by the manifest.
+license: MIT
+---
+# Orphan skill
+
+## Procedure
+
+Follow the workflow.
+`)
+	inventoryPath := filepath.Join(repo, ".software-standards", "inventory.json")
+	reportPath := filepath.Join(repo, ".software-standards", "report.md")
+	rulePath := filepath.Join(repo, ".software-standards", "rules", "keep-rule.md")
+	skillPath := filepath.Join(repo, ".agents", "skills", "orphan-skill", "SKILL.md")
+	writeFile(t, inventoryPath, string(inventoryData))
+	writeFile(t, reportPath, string(reportData))
+	writeFile(t, rulePath, string(ruleData))
+	writeFile(t, skillPath, string(skillData))
+	writeFile(t, filepath.Join(repo, ".software-standards", "manifest.yaml"), fmt.Sprintf(`schema: ssb.dev/manifest/v1
+baseline_commit: %s
+inventory:
+  path: .software-standards/inventory.json
+  sha256: %s
+report:
+  path: .software-standards/report.md
+  sha256: %s
+artifacts:
+  - id: keep-rule
+    kind: rule
+    path: .software-standards/rules/keep-rule.md
+    sha256: %s
+    category: maintainability
+    lenses:
+      - kind: base
+    directive: prefer
+    scopes:
+      - "**"
+    derivation: extracted
+    evidence:
+      - role: declares
+        path: README.md
+        lines: 1-1
+        excerpt_sha256: %s
+    confidence: high
+    utility:
+      method: ssb-utility-v1
+      total: 70
+      factors:
+        marginal_value: 20
+        risk_reduction: 15
+        actionability: 15
+        applicability: 10
+        earlier_feedback: 10
+    related_artifacts:
+      - orphan-skill
+  - id: orphan-skill
+    kind: skill
+    path: .agents/skills/orphan-skill/SKILL.md
+    sha256: %s
+    category: maintainability
+    lenses:
+      - kind: base
+    scopes:
+      - "**"
+    derivation: extracted
+    evidence:
+      - role: declares
+        path: README.md
+        lines: 1-1
+        excerpt_sha256: %s
+    confidence: medium
+    utility:
+      method: ssb-utility-v1
+      total: 50
+      factors:
+        marginal_value: 15
+        risk_reduction: 10
+        actionability: 10
+        applicability: 10
+        earlier_feedback: 5
+`,
+		baseline,
+		fileDigest(t, inventoryPath),
+		fileDigest(t, reportPath),
+		fileDigest(t, rulePath),
+		evidenceDigest,
+		fileDigest(t, skillPath),
+		evidenceDigest,
+	))
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "adopt split standards")
 	return repo
 }
 

@@ -263,7 +263,13 @@ func render(pack rulepack.Pack, number int) []byte {
 	fmt.Fprintf(&output, "# ADR %04d: Adopt actionable repository standards\n\n", number)
 	output.WriteString("- Status: Proposed\n")
 	fmt.Fprintf(&output, "- Baseline commit: `%s`\n", pack.BaselineCommit)
-	fmt.Fprintf(&output, "- Report: `%s`\n\n", pack.ReportPath)
+	if pack.Format == rulepack.FormatSplitV1 {
+		fmt.Fprintf(&output, "- Manifest: `%s`\n", pack.ManifestPath)
+		fmt.Fprintf(&output, "- Inventory: `%s`\n", pack.InventoryPath)
+		fmt.Fprintf(&output, "- Report: `%s`\n\n", pack.ReportPath)
+	} else {
+		fmt.Fprintf(&output, "- Report: `%s`\n\n", pack.ReportPath)
+	}
 	output.WriteString("## Context\n\n")
 	output.WriteString("The repository was inspected at the pinned baseline above. The developer retained the following evidence-backed actionable artifacts after review. Verification recipes are recorded here but were not executed by SSB.\n")
 	if len(rules) != 0 {
@@ -308,7 +314,11 @@ func render(pack rulepack.Pack, number int) []byte {
 		}
 	}
 	output.WriteString("\n## Consequences\n\n")
-	output.WriteString("- `AGENTS.md` is a derived projection; the report and canonical artifact source files remain editable.\n")
+	if pack.Format == rulepack.FormatSplitV1 {
+		output.WriteString("- `AGENTS.md` is a derived projection; the manifest, inventory, human report, and canonical artifact source files remain editable.\n")
+	} else {
+		output.WriteString("- `AGENTS.md` is a derived projection; the report and canonical artifact source files remain editable.\n")
+	}
 	output.WriteString("- Verification recipes remain deliberately invoked repository procedures; this record does not claim their commands passed.\n")
 	output.WriteString("- The developer-created pull request and its merge constitute adoption; this ADR remains Proposed until then.\n")
 	return []byte(output.String())

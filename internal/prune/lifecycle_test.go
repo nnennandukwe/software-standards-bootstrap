@@ -1,6 +1,7 @@
 package prune_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -9,6 +10,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -502,6 +504,145 @@ func TestApplyDefaultsToDryRunThenAppliesApprovedRemoval(t *testing.T) {
 		t.Fatal(err)
 	} else if len(diagnostics) != 0 {
 		t.Fatalf("atomically updated pack is invalid: %#v", diagnostics)
+	}
+}
+
+func TestApplySplitRemovalUpdatesManifestAndCleansRelationshipsAtomically(t *testing.T) {
+	root := splitLifecycleRepository(t)
+	manifestPath := filepath.Join(root, ".software-standards", "manifest.yaml")
+	reportPath := filepath.Join(root, ".software-standards", "report.md")
+	inventoryPath := filepath.Join(root, ".software-standards", "inventory.json")
+	reportBefore, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventoryBefore, err := os.ReadFile(inventoryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createReviewWithProposal(t, root, false)
+	review, _, err := prune.LoadReview(root, "review-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	review.Proposal.Actions[1].Disposition = prune.DispositionRemove
+	proposalData, err := yaml.Marshal(review.Proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), proposalData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+		ReviewID: "review-one",
+		Approved: []string{"keep-rule", "orphan-skill"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dryRun, err := prune.Apply(context.Background(), root, prune.ApplyOptions{ReviewID: "review-one"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dryRun.Changes) != 2 ||
+		dryRun.Changes[0].Path != ".agents/skills/orphan-skill/SKILL.md" ||
+		dryRun.Changes[1].Path != ".software-standards/manifest.yaml" {
+		t.Fatalf("split removal plan did not bind artifact and manifest: %#v", dryRun.Changes)
+	}
+	if _, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
+		ReviewID: "review-one",
+		Write:    true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	manifestData, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest rulepack.Manifest
+	if err := yaml.Load(manifestData, &manifest, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Artifacts) != 1 || manifest.Artifacts[0].ID != "keep-rule" ||
+		len(manifest.Artifacts[0].RelatedArtifactIDs) != 0 {
+		t.Fatalf("split manifest retained removal or dangling relationship: %#v", manifest)
+	}
+	if reportAfter, err := os.ReadFile(reportPath); err != nil || !bytes.Equal(reportAfter, reportBefore) {
+		t.Fatalf("split prune changed human report: error=%v\nbefore=%s\nafter=%s", err, reportBefore, reportAfter)
+	}
+	if inventoryAfter, err := os.ReadFile(inventoryPath); err != nil || !bytes.Equal(inventoryAfter, inventoryBefore) {
+		t.Fatalf("split prune changed inventory: error=%v", err)
+	}
+	repo, err := workspace.Open(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, diagnostics, err := rulepack.ValidateRetainedPack(context.Background(), repo); err != nil {
+		t.Fatal(err)
+	} else if len(diagnostics) != 0 {
+		t.Fatalf("split pack invalid after atomic removal: %#v", diagnostics)
+	}
+}
+
+func TestApplySplitRuleUpdateRefreshesOnlyPrimaryDigest(t *testing.T) {
+	root := splitLifecycleRepository(t)
+	configureRuleUpdateCandidate(t, root)
+	manifestPath := filepath.Join(root, ".software-standards", "manifest.yaml")
+	manifestBeforeData, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifestBefore rulepack.Manifest
+	if err := yaml.Load(manifestBeforeData, &manifestBefore, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+		ReviewID: "review-one",
+		Approved: []string{"keep-rule", "orphan-skill"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dryRun, err := prune.Apply(context.Background(), root, prune.ApplyOptions{ReviewID: "review-one"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dryRun.Changes) != 2 ||
+		dryRun.Changes[0].Path != ".software-standards/manifest.yaml" ||
+		dryRun.Changes[1].Path != ".software-standards/rules/keep-rule.md" {
+		t.Fatalf("split update plan did not bind rule and manifest: %#v", dryRun.Changes)
+	}
+	if _, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
+		ReviewID: "review-one",
+		Write:    true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	manifestAfterData, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifestAfter rulepack.Manifest
+	if err := yaml.Load(manifestAfterData, &manifestAfter, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+		t.Fatal(err)
+	}
+	before := manifestBefore.Artifacts[0]
+	after := manifestAfter.Artifacts[0]
+	rulePath := filepath.Join(root, ".software-standards", "rules", "keep-rule.md")
+	if after.SHA256 != fileDigest(t, rulePath) || after.SHA256 == before.SHA256 ||
+		after.Category != before.Category || after.Directive != before.Directive ||
+		!reflect.DeepEqual(after.Lenses, before.Lenses) ||
+		!reflect.DeepEqual(after.Scopes, before.Scopes) ||
+		after.Derivation != before.Derivation || !reflect.DeepEqual(after.Evidence, before.Evidence) ||
+		manifestAfter.Inventory != manifestBefore.Inventory || manifestAfter.Report != manifestBefore.Report {
+		t.Fatalf("split update changed immutable metadata or missed digest: before=%#v after=%#v", manifestBefore, manifestAfter)
+	}
+	repo, err := workspace.Open(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, diagnostics, err := rulepack.ValidateRetainedPack(context.Background(), repo); err != nil {
+		t.Fatal(err)
+	} else if len(diagnostics) != 0 {
+		t.Fatalf("split pack invalid after atomic update: %#v", diagnostics)
 	}
 }
 
