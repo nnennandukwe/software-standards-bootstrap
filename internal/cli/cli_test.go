@@ -1157,6 +1157,44 @@ func TestRenderDryRunAndValidationFailureHaveNoFilesystemEffects(t *testing.T) {
 	}
 }
 
+func TestOrientationValidationFailureStopsBeforeAgentsMutation(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+	writeFile(t, filepath.Join(repo, ".software-standards", "orientation.yaml"), "schema: ssb.dev/orientation/v1\n")
+	agentsPath := filepath.Join(repo, "AGENTS.md")
+	before := "# Human guidance\n"
+	writeFile(t, agentsPath, before)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{"render", "--repo", repo}, &stdout, &stderr)
+	if code != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "bind it in the manifest or remove it") {
+		t.Fatalf("render failure: exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	after, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != before {
+		t.Fatalf("failed validation changed AGENTS.md: %q", after)
+	}
+	matches, err := filepath.Glob(filepath.Join(repo, ".ssb-agents-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("failed validation left staged files: %#v", matches)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = cli.Run([]string{"validate", "--repo", repo, "--format", "json"}, &stdout, &stderr)
+	if code != 1 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"valid": false`) ||
+		!strings.Contains(stdout.String(), "bind it in the manifest or remove it") {
+		t.Fatalf("JSON validation failure: exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
 func TestRenderDryRunReportsNoWriteForZeroArtifactPack(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
 	writeValidPack(t, repo, baseline)

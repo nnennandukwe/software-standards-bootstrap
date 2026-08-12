@@ -22,6 +22,11 @@ func TestCreateRecordsAdoptableArtifactsAndExcludesAutomation(t *testing.T) {
 		t.Fatal(err)
 	}
 	pack := actionableADRPack(ws.Baseline())
+	pack.OrientationPath = ".software-standards/orientation.yaml"
+	pack.Orientation = &rulepack.Orientation{
+		Schema:  rulepack.OrientationSchema,
+		Summary: &rulepack.OrientationStatement{Text: "Orientation is context, not an adoptable artifact."},
+	}
 
 	result, err := adr.Create(context.Background(), ws, pack, adr.Options{DryRun: true})
 	if err != nil {
@@ -47,7 +52,7 @@ func TestCreateRecordsAdoptableArtifactsAndExcludesAutomation(t *testing.T) {
 			t.Errorf("ADR missing %q:\n%s", required, content)
 		}
 	}
-	for _, forbidden := range []string{"automate-check", "proof gap", "coverage", "classification"} {
+	for _, forbidden := range []string{"automate-check", "Orientation is context", "orientation.yaml", "proof gap", "coverage", "classification"} {
 		if strings.Contains(strings.ToLower(content), forbidden) {
 			t.Errorf("ADR contains forbidden %q:\n%s", forbidden, content)
 		}
@@ -110,6 +115,9 @@ func TestCreateFailsSafelyWhenNothingIsAdoptable(t *testing.T) {
 		{name: "empty", pack: rulepack.Pack{}},
 		{name: "automation only", pack: rulepack.Pack{
 			Automations: []rulepack.AutomationProposal{{ID: "automate-check"}},
+		}},
+		{name: "orientation only", pack: rulepack.Pack{
+			Orientation: &rulepack.Orientation{Schema: rulepack.OrientationSchema},
 		}},
 	}
 	for _, test := range tests {

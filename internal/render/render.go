@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -121,16 +122,18 @@ func buildSection(pack rulepack.Pack) ([]byte, string, string, error) {
 		manifest[artifact.ID] = artifact
 	}
 	sourceState := struct {
-		Baseline       string                        `json:"baseline"`
-		Manifest       []rulepack.AcceptedArtifact   `json:"manifest"`
-		Rules          []rulepack.Rule               `json:"rules"`
-		Recipes        []rulepack.VerificationRecipe `json:"recipes"`
-		Skills         []rulepack.Skill              `json:"skills"`
-		Layout         rulepack.Layout               `json:"layout,omitempty"`
-		ManifestPath   string                        `json:"manifest_path,omitempty"`
-		ManifestSchema string                        `json:"manifest_schema,omitempty"`
-		InventoryFile  *rulepack.FileReference       `json:"inventory_file,omitempty"`
-		ReportFile     *rulepack.FileReference       `json:"report_file,omitempty"`
+		Baseline        string                        `json:"baseline"`
+		Manifest        []rulepack.AcceptedArtifact   `json:"manifest"`
+		Rules           []rulepack.Rule               `json:"rules"`
+		Recipes         []rulepack.VerificationRecipe `json:"recipes"`
+		Skills          []rulepack.Skill              `json:"skills"`
+		Layout          rulepack.Layout               `json:"layout,omitempty"`
+		ManifestPath    string                        `json:"manifest_path,omitempty"`
+		ManifestSchema  string                        `json:"manifest_schema,omitempty"`
+		InventoryFile   *rulepack.FileReference       `json:"inventory_file,omitempty"`
+		ReportFile      *rulepack.FileReference       `json:"report_file,omitempty"`
+		OrientationFile *rulepack.FileReference       `json:"orientation_file,omitempty"`
+		Orientation     *rulepack.Orientation         `json:"orientation,omitempty"`
 	}{
 		Baseline: pack.BaselineCommit,
 		Manifest: renderableManifest(pack.Report.Artifacts),
@@ -144,17 +147,21 @@ func buildSection(pack rulepack.Pack) ([]byte, string, string, error) {
 		sourceState.ManifestSchema = pack.Manifest.Schema
 		sourceState.InventoryFile = &pack.Manifest.Inventory
 		sourceState.ReportFile = &pack.Manifest.Report
+		if pack.Orientation != nil {
+			sourceState.OrientationFile = &pack.Manifest.Orientation
+			sourceState.Orientation = pack.Orientation
+		}
 	}
-	canonical, err := json.Marshal(sourceState)
-	if err != nil {
+	var canonicalJSON bytes.Buffer
+	encoder := json.NewEncoder(&canonicalJSON)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(sourceState); err != nil {
 		return nil, "", "", fmt.Errorf("encode projection source digest: %w", err)
 	}
+	canonical := bytes.TrimSuffix(canonicalJSON.Bytes(), []byte("\n"))
 	sourceDigest := digest(canonical)
-
-	for _, rule := range rules {
-		if strings.Contains(rule.Body, StartMarker) || strings.Contains(rule.Body, EndMarker) {
-			return nil, "", "", fmt.Errorf("%w: rule content contains a reserved marker", ErrMarkers)
-		}
+	if bytes.Contains(canonical, []byte(StartMarker)) || bytes.Contains(canonical, []byte(EndMarker)) {
+		return nil, "", "", fmt.Errorf("%w: canonical projection input contains a reserved marker", ErrMarkers)
 	}
 	orderedRules := append([]rulepack.Rule(nil), rules...)
 	sort.SliceStable(orderedRules, func(i, j int) bool {
@@ -170,36 +177,41 @@ func buildSection(pack rulepack.Pack) ([]byte, string, string, error) {
 		}
 		return orderedRules[i].ID < orderedRules[j].ID
 	})
+	titles := artifactTitles(rules, recipes, skills)
 
 	var body strings.Builder
 	body.WriteString("## Software Standards Bootstrap\n\n")
+	body.WriteString("This managed section is derived from retained canonical sources. An unmerged generated change is a proposal; repository review and merge are the adoption decision. File presence alone does not prove adoption.\n\n")
 	if pack.Layout == rulepack.LayoutManifest {
-		fmt.Fprintf(
-			&body,
-			"Generated from `%s`, `%s`, `%s`, and the accepted artifacts by `ssb render`. Edit canonical sources and the manifest together, then rerun the command.\n\n",
-			pack.ManifestPath,
-			pack.InventoryPath,
-			pack.ReportPath,
-		)
+		sources := []string{pack.ManifestPath, pack.InventoryPath, pack.ReportPath}
+		if pack.Orientation != nil {
+			sources = append(sources, pack.OrientationPath)
+		}
+		fmt.Fprintf(&body, "Generated from %s and the accepted artifacts by `ssb render`. Edit canonical sources and the manifest together, then rerun the command.\n\n", codeList(sources))
 	} else {
 		body.WriteString("Generated from `.software-standards/report.md` and its accepted artifacts by `ssb render`. Edit canonical sources and the manifest together, then rerun the command.\n\n")
 	}
 	fmt.Fprintf(&body, "Baseline: `%s`\n\n", pack.BaselineCommit)
-	body.WriteString("### How to apply these standards\n\n")
-	body.WriteString("- A semantic rule is active only when its affected path scope matches. For contextual artifacts, every represented lens dimension must also match; values within one dimension are alternatives.\n")
+	body.WriteString("SSB did not stage, commit, push, open a pull request, execute any command, or activate another system. Recipe presence and expected results are not execution evidence.\n")
+
+	if pack.Layout == rulepack.LayoutManifest && hasOrientationContent(pack.Orientation) {
+		writeOrientation(&body, pack.Orientation, manifest, titles)
+	}
+	body.WriteString("\n### How routing works\n\n")
+	body.WriteString("- Directory placement and nearest-file precedence are host-level `AGENTS.md` behavior.\n")
+	body.WriteString("- Scopes and lenses are SSB's agent-readable routing contract, not native `AGENTS.md` glob activation. A semantic rule applies when its affected path scope matches; contextual artifacts also require every represented lens dimension to match, with values inside one dimension treated as alternatives.\n")
 	body.WriteString("- If the language, framework, task, or affected path is uncertain, load the potentially relevant rule, recipe, or skill instead of excluding it.\n")
 	body.WriteString("- Directives mean: `never` is prohibited, `ask-first` requires developer authorization, `always` is required, and `prefer` is the default when no documented exception or explicit user direction applies.\n")
 	body.WriteString("- Linked artifact files are canonical. This projection is a concise router, not a replacement for their complete content.\n")
-	body.WriteString("- Verification recipes record existing commands for deliberate use. `ssb` did not execute them.\n")
 
-	writeStandingOrders(&body, orderedRules, manifest)
-	writeContextualRules(&body, orderedRules, manifest)
-	writeVerificationRecipes(&body, recipes, manifest)
-	writeSkills(&body, skills, manifest)
+	writeStandingOrders(&body, orderedRules, manifest, titles)
+	writeContextualRules(&body, orderedRules, manifest, titles)
+	writeVerificationRecipes(&body, recipes, manifest, titles)
+	writeSkills(&body, skills, manifest, titles)
 
 	bodyBytes := []byte(body.String())
 	if bytes.Contains(bodyBytes, []byte(StartMarker)) || bytes.Contains(bodyBytes, []byte(EndMarker)) {
-		return nil, "", "", fmt.Errorf("%w: rule content contains a reserved marker", ErrMarkers)
+		return nil, "", "", fmt.Errorf("%w: projection contains a reserved marker", ErrMarkers)
 	}
 
 	sourceLine := "<!-- source-digest: " + sourceDigest + " -->"
@@ -226,10 +238,81 @@ func renderableManifest(artifacts []rulepack.AcceptedArtifact) []rulepack.Accept
 	return result
 }
 
+func artifactTitles(
+	rules []rulepack.Rule,
+	recipes []rulepack.VerificationRecipe,
+	skills []rulepack.Skill,
+) map[string]string {
+	titles := make(map[string]string, len(rules)+len(recipes)+len(skills))
+	for _, rule := range rules {
+		titles[rule.ID] = rule.Title
+	}
+	for _, recipe := range recipes {
+		titles[recipe.ID] = recipe.Title
+	}
+	for _, skill := range skills {
+		titles[skill.ID] = titleFromID(skill.ID)
+	}
+	return titles
+}
+
+func hasOrientationContent(orientation *rulepack.Orientation) bool {
+	return orientation != nil && (orientation.Summary != nil || len(orientation.Areas) != 0 ||
+		len(orientation.Prerequisites) != 0 || len(orientation.Documents) != 0 ||
+		len(orientation.RelatedArtifactIDs) != 0 || len(orientation.Guidance) != 0)
+}
+
+func writeOrientation(
+	body *strings.Builder,
+	orientation *rulepack.Orientation,
+	manifest map[string]rulepack.AcceptedArtifact,
+	titles map[string]string,
+) {
+	body.WriteString("\n### Repository orientation\n")
+	if orientation.Summary != nil {
+		fmt.Fprintf(body, "\n%s\n\n- Evidence: %s\n", markdownText(orientation.Summary.Text), evidenceSourceList(orientation.Summary.Evidence, true))
+	}
+	if len(orientation.Areas) != 0 {
+		body.WriteString("\n#### Important areas\n")
+		for _, area := range orientation.Areas {
+			fmt.Fprintf(body, "\n- %s — %s\n", inlineCode(area.Path), markdownText(area.Purpose))
+			fmt.Fprintf(body, "  - Evidence: %s\n", evidenceSourceList(area.Evidence, true))
+		}
+	}
+	if len(orientation.Prerequisites) != 0 {
+		body.WriteString("\n#### Prerequisites\n")
+		for _, prerequisite := range orientation.Prerequisites {
+			fmt.Fprintf(body, "\n- %s\n", markdownText(prerequisite.Requirement))
+			fmt.Fprintf(body, "  - Evidence: %s\n", evidenceSourceList(prerequisite.Evidence, true))
+		}
+	}
+	if len(orientation.Documents) != 0 {
+		body.WriteString("\n#### Canonical documents\n")
+		for _, document := range orientation.Documents {
+			fmt.Fprintf(body, "\n- %s\n", markdownLink(document.Label, document.Path))
+			fmt.Fprintf(body, "  - Evidence: %s\n", evidenceSourceList(document.Evidence, true))
+		}
+	}
+	if len(orientation.RelatedArtifactIDs) != 0 {
+		body.WriteString("\n#### Related standards\n")
+		for _, relatedID := range orientation.RelatedArtifactIDs {
+			writeRelatedArtifact(body, relatedID, manifest, titles, "")
+		}
+	}
+	if len(orientation.Guidance) != 0 {
+		body.WriteString("\n#### Task guidance\n")
+		for _, guidance := range orientation.Guidance {
+			fmt.Fprintf(body, "\n- **%s:** %s\n", titleFromID(guidance.Kind), markdownText(guidance.Text))
+			fmt.Fprintf(body, "  - Evidence: %s\n", evidenceSourceList(guidance.Evidence, true))
+		}
+	}
+}
+
 func writeStandingOrders(
 	body *strings.Builder,
 	rules []rulepack.Rule,
 	manifest map[string]rulepack.AcceptedArtifact,
+	titles map[string]string,
 ) {
 	body.WriteString("\n### Standing orders\n")
 	wroteAny := false
@@ -246,7 +329,7 @@ func writeStandingOrders(
 		wroteAny = true
 		fmt.Fprintf(body, "\n#### %s\n", directiveHeading(directive))
 		for _, rule := range group {
-			writeStandingOrder(body, rule, manifest)
+			writeStandingOrder(body, rule, manifest, titles)
 		}
 	}
 	if !wroteAny {
@@ -258,24 +341,26 @@ func writeStandingOrder(
 	body *strings.Builder,
 	rule rulepack.Rule,
 	manifest map[string]rulepack.AcceptedArtifact,
+	titles map[string]string,
 ) {
-	fmt.Fprintf(body, "\n##### %s (`%s`)\n\n", rule.Title, rule.ID)
-	fmt.Fprintf(body, "- Source: [%s](%s)\n", rule.SourcePath, rule.SourcePath)
-	fmt.Fprintf(body, "- Scope: %s\n", codeList(rule.Scopes))
-	fmt.Fprintf(body, "- Category: `%s`\n", rule.Category)
-	fmt.Fprintf(body, "- Evidence: %s\n", evidenceSourceList(rule.Evidence, false))
-	writeRelationships(body, manifest[rule.ID], manifest, "")
-	body.WriteString("\n")
+	fmt.Fprintf(body, "\n##### %s (%s)\n\n", markdownText(rule.Title), inlineCode(rule.ID))
 	body.WriteString(rule.Body)
 	if !strings.HasSuffix(rule.Body, "\n") {
 		body.WriteString("\n")
 	}
+	body.WriteString("\n")
+	fmt.Fprintf(body, "- Applies to: %s\n", codeList(rule.Scopes))
+	writeRelationships(body, manifest[rule.ID], manifest, titles, "")
+	fmt.Fprintf(body, "- Category: %s\n", inlineCode(rule.Category))
+	fmt.Fprintf(body, "- Canonical rule: %s\n", markdownLink(rule.SourcePath, rule.SourcePath))
+	fmt.Fprintf(body, "- Evidence: %s\n", evidenceSourceList(rule.Evidence, false))
 }
 
 func writeContextualRules(
 	body *strings.Builder,
 	rules []rulepack.Rule,
 	manifest map[string]rulepack.AcceptedArtifact,
+	titles map[string]string,
 ) {
 	contextual := make([]rulepack.Rule, 0)
 	for _, rule := range rules {
@@ -288,19 +373,13 @@ func writeContextualRules(
 	}
 	body.WriteString("\n### Contextual semantic rules\n")
 	for _, rule := range contextual {
-		fmt.Fprintf(
-			body,
-			"\n- [%s](%s) (`%s`) — `%s`; category: `%s`; lenses: %s; scope: %s\n",
-			rule.Title,
-			rule.SourcePath,
-			rule.ID,
-			rule.Directive,
-			rule.Category,
-			lensCodeList(rule.Lenses),
-			codeList(rule.Scopes),
-		)
-		fmt.Fprintf(body, "  - Evidence: %s\n", evidenceSourceList(rule.Evidence, false))
-		writeRelationships(body, manifest[rule.ID], manifest, "  ")
+		fmt.Fprintf(body, "\n#### %s (%s) — %s\n\n", markdownLink(rule.Title, rule.SourcePath), inlineCode(rule.ID), inlineCode(rule.Directive))
+		fmt.Fprintf(body, "- Load when: %s\n", lensCodeList(rule.Lenses))
+		fmt.Fprintf(body, "- Applies to: %s\n", codeList(rule.Scopes))
+		writeRelationships(body, manifest[rule.ID], manifest, titles, "")
+		fmt.Fprintf(body, "- Category: %s\n", inlineCode(rule.Category))
+		fmt.Fprintf(body, "- Canonical rule: %s\n", markdownLink(rule.SourcePath, rule.SourcePath))
+		fmt.Fprintf(body, "- Evidence: %s\n", evidenceSourceList(rule.Evidence, false))
 	}
 }
 
@@ -308,25 +387,29 @@ func writeVerificationRecipes(
 	body *strings.Builder,
 	recipes []rulepack.VerificationRecipe,
 	manifest map[string]rulepack.AcceptedArtifact,
+	titles map[string]string,
 ) {
 	if len(recipes) == 0 {
 		return
 	}
-	body.WriteString("\n### Verification recipes\n")
+	body.WriteString("\n### Verification commands\n")
 	for _, recipe := range recipes {
-		fmt.Fprintf(
-			body,
-			"\n- [%s](%s) (`%s`) — category: `%s`; lenses: %s; scope: %s\n",
-			recipe.Title,
-			recipe.SourcePath,
-			recipe.ID,
-			recipe.Category,
-			lensCodeList(recipe.Lenses),
-			codeList(recipe.Scopes),
-		)
-		fmt.Fprintf(body, "  - When: %s\n", strings.TrimSpace(recipe.When))
-		fmt.Fprintf(body, "  - Evidence: %s\n", evidenceSourceList(recipe.Evidence, false))
-		writeRelationships(body, manifest[recipe.ID], manifest, "  ")
+		fmt.Fprintf(body, "\n#### %s (%s)\n\n", markdownLink(recipe.Title, recipe.SourcePath), inlineCode(recipe.ID))
+		fmt.Fprintf(body, "- When: %s\n", markdownText(recipe.When))
+		fmt.Fprintf(body, "- Route when: %s\n", lensCodeList(recipe.Lenses))
+		fmt.Fprintf(body, "- Applies to: %s\n", codeList(recipe.Scopes))
+		writeRelationships(body, manifest[recipe.ID], manifest, titles, "")
+		fmt.Fprintf(body, "- Category: %s\n", inlineCode(recipe.Category))
+		fmt.Fprintf(body, "- Canonical recipe: %s\n", markdownLink(recipe.SourcePath, recipe.SourcePath))
+		fmt.Fprintf(body, "- Evidence: %s\n", evidenceSourceList(recipe.Evidence, false))
+		for index, step := range recipe.Steps {
+			fmt.Fprintf(body, "\n##### Step %d\n\n", index+1)
+			if step.WorkingDirectory != "." {
+				fmt.Fprintf(body, "Working directory: %s\n\n", inlineCode(step.WorkingDirectory))
+			}
+			writeCommandFence(body, step.Run)
+			fmt.Fprintf(body, "\nExpected result: %s\n", markdownText(step.ExpectedResult))
+		}
 	}
 }
 
@@ -334,6 +417,7 @@ func writeSkills(
 	body *strings.Builder,
 	skills []rulepack.Skill,
 	manifest map[string]rulepack.AcceptedArtifact,
+	titles map[string]string,
 ) {
 	if len(skills) == 0 {
 		return
@@ -344,18 +428,13 @@ func writeSkills(
 		if !exists {
 			continue
 		}
-		fmt.Fprintf(
-			body,
-			"\n- [%s](%s) — description: %s; category: `%s`; lenses: %s; scope: %s\n",
-			titleFromID(skill.ID),
-			skill.SourcePath,
-			strings.TrimSpace(skill.Description),
-			skill.Category,
-			lensCodeList(metadata.Lenses),
-			codeList(metadata.Scopes),
-		)
-		fmt.Fprintf(body, "  - Evidence: %s\n", evidenceSourceList(metadata.Evidence, false))
-		writeRelationships(body, metadata, manifest, "  ")
+		fmt.Fprintf(body, "\n#### %s (%s)\n\n", markdownLink(titleFromID(skill.ID), skill.SourcePath), inlineCode(skill.ID))
+		fmt.Fprintf(body, "%s\n\n", markdownText(skill.Description))
+		fmt.Fprintf(body, "- Use when: %s\n", lensCodeList(metadata.Lenses))
+		fmt.Fprintf(body, "- Applies to: %s\n", codeList(metadata.Scopes))
+		writeRelationships(body, metadata, manifest, titles, "")
+		fmt.Fprintf(body, "- Category: %s\n", inlineCode(skill.Category))
+		fmt.Fprintf(body, "- Evidence: %s\n", evidenceSourceList(metadata.Evidence, false))
 	}
 }
 
@@ -363,32 +442,41 @@ func writeRelationships(
 	body *strings.Builder,
 	artifact rulepack.AcceptedArtifact,
 	manifest map[string]rulepack.AcceptedArtifact,
+	titles map[string]string,
 	indent string,
 ) {
 	for _, relatedID := range artifact.RelatedArtifactIDs {
-		related, exists := manifest[relatedID]
-		if !exists {
-			continue
-		}
-		switch related.Kind {
-		case "verification":
-			fmt.Fprintf(
-				body,
-				"%s- Related recipe: [%s](%s)\n",
-				indent,
-				titleFromID(related.ID),
-				related.Path,
-			)
-		case "skill":
-			fmt.Fprintf(
-				body,
-				"%s- Related skill: [%s](%s)\n",
-				indent,
-				titleFromID(related.ID),
-				related.Path,
-			)
-		}
+		writeRelatedArtifact(body, relatedID, manifest, titles, indent)
 	}
+}
+
+func writeRelatedArtifact(
+	body *strings.Builder,
+	relatedID string,
+	manifest map[string]rulepack.AcceptedArtifact,
+	titles map[string]string,
+	indent string,
+) {
+	related, exists := manifest[relatedID]
+	if !exists {
+		return
+	}
+	label := ""
+	switch related.Kind {
+	case "rule":
+		label = "rule"
+	case "verification":
+		label = "recipe"
+	case "skill":
+		label = "skill"
+	default:
+		return
+	}
+	title := titles[related.ID]
+	if title == "" {
+		title = titleFromID(related.ID)
+	}
+	fmt.Fprintf(body, "%s- Related %s: %s\n", indent, label, markdownLink(title, related.Path))
 }
 
 func titleFromID(id string) string {
@@ -411,9 +499,78 @@ func evidenceSourceList(evidence []rulepack.Evidence, includeRole bool) string {
 			continue
 		}
 		seen[value] = struct{}{}
-		values = append(values, "`"+value+"`")
+		values = append(values, inlineCode(value))
 	}
 	return strings.Join(values, ", ")
+}
+
+func markdownText(value string) string {
+	replacer := strings.NewReplacer(
+		`\`, `\\`,
+		"&", "&amp;",
+		"`", "\\`",
+		"*", "\\*",
+		"_", "\\_",
+		"{", "\\{",
+		"}", "\\}",
+		"[", "\\[",
+		"]", "\\]",
+		"<", "\\<",
+		">", "\\>",
+		"#", "\\#",
+		"!", "\\!",
+		"|", "\\|",
+	)
+	return replacer.Replace(value)
+}
+
+func markdownLink(label, relative string) string {
+	segments := strings.Split(relative, "/")
+	for index, segment := range segments {
+		segments[index] = url.PathEscape(segment)
+	}
+	return "[" + markdownText(label) + "](" + strings.Join(segments, "/") + ")"
+}
+
+func inlineCode(value string) string {
+	delimiter := strings.Repeat("`", longestRun(value, '`')+1)
+	if strings.HasPrefix(value, "`") || strings.HasSuffix(value, "`") ||
+		strings.HasPrefix(value, " ") || strings.HasSuffix(value, " ") {
+		return delimiter + " " + value + " " + delimiter
+	}
+	return delimiter + value + delimiter
+}
+
+func writeCommandFence(body *strings.Builder, command string) {
+	fenceLength := longestRun(command, '`') + 1
+	if fenceLength < 3 {
+		fenceLength = 3
+	}
+	fence := strings.Repeat("`", fenceLength)
+	body.WriteString(fence)
+	body.WriteString("\n")
+	body.WriteString(command)
+	if !strings.HasSuffix(command, "\n") {
+		body.WriteString("\n")
+	}
+	body.WriteString(fence)
+	body.WriteString("\n")
+}
+
+func longestRun(value string, target byte) int {
+	longest := 0
+	current := 0
+	for index := 0; index < len(value); index++ {
+		if value[index] == target {
+			current++
+			if current > longest {
+				longest = current
+			}
+			continue
+		}
+		current = 0
+	}
+	return longest
 }
 
 func isBaseRule(rule rulepack.Rule) bool {
@@ -489,9 +646,13 @@ func removeManagedSection(existing []byte) ([]byte, error) {
 	if !found {
 		return append([]byte(nil), existing...), nil
 	}
-	next := make([]byte, 0, len(existing)-(end-start))
+	removalEnd := end
+	if removalEnd+1 == len(existing) && existing[removalEnd] == '\n' {
+		removalEnd++
+	}
+	next := make([]byte, 0, len(existing)-(removalEnd-start))
 	next = append(next, existing[:start]...)
-	next = append(next, existing[end:]...)
+	next = append(next, existing[removalEnd:]...)
 	return next, nil
 }
 
@@ -616,7 +777,7 @@ func writeAtomic(target string, expected, content []byte, mode os.FileMode, exis
 func codeList(values []string) string {
 	quoted := make([]string, 0, len(values))
 	for _, value := range values {
-		quoted = append(quoted, "`"+value+"`")
+		quoted = append(quoted, inlineCode(value))
 	}
 	return strings.Join(quoted, ", ")
 }

@@ -2,8 +2,6 @@ package render_test
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -15,7 +13,7 @@ import (
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/workspace"
 )
 
-func TestApplyProjectsRulesRecipesAndSkillsWithoutAutomationOrCommands(t *testing.T) {
+func TestApplyProjectsActionFirstRulesInertCommandsAndScannableSkills(t *testing.T) {
 	repo := committedRepository(t)
 	ws, err := workspace.Open(context.Background(), repo)
 	if err != nil {
@@ -29,19 +27,32 @@ func TestApplyProjectsRulesRecipesAndSkillsWithoutAutomationOrCommands(t *testin
 	}
 	content := string(result.Content)
 	for _, required := range []string{
+		"This managed section is derived",
+		"An unmerged generated change is a proposal",
+		"review and merge are the adoption decision",
+		"File presence alone does not prove adoption",
+		"did not stage, commit, push, open a pull request, execute any command, or activate another system",
+		"Recipe presence and expected results are not execution evidence",
+		"### How routing works",
 		"### Standing orders",
 		"Keep public APIs compatible.",
 		"- Category: `compatibility`",
 		"- Evidence: `README.md:1-1`",
 		"### Contextual semantic rules",
 		"[Review command changes](.software-standards/rules/review-command-changes.md)",
-		"### Verification recipes",
+		"### Verification commands",
 		"[Verify change](.software-standards/verification/verify-change.yaml)",
+		"go test ./...",
+		"printf '```'",
+		"touch SHOULD_NOT_EXIST",
+		"Working directory: `tools`",
+		"Expected result: The command exits successfully.",
 		"### Agent Skills",
 		"[Review change](.agents/skills/review-change/SKILL.md)",
-		"description: Review a change using repository evidence.",
+		"Review a change using repository evidence.",
 		"Related recipe: [Verify change](.software-standards/verification/verify-change.yaml)",
 		"Related skill: [Review change](.agents/skills/review-change/SKILL.md)",
+		"Related rule: [Review command changes](.software-standards/rules/review-command-changes.md)",
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("projection missing %q:\n%s", required, content)
@@ -50,8 +61,6 @@ func TestApplyProjectsRulesRecipesAndSkillsWithoutAutomationOrCommands(t *testin
 	for _, forbidden := range []string{
 		"Contextual body must stay canonical.",
 		"automate-check",
-		"go test ./...",
-		"proof",
 		"coverage",
 		"classification",
 		"topic",
@@ -59,6 +68,96 @@ func TestApplyProjectsRulesRecipesAndSkillsWithoutAutomationOrCommands(t *testin
 		if strings.Contains(strings.ToLower(content), strings.ToLower(forbidden)) {
 			t.Errorf("projection contains forbidden %q:\n%s", forbidden, content)
 		}
+	}
+	if _, err := os.Lstat(filepath.Join(repo, "SHOULD_NOT_EXIST")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("render executed a displayed command: %v", err)
+	}
+	assertOrdered(t, content,
+		"## Software Standards Bootstrap",
+		"### How routing works",
+		"### Standing orders",
+		"### Contextual semantic rules",
+		"### Verification commands",
+		"### Agent Skills",
+	)
+	assertOrdered(t, content, "go test ./...\nprintf '```'", "touch SHOULD_NOT_EXIST")
+	if !strings.Contains(content, "````\ngo test ./...\nprintf '```'\n````") {
+		t.Fatalf("command with backticks did not use a safe fence:\n%s", content)
+	}
+	if strings.Contains(content, "Working directory: `.`") {
+		t.Fatalf("root working directory should be omitted:\n%s", content)
+	}
+	body := strings.Index(content, "Keep public APIs compatible.\n")
+	metadata := strings.Index(content, "- Applies to: `**/*.go`")
+	if body < 0 || metadata < 0 || body > metadata {
+		t.Fatalf("base rule is not action-first:\n%s", content)
+	}
+}
+
+func TestApplyOrdersEveryDirectiveAndUtilityDeterministically(t *testing.T) {
+	repo := committedRepository(t)
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack := testPack(ws.Baseline(),
+		"never-rule", "Never body.",
+		"ask-rule", "Ask body.",
+		"always-low", "Always low body.",
+		"always-high", "Always high body.",
+		"prefer-rule", "Prefer body.",
+	)
+	directives := map[string]string{
+		"never-rule": "never", "ask-rule": "ask-first", "always-low": "always",
+		"always-high": "always", "prefer-rule": "prefer",
+	}
+	utilities := map[string]int{"always-low": 40, "always-high": 80}
+	for index := range pack.Rules {
+		pack.Rules[index].Directive = directives[pack.Rules[index].ID]
+	}
+	for index := range pack.Report.Artifacts {
+		if total, exists := utilities[pack.Report.Artifacts[index].ID]; exists {
+			pack.Report.Artifacts[index].Utility.Total = total
+		}
+	}
+	result, err := render.Apply(ws, pack, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(result.Content)
+	assertOrdered(t, content, "#### Never", "#### Ask first", "#### Always", "#### Prefer")
+	assertOrdered(t, content, "Always high body.", "Always low body.")
+}
+
+func TestApplyEscapesSchemaScalarsWithoutChangingCanonicalRuleBodies(t *testing.T) {
+	repo := committedRepository(t)
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack := actionableProjectionPack(ws.Baseline())
+	pack.Rules[0].Title = "Keep [public] *APIs* compatible"
+	pack.Rules[0].Body = "Raw *canonical* Markdown stays active.\n"
+	pack.Recipes[0].When = "Before *handoff* [now]."
+	pack.Recipes[0].Steps[0].ExpectedResult = "A [literal] *result*."
+	pack.Skills[0].Description = "Use *literal* [routing] text."
+	result, err := render.Apply(ws, pack, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(result.Content)
+	for _, escaped := range []string{
+		"Keep \\[public\\] \\*APIs\\* compatible",
+		"Before \\*handoff\\* \\[now\\].",
+		"A \\[literal\\] \\*result\\*.",
+		"Use \\*literal\\* \\[routing\\] text.",
+	} {
+		if !strings.Contains(content, escaped) {
+			t.Errorf("projection did not escape %q:\n%s", escaped, content)
+		}
+	}
+	if !strings.Contains(content, "Raw *canonical* Markdown stays active.") {
+		t.Fatalf("canonical base-rule Markdown was escaped:\n%s", content)
 	}
 }
 
@@ -109,7 +208,7 @@ func TestApplyBindsManifestSources(t *testing.T) {
 	}
 }
 
-func TestApplyPreservesEmbeddedBytes(t *testing.T) {
+func TestApplyPreservesEmbeddedLayoutBehavior(t *testing.T) {
 	repo := committedRepository(t)
 	ws, err := workspace.Open(context.Background(), repo)
 	if err != nil {
@@ -121,11 +220,148 @@ func TestApplyPreservesEmbeddedBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sum := sha256.Sum256(result.Content)
-	got := "sha256:" + hex.EncodeToString(sum[:])
-	const want = "sha256:043364ea803d1689596baa6fb10d76d42b72d0edba63ef4bd7335f5d4c159ae2"
-	if got != want {
-		t.Fatalf("embedded projection digest = %s, want %s", got, want)
+	content := string(result.Content)
+	for _, required := range []string{
+		"Generated from `.software-standards/report.md`",
+		"### How routing works",
+		"### Standing orders",
+		"### Verification commands",
+		"go test ./...",
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("embedded projection missing %q:\n%s", required, content)
+		}
+	}
+	if strings.Contains(content, "### Repository orientation") {
+		t.Fatalf("embedded projection rendered orientation:\n%s", content)
+	}
+}
+
+func TestApplyProjectsOrientationAndBindsItToSourceIdentity(t *testing.T) {
+	repo := committedRepository(t)
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack := actionableProjectionPack(ws.Baseline())
+	pack.Layout = rulepack.LayoutManifest
+	pack.ManifestPath = ".software-standards/manifest.yaml"
+	pack.InventoryPath = ".software-standards/inventory.json"
+	pack.ReportPath = ".software-standards/report.md"
+	pack.OrientationPath = ".software-standards/orientation.yaml"
+	pack.Manifest = rulepack.Manifest{
+		Schema:      rulepack.ManifestSchema,
+		Inventory:   rulepack.FileReference{Path: pack.InventoryPath, SHA256: "sha256:" + strings.Repeat("1", 64)},
+		Report:      rulepack.FileReference{Path: pack.ReportPath, SHA256: "sha256:" + strings.Repeat("2", 64)},
+		Orientation: rulepack.FileReference{Path: pack.OrientationPath, SHA256: "sha256:" + strings.Repeat("3", 64)},
+		Artifacts:   pack.Report.Artifacts,
+	}
+	pack.Orientation = projectionOrientation()
+
+	first, err := render.Apply(ws, pack, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(first.Content)
+	for _, required := range []string{
+		"### Repository orientation",
+		"A compact \\*reviewed\\* summary.",
+		"#### Important areas",
+		"`internal/render`",
+		"#### Prerequisites",
+		"#### Canonical documents",
+		"[Contributor guide](CONTRIBUTING.md)",
+		"#### Related standards",
+		"Related recipe: [Verify change](.software-standards/verification/verify-change.yaml)",
+		"#### Task guidance",
+		"**Handoff:** Report the result.",
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("orientation projection missing %q:\n%s", required, content)
+		}
+	}
+	assertOrdered(t, content, "This managed section is derived", "### Repository orientation", "### How routing works")
+
+	pack.Orientation.Summary.Text = "A changed reviewed summary."
+	second, err := render.Apply(ws, pack, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.SourceDigest == second.SourceDigest || first.ContentDigest == second.ContentDigest {
+		t.Fatal("orientation change did not affect source and content digests")
+	}
+}
+
+func TestApplyOmitsEmptyOrientationAndRejectsMarkerInjection(t *testing.T) {
+	repo := committedRepository(t)
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack := actionableProjectionPack(ws.Baseline())
+	pack.Layout = rulepack.LayoutManifest
+	pack.OrientationPath = ".software-standards/orientation.yaml"
+	pack.Manifest.Orientation = rulepack.FileReference{Path: pack.OrientationPath, SHA256: "sha256:" + strings.Repeat("3", 64)}
+	pack.Orientation = &rulepack.Orientation{Schema: rulepack.OrientationSchema}
+	result, err := render.Apply(ws, pack, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(result.Content), "### Repository orientation") {
+		t.Fatalf("schema-only orientation produced an empty heading:\n%s", result.Content)
+	}
+
+	target := filepath.Join(repo, "AGENTS.md")
+	before := "# Human guidance\n"
+	writeFile(t, target, before)
+	pack.Orientation = projectionOrientation()
+	pack.Orientation.Summary.Text = "unsafe " + render.StartMarker
+	_, err = render.Apply(ws, pack, false)
+	if !errors.Is(err, render.ErrMarkers) {
+		t.Fatalf("expected marker error, got %v", err)
+	}
+	after, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(after) != before {
+		t.Fatal("marker rejection changed AGENTS.md")
+	}
+}
+
+func TestApplyRejectsReservedMarkersFromCanonicalInputs(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*rulepack.Pack)
+	}{
+		{name: "rule title", mutate: func(pack *rulepack.Pack) { pack.Rules[0].Title = render.StartMarker }},
+		{name: "rule body", mutate: func(pack *rulepack.Pack) { pack.Rules[0].Body = render.EndMarker }},
+		{name: "recipe command", mutate: func(pack *rulepack.Pack) { pack.Recipes[0].Steps[0].Run = render.StartMarker }},
+		{name: "skill description", mutate: func(pack *rulepack.Pack) { pack.Skills[0].Description = render.EndMarker }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := committedRepository(t)
+			target := filepath.Join(repo, "AGENTS.md")
+			before := "# Human guidance\n"
+			writeFile(t, target, before)
+			ws, err := workspace.Open(context.Background(), repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pack := actionableProjectionPack(ws.Baseline())
+			test.mutate(&pack)
+			_, err = render.Apply(ws, pack, false)
+			if !errors.Is(err, render.ErrMarkers) {
+				t.Fatalf("expected marker error, got %v", err)
+			}
+			after, readErr := os.ReadFile(target)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if string(after) != before {
+				t.Fatal("marker rejection changed AGENTS.md")
+			}
+		})
 	}
 }
 
@@ -152,6 +388,12 @@ func TestApplyDoesNotWriteEmptyOrAutomationOnlyProjection(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "orientation only",
+			pack: func(baseline string) rulepack.Pack {
+				return rulepack.Pack{BaselineCommit: baseline, Orientation: projectionOrientation()}
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -170,6 +412,48 @@ func TestApplyDoesNotWriteEmptyOrAutomationOnlyProjection(t *testing.T) {
 			}
 			if _, err := os.Lstat(filepath.Join(repo, "AGENTS.md")); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("non-renderable pack wrote AGENTS.md: %v", err)
+			}
+		})
+	}
+}
+
+func TestApplyRemovesStaleSectionForNonActionablePacks(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		pack func(string) rulepack.Pack
+	}{
+		{name: "empty", pack: func(baseline string) rulepack.Pack { return rulepack.Pack{BaselineCommit: baseline} }},
+		{name: "orientation only", pack: func(baseline string) rulepack.Pack {
+			return rulepack.Pack{BaselineCommit: baseline, Orientation: projectionOrientation()}
+		}},
+		{name: "automation only", pack: func(baseline string) rulepack.Pack {
+			return rulepack.Pack{BaselineCommit: baseline, Automations: []rulepack.AutomationProposal{{ID: "automate-check"}}}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := committedRepository(t)
+			prefix := "# Human guidance\n\n"
+			writeFile(t, filepath.Join(repo, "AGENTS.md"), prefix)
+			ws, err := workspace.Open(context.Background(), repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := render.Apply(ws, actionableProjectionPack(ws.Baseline()), false); err != nil {
+				t.Fatal(err)
+			}
+			result, err := render.Apply(ws, test.pack(ws.Baseline()), false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !result.Changed {
+				t.Fatal("stale managed section was not removed")
+			}
+			content, err := os.ReadFile(filepath.Join(repo, "AGENTS.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(content) != prefix || strings.Contains(string(content), render.StartMarker) {
+				t.Fatalf("stale removal changed human bytes or retained markers: %q", content)
 			}
 		})
 	}
@@ -199,22 +483,24 @@ func actionableProjectionPack(baseline string) rulepack.Pack {
 					Utility:    projectionUtility(60),
 				},
 				{
-					ID:         "verify-change",
-					Kind:       "verification",
-					Path:       ".software-standards/verification/verify-change.yaml",
-					Confidence: "high",
-					Utility:    projectionUtility(70),
+					ID:                 "verify-change",
+					Kind:               "verification",
+					Path:               ".software-standards/verification/verify-change.yaml",
+					Confidence:         "high",
+					Utility:            projectionUtility(70),
+					RelatedArtifactIDs: []string{"review-command-changes", "review-change"},
 				},
 				{
-					ID:         "review-change",
-					Kind:       "skill",
-					Path:       ".agents/skills/review-change/SKILL.md",
-					Confidence: "medium",
-					Utility:    projectionUtility(60),
-					Category:   "correctness",
-					Lenses:     []rulepack.Lens{{Kind: "task", Value: "verification"}},
-					Scopes:     []string{"**/*.go"},
-					Derivation: "extracted",
+					ID:                 "review-change",
+					Kind:               "skill",
+					Path:               ".agents/skills/review-change/SKILL.md",
+					Confidence:         "medium",
+					Utility:            projectionUtility(60),
+					RelatedArtifactIDs: []string{"verify-change"},
+					Category:           "correctness",
+					Lenses:             []rulepack.Lens{{Kind: "task", Value: "verification"}},
+					Scopes:             []string{"**/*.go"},
+					Derivation:         "extracted",
 					Evidence: []rulepack.Evidence{{
 						Role: "enforces", Path: "Makefile", Lines: "1-2",
 					}},
@@ -261,10 +547,16 @@ func actionableProjectionPack(baseline string) rulepack.Pack {
 				Ref: "make-verify", Role: "enforces", Path: "Makefile", Lines: "1-2",
 			}},
 			When: "Before handoff.",
-			Steps: []rulepack.VerificationStep{{
-				Run: "go test ./...", SourceEvidence: "make-verify",
-				ExpectedResult: "The command exits successfully.",
-			}},
+			Steps: []rulepack.VerificationStep{
+				{
+					Run: "go test ./...\nprintf '```'", WorkingDirectory: ".", SourceEvidence: "make-verify",
+					ExpectedResult: "The command exits successfully.",
+				},
+				{
+					Run: "touch SHOULD_NOT_EXIST", WorkingDirectory: "tools", SourceEvidence: "make-verify",
+					ExpectedResult: "The sentinel command would exit successfully if deliberately run.",
+				},
+			},
 			SourcePath: ".software-standards/verification/verify-change.yaml",
 		}},
 		Skills: []rulepack.Skill{{
@@ -280,4 +572,29 @@ func actionableProjectionPack(baseline string) rulepack.Pack {
 
 func projectionUtility(total int) rulepack.Utility {
 	return rulepack.Utility{Method: rulepack.UtilityMethod, Total: total}
+}
+
+func projectionOrientation() *rulepack.Orientation {
+	evidence := []rulepack.Evidence{{Role: "declares", Path: "README.md", Lines: "1-1"}}
+	return &rulepack.Orientation{
+		Schema:             rulepack.OrientationSchema,
+		Summary:            &rulepack.OrientationStatement{Text: "A compact *reviewed* summary.", Evidence: evidence},
+		Areas:              []rulepack.OrientationArea{{Path: "internal/render", Purpose: "Projects validated guidance.", Evidence: evidence}},
+		Prerequisites:      []rulepack.OrientationPrerequisite{{Requirement: "Go 1.26.5", Evidence: evidence}},
+		Documents:          []rulepack.OrientationDocument{{Label: "Contributor guide", Path: "CONTRIBUTING.md", Evidence: evidence}},
+		RelatedArtifactIDs: []string{"verify-change"},
+		Guidance:           []rulepack.OrientationGuidance{{Kind: "handoff", Text: "Report the result.", Evidence: evidence}},
+	}
+}
+
+func assertOrdered(t *testing.T, content string, values ...string) {
+	t.Helper()
+	position := -1
+	for _, value := range values {
+		next := strings.Index(content, value)
+		if next < 0 || next <= position {
+			t.Fatalf("%q is missing or out of order:\n%s", value, content)
+		}
+		position = next
+	}
 }
