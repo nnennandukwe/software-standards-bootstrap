@@ -410,6 +410,43 @@ func TestApplyRendersNonCommandControlCharactersAsVisibleText(t *testing.T) {
 	}
 }
 
+func TestApplyEscapesTildeFencesAndTrimsProjectedProse(t *testing.T) {
+	repo := committedRepository(t)
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack := actionableProjectionPack(ws.Baseline())
+	pack.Layout = rulepack.LayoutManifest
+	pack.Orientation = projectionOrientation()
+	pack.Orientation.Summary.Text = "~~~ Repository overview"
+	pack.Recipes[0].When = "  Before handoff.\n"
+	pack.Skills[0].Description = "  ~~~ Review a change.\n"
+
+	result, err := render.Apply(ws, pack, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(result.Content)
+	for _, forbidden := range []string{"\n~~~ Repository overview\n", "\n  ~~~ Review a change.\\n\n"} {
+		if strings.Contains(content, forbidden) {
+			t.Fatalf("projected prose opened a tilde fence or retained padding %q:\n%s", forbidden, content)
+		}
+	}
+	for _, required := range []string{
+		`\~\~\~ Repository overview`,
+		`- When: Before handoff.`,
+		`\~\~\~ Review a change.`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("projection missing safe trimmed prose %q:\n%s", required, content)
+		}
+	}
+	if strings.Contains(content, `Before handoff.\n`) || strings.Contains(content, `Review a change.\n`) {
+		t.Fatalf("projection rendered YAML scalar padding as visible text:\n%s", content)
+	}
+}
+
 func TestApplyOmitsEmptyOrientationAndRejectsMarkerInjection(t *testing.T) {
 	repo := committedRepository(t)
 	ws, err := workspace.Open(context.Background(), repo)

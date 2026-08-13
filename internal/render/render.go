@@ -396,7 +396,7 @@ func writeVerificationRecipes(
 	body.WriteString("\n### Verification commands\n")
 	for _, recipe := range recipes {
 		fmt.Fprintf(body, "\n#### %s (%s)\n\n", markdownLink(recipe.Title, recipe.SourcePath), inlineCode(recipe.ID))
-		fmt.Fprintf(body, "- When: %s\n", markdownText(recipe.When))
+		fmt.Fprintf(body, "- When: %s\n", markdownText(strings.TrimSpace(recipe.When)))
 		fmt.Fprintf(body, "- Route when: %s\n", lensCodeList(recipe.Lenses))
 		fmt.Fprintf(body, "- Applies to: %s\n", codeList(recipe.Scopes))
 		writeRelationships(body, manifest[recipe.ID], manifest, titles, "")
@@ -430,7 +430,7 @@ func writeSkills(
 			continue
 		}
 		fmt.Fprintf(body, "\n#### %s (%s)\n\n", markdownLink(titleFromID(skill.ID), skill.SourcePath), inlineCode(skill.ID))
-		fmt.Fprintf(body, "%s\n\n", markdownText(skill.Description))
+		fmt.Fprintf(body, "%s\n\n", markdownText(strings.TrimSpace(skill.Description)))
 		fmt.Fprintf(body, "- Use when: %s\n", lensCodeList(metadata.Lenses))
 		fmt.Fprintf(body, "- Applies to: %s\n", codeList(metadata.Scopes))
 		writeRelationships(body, metadata, manifest, titles, "")
@@ -521,6 +521,7 @@ func markdownText(value string) string {
 		"#", "\\#",
 		"!", "\\!",
 		"|", "\\|",
+		"~", "\\~",
 	)
 	return visibleControlCharacters(replacer.Replace(value))
 }
