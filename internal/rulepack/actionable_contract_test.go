@@ -1772,7 +1772,13 @@ func diagnosticsContain(diagnostics []rulepack.Diagnostic, want string) bool {
 
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	command := append([]string{"-c", "user.name=SSB Test", "-c", "user.email=ssb@example.invalid", "-C", dir}, args...)
+	command := append([]string{
+		"-c", "user.name=SSB Test",
+		"-c", "user.email=ssb@example.invalid",
+		"-c", "maintenance.auto=false",
+		"-c", "gc.auto=0",
+		"-C", dir,
+	}, args...)
 	cmd := exec.Command("git", command...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

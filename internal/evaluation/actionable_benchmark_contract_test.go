@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -202,8 +203,7 @@ func TestHoopAgentsContractSnapshotBindsInertProposalAndHostRouting(t *testing.T
 
 	bindings := make(map[string]string, len(run.Files))
 	for _, binding := range run.Files {
-		if binding.Path == "" || filepath.IsAbs(binding.Path) || filepath.Clean(binding.Path) != binding.Path ||
-			strings.Contains(binding.Path, `\`) || binding.SHA256 == "" {
+		if !safeBenchmarkBindingPath(binding.Path) || binding.SHA256 == "" {
 			t.Fatalf("unsafe or incomplete binding: %#v", binding)
 		}
 		if _, duplicate := bindings[binding.Path]; duplicate {
@@ -249,4 +249,43 @@ func TestHoopAgentsContractSnapshotBindsInertProposalAndHostRouting(t *testing.T
 		bindings[run.Proposal.RetainedPath] != run.Proposal.OutputDigest {
 		t.Fatal("retained projection does not match its source, content, and output digest bindings")
 	}
+}
+
+func TestBenchmarkBindingPathSafetyIsPortable(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{name: "proposal", path: "proposal/AGENTS.proposed.md", want: true},
+		{name: "nested skill", path: "proposal/.agents/skills/add-feature-flag/SKILL.md", want: true},
+		{name: "empty", path: "", want: false},
+		{name: "current directory", path: ".", want: false},
+		{name: "parent directory", path: "..", want: false},
+		{name: "parent traversal", path: "../escape", want: false},
+		{name: "embedded traversal", path: "inside/../escape", want: false},
+		{name: "absolute", path: "/escape", want: false},
+		{name: "network path", path: "//server/share", want: false},
+		{name: "Windows volume", path: "C:/escape", want: false},
+		{name: "Windows separators", path: `C:\escape`, want: false},
+		{name: "alternate separator", path: `inside\file`, want: false},
+		{name: "empty segment", path: "inside//file", want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := safeBenchmarkBindingPath(test.path); got != test.want {
+				t.Fatalf("safeBenchmarkBindingPath(%q) = %t, want %t", test.path, got, test.want)
+			}
+		})
+	}
+}
+
+func safeBenchmarkBindingPath(value string) bool {
+	return value != "" &&
+		value != "." &&
+		value != ".." &&
+		!path.IsAbs(value) &&
+		path.Clean(value) == value &&
+		!strings.HasPrefix(value, "../") &&
+		!strings.ContainsAny(value, `\:`)
 }
