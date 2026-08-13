@@ -2,9 +2,11 @@ package evaluation_test
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"reflect"
@@ -83,10 +85,11 @@ func TestFreshActionableBenchmarkLedgerDoesNotPromoteInventoryToAcceptance(t *te
 }
 
 func TestHoopAgentsContractSnapshotBindsInertProposalAndHostRouting(t *testing.T) {
-	root := filepath.Join(
-		repositoryRoot(t),
+	repoRoot := repositoryRoot(t)
+	benchmarkRelativeRoot := filepath.Join(
 		"docs", "benchmarks", "results", "2026-08-12-hoop-agents-contract",
 	)
+	root := filepath.Join(repoRoot, benchmarkRelativeRoot)
 	runBytes, err := os.ReadFile(filepath.Join(root, "run.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -223,7 +226,8 @@ func TestHoopAgentsContractSnapshotBindsInertProposalAndHostRouting(t *testing.T
 		if err != nil {
 			return err
 		}
-		data, err := os.ReadFile(path)
+		blobPath := filepath.ToSlash(filepath.Join(benchmarkRelativeRoot, relative))
+		data, err := readGitBlob(repoRoot, "HEAD:"+blobPath)
 		if err != nil {
 			return err
 		}
@@ -288,4 +292,21 @@ func safeBenchmarkBindingPath(value string) bool {
 		path.Clean(value) == value &&
 		!strings.HasPrefix(value, "../") &&
 		!strings.ContainsAny(value, `\:`)
+}
+
+func readGitBlob(root, object string) ([]byte, error) {
+	command := exec.Command("git", "-C", root, "cat-file", "blob", object)
+	output, err := command.Output()
+	if err != nil {
+		var exitError *exec.ExitError
+		if errors.As(err, &exitError) {
+			return nil, fmt.Errorf(
+				"git cat-file blob %s: %s",
+				object,
+				strings.TrimSpace(string(exitError.Stderr)),
+			)
+		}
+		return nil, fmt.Errorf("git cat-file blob %s: %w", object, err)
+	}
+	return output, nil
 }
