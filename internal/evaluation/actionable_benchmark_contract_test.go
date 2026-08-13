@@ -84,7 +84,7 @@ func TestFreshActionableBenchmarkLedgerDoesNotPromoteInventoryToAcceptance(t *te
 	}
 }
 
-func TestHoopAgentsContractSnapshotBindsInertProposalAndHostRouting(t *testing.T) {
+func TestHoopAgentsContractRecordBindsProjectionAndRouting(t *testing.T) {
 	repoRoot := repositoryRoot(t)
 	benchmarkRelativeRoot := filepath.Join(
 		"docs", "benchmarks", "results", "2026-08-12-hoop-agents-contract",
@@ -214,6 +214,20 @@ func TestHoopAgentsContractSnapshotBindsInertProposalAndHostRouting(t *testing.T
 		}
 		bindings[binding.Path] = binding.SHA256
 	}
+	gotBindingPaths := make([]string, 0, len(bindings))
+	for bindingPath := range bindings {
+		gotBindingPaths = append(gotBindingPaths, bindingPath)
+	}
+	sort.Strings(gotBindingPaths)
+	wantBindingPaths := []string{
+		"proposal/AGENTS.proposed.md",
+		"routing/implementation.md",
+		"routing/planning.md",
+		"routing/verification.md",
+	}
+	if !reflect.DeepEqual(gotBindingPaths, wantBindingPaths) {
+		t.Fatalf("retained evidence paths = %#v, want %#v", gotBindingPaths, wantBindingPaths)
+	}
 	observed := make(map[string]string)
 	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -240,9 +254,6 @@ func TestHoopAgentsContractSnapshotBindsInertProposalAndHostRouting(t *testing.T
 	}
 	if !reflect.DeepEqual(bindings, observed) {
 		t.Fatalf("run bindings do not cover exact retained bytes:\nbindings=%#v\nobserved=%#v", bindings, observed)
-	}
-	if _, exists := bindings["proposal/AGENTS.md"]; exists {
-		t.Fatal("benchmark retains an active nested AGENTS.md")
 	}
 	agents, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(run.Proposal.RetainedPath)))
 	if err != nil {

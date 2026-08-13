@@ -99,6 +99,8 @@ The [2026-08-12 Hoop AGENTS contract](benchmarks/results/2026-08-12-hoop-agents-
 records a Codex CLI 0.145.0 and `gpt-5.6-sol` behavioral conformance run for
 orientation, planning/implementation/verification routing, action-first rules,
 and exact inert verification commands. Its source commit, target pin, host,
-proposal inputs, routing outputs, and source/content/output digests are bound
-byte-for-byte. The retained projection is `proposal/AGENTS.proposed.md`, never
-a nested active `AGENTS.md`.
+inventory and proposal metadata, final projection, routing outputs, and
+source/content/output digests are recorded. The raw replay bundle is not
+retained in Git. The retained projection is `proposal/AGENTS.proposed.md`, never
+a nested active `AGENTS.md`; `run.yaml` binds it and the routing records
+byte-for-byte.

@@ -73,36 +73,6 @@ execution_boundaries:
   pull_request_opened: false
   adoption_claimed: false
 files:
-  - path: proposal/.agents/skills/add-feature-flag/SKILL.md
-    sha256: sha256:fe97406cf5347ab85cfd908bbb3251fed07b2610ab899ea0c27eb45c480f6152
-  - path: proposal/.agents/skills/change-gateway-api-route/SKILL.md
-    sha256: sha256:288b7b2bb93039289d4e9c5c745ddfa1ffc7b786585a7ebc848726cf33762ee0
-  - path: proposal/.software-standards/automation/detect-analytics-route-drift.yaml
-    sha256: sha256:f2eb8361128f083a2108479b98d8fff1a9e4da19a08a0a1454c24a8c3412ef48
-  - path: proposal/.software-standards/inventory.json
-    sha256: sha256:679c580d8186a020bb86337f3451927eb3cf42b676ae14102ec17a019355423e
-  - path: proposal/.software-standards/manifest.yaml
-    sha256: sha256:eb7ef230b58574442f7f9bab2b7a16cfb5cf5f95c93f914442aeacb09ea3bbaf
-  - path: proposal/.software-standards/orientation.yaml
-    sha256: sha256:8c356e1ce387bdbd448d534a24a1c75134c23243d10a0131fee487c920a545c2
-  - path: proposal/.software-standards/report.md
-    sha256: sha256:e7969a682efa52a33955bc57a70c31453079a174960ea18a333af5cbd1b61780
-  - path: proposal/.software-standards/rules/keep-libhoop-independent.md
-    sha256: sha256:2da1439b8418cfca60ba455db67348e72ded71c9a0f62f3204761e9b4468c034
-  - path: proposal/.software-standards/rules/preserve-analytics-event-continuity.md
-    sha256: sha256:935958e2e0ca5dedb597c86c7e5e9dbc25671de40f171574c689163b5e1fe25d
-  - path: proposal/.software-standards/rules/preserve-transport-plugin-order.md
-    sha256: sha256:568e0be22b1fec09619569e481c5e0fc8eb18726c9d8e13f2e3a6449207dafe0
-  - path: proposal/.software-standards/rules/synchronize-environment-configuration.md
-    sha256: sha256:abd8658eb9d3e50a8edee7a2caa4f244cafb992882d71d73134a6f493610b72f
-  - path: proposal/.software-standards/rules/use-protocol-packet-constants.md
-    sha256: sha256:3edecfd79b20d73828c51ec625b52cd1e1d8ef8d6711a1cf9e7997c74cb94186
-  - path: proposal/.software-standards/verification/regenerate-openapi-artifacts.yaml
-    sha256: sha256:e0f07a1f8da7412fca61c6f82318e1874721fc4983bbba2d5516597e9bf8142e
-  - path: proposal/.software-standards/verification/verify-go-changes.yaml
-    sha256: sha256:e2641733e468010c6cf43e972af0b70ad3e967b619ce9fbf8e91ee65020c9407
-  - path: proposal/.software-standards/verification/verify-react-webapp.yaml
-    sha256: sha256:0032be1e932e1225d4fbde937fa97260401ad6611eadd4205940ed3acca75738
   - path: proposal/AGENTS.proposed.md
     sha256: sha256:01d11712ecb0ada4a37260b467dcfd11954fa3713c5f1af56fb76906d08181f0
   - path: routing/implementation.md
