@@ -1,6 +1,6 @@
 <!-- software-standards-bootstrap:start -->
 <!-- source-digest: sha256:8e7ac51d033b957b03b4752bc1cf262a35c0e80198ab81a5283ea555f7774708 -->
-<!-- content-digest: sha256:af1be1a5393a1028719a66c9952e3c5476a7f259e7fdc8f217f18bd16e732204 -->
+<!-- content-digest: sha256:35a67321268fe4e78bd2e0b3dd00eb5656b607b265619814eb358c51b715f87a -->
 ## Software Standards Bootstrap
 
 This managed section is derived from retained canonical sources. An unmerged generated change is a proposal; repository review and merge are the adoption decision. File presence alone does not prove adoption.
@@ -19,10 +19,10 @@ Hoop is an open-source layer 7 gateway that governs access to infrastructure at 
 
 #### Important areas
 
-- `gateway` — Hosts the HTTP and gRPC gateway, business services, persistence, and transport plugins.
+- `gateway` - Hosts the HTTP and gRPC gateway, business services, persistence, and transport plugins.
   - Evidence: `CLAUDE.md:30-50 (declares)`
 
-- `agent` — Hosts the long-lived agent connection and protocol-specific packet handlers.
+- `agent` - Hosts the long-lived agent connection and protocol-specific packet handlers.
   - Evidence: `CLAUDE.md:52-68 (declares)`
 
 #### Prerequisites

@@ -276,7 +276,7 @@ func writeOrientation(
 	if len(orientation.Areas) != 0 {
 		body.WriteString("\n#### Important areas\n")
 		for _, area := range orientation.Areas {
-			fmt.Fprintf(body, "\n- %s — %s\n", inlineCode(area.Path), markdownText(area.Purpose))
+			fmt.Fprintf(body, "\n- %s - %s\n", inlineCode(area.Path), markdownText(area.Purpose))
 			fmt.Fprintf(body, "  - Evidence: %s\n", evidenceSourceList(area.Evidence, true))
 		}
 	}
@@ -374,7 +374,7 @@ func writeContextualRules(
 	}
 	body.WriteString("\n### Contextual semantic rules\n")
 	for _, rule := range contextual {
-		fmt.Fprintf(body, "\n#### %s (%s) — %s\n\n", markdownLink(rule.Title, rule.SourcePath), inlineCode(rule.ID), inlineCode(rule.Directive))
+		fmt.Fprintf(body, "\n#### %s (%s) - %s\n\n", markdownLink(rule.Title, rule.SourcePath), inlineCode(rule.ID), inlineCode(rule.Directive))
 		fmt.Fprintf(body, "- Load when: %s\n", lensCodeList(rule.Lenses))
 		fmt.Fprintf(body, "- Applies to: %s\n", codeList(rule.Scopes))
 		writeRelationships(body, manifest[rule.ID], manifest, titles, "")

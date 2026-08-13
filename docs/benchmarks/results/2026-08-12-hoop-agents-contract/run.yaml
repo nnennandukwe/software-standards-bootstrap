@@ -30,8 +30,8 @@ proposal:
   orientation: true
   orientation_artifacts: 0
   source_digest: sha256:8e7ac51d033b957b03b4752bc1cf262a35c0e80198ab81a5283ea555f7774708
-  content_digest: sha256:af1be1a5393a1028719a66c9952e3c5476a7f259e7fdc8f217f18bd16e732204
-  output_digest: sha256:01d11712ecb0ada4a37260b467dcfd11954fa3713c5f1af56fb76906d08181f0
+  content_digest: sha256:35a67321268fe4e78bd2e0b3dd00eb5656b607b265619814eb358c51b715f87a
+  output_digest: sha256:1e393809b222347b8e5d0adde9e37421529e2dafd4dada6a674952cbc9a635c8
   retained_path: proposal/AGENTS.proposed.md
 verification:
   validate: pass
@@ -74,7 +74,7 @@ execution_boundaries:
   adoption_claimed: false
 files:
   - path: proposal/AGENTS.proposed.md
-    sha256: sha256:01d11712ecb0ada4a37260b467dcfd11954fa3713c5f1af56fb76906d08181f0
+    sha256: sha256:1e393809b222347b8e5d0adde9e37421529e2dafd4dada6a674952cbc9a635c8
   - path: routing/implementation.md
     sha256: sha256:72c1fcea1cb995cfab7652c40d9339b2fbe473e1fce2b99da702d0a56c765564
   - path: routing/planning.md
