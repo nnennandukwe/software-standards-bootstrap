@@ -187,6 +187,9 @@ summary:
 		{name: "Unicode format character", mutate: func(value string) string {
 			return strings.Replace(value, "Reviewed repository summary.", "Reviewed repository \u202esummary.", 1)
 		}, want: "format characters"},
+		{name: "Unicode paragraph separator", mutate: func(value string) string {
+			return strings.Replace(value, "text: Reviewed repository summary.", "text: \"Reviewed repository\\u2029summary.\"", 1)
+		}, want: "single-paragraph"},
 		{name: "text over limit", mutate: func(value string) string {
 			return strings.Replace(value, "Reviewed repository summary.", strings.Repeat("x", rulepack.OrientationMaxTextRunes+1), 1)
 		}, want: "maximum is 1024"},

@@ -220,7 +220,7 @@ func validateOrientationText(sourcePath, field, value string, maxRunes int, labe
 		return []Diagnostic{diagnostic(sourcePath, field, fmt.Sprintf("%s has %d Unicode code points; maximum is %d", label, count, maxRunes), "shorten the reviewed statement")}
 	}
 	for _, character := range value {
-		if unicode.IsControl(character) || unicode.In(character, unicode.Cf) {
+		if unicode.IsControl(character) || unicode.In(character, unicode.Cf, unicode.Zl, unicode.Zp) {
 			return []Diagnostic{diagnostic(sourcePath, field, label+" must be single-paragraph text without control or format characters", "replace line breaks, bidirectional overrides, and other invisible formatting with ordinary text")}
 		}
 	}

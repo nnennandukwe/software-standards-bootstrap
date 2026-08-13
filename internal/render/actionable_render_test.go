@@ -378,7 +378,7 @@ func TestApplyRendersNonCommandControlCharactersAsVisibleText(t *testing.T) {
 	pack.Recipes[0].When = "Before\n- injected list"
 	pack.Recipes[0].Scopes = []string{"tools\n- injected scope"}
 	pack.Recipes[0].Steps[0].ExpectedResult = "Success\n### injected result"
-	pack.Skills[0].Description = "Review\n### injected skill heading \u202e"
+	pack.Skills[0].Description = "Review\n### injected skill heading \u202e\u2029tail"
 
 	result, err := render.Apply(ws, pack, true)
 	if err != nil {
@@ -392,6 +392,7 @@ func TestApplyRendersNonCommandControlCharactersAsVisibleText(t *testing.T) {
 		"\n### injected result",
 		"\n### injected skill heading",
 		"\u202e",
+		"\u2029",
 	} {
 		if strings.Contains(content, injected) {
 			t.Fatalf("non-command scalar injected Markdown structure %q:\n%s", injected, content)
@@ -402,7 +403,7 @@ func TestApplyRendersNonCommandControlCharactersAsVisibleText(t *testing.T) {
 		`Before\n- injected list`,
 		`tools\n- injected scope`,
 		`Success\n\#\#\# injected result`,
-		`Review\n\#\#\# injected skill heading \u{202E}`,
+		`Review\n\#\#\# injected skill heading \u{202E}\u{2029}tail`,
 	} {
 		if !strings.Contains(content, visible) {
 			t.Errorf("projection did not render control characters visibly as %q:\n%s", visible, content)

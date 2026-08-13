@@ -559,7 +559,7 @@ func visibleControlCharacters(value string) string {
 		case '\t':
 			result.WriteString(`\t`)
 		default:
-			if unicode.IsControl(character) || unicode.In(character, unicode.Cf) {
+			if unicode.IsControl(character) || unicode.In(character, unicode.Cf, unicode.Zl, unicode.Zp) {
 				fmt.Fprintf(&result, `\u{%04X}`, character)
 				continue
 			}
