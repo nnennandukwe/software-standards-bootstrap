@@ -4,8 +4,8 @@ target:
   url: https://github.com/hoophq/hoop
   commit: 3e0091b89fdaa3912f4f8e7b33fbb3104e47d71e
 ssb:
-  source_commit: e8843727679eda6d225711d07ac12a2655eb0cd8
-  binary_sha256: sha256:fb43beb4d396ee51b586fba1e1ae37893907f4ca6cc2c60aca1460451221d416
+  source_commit: d2b926816d97a98f83e380da8b477597f1337cfb
+  binary_sha256: sha256:769f04f2136f3873cf509dd6dd9c4a87e537ac5041c5e64e14c5862350fa1cb3
   skill_version: 0.6.0
 host:
   name: Codex CLI
