@@ -208,6 +208,9 @@ func validateWorkingDirectory(
 		windowsVolumePattern.MatchString(relative) {
 		return add(fmt.Sprintf("unsafe working_directory %q", relative), "use . or a canonical repository-relative path with / separators and no traversal")
 	}
+	if containsUnicodeFormatCharacter(relative) {
+		return add("working_directory must not contain Unicode format characters", "remove bidirectional overrides and other invisible format characters from the repository-relative path")
+	}
 	hasSubmodule, err := repo.HasSubmodulePrefix(ctx, relative)
 	if err != nil {
 		return add(err.Error(), "use . or a canonical tracked directory")

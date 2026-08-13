@@ -150,6 +150,12 @@ func TestValidateRejectsInvalidVerificationVersionsAndWorkingDirectories(t *test
 			),
 			want: "format characters",
 		},
+		{
+			name:   "Unicode format character in working directory",
+			schema: "ssb.dev/verification/v2",
+			steps:  validVerificationStep("    working_directory: \"tools\\u202e\"\n"),
+			want:   "format characters",
+		},
 	}
 
 	for _, test := range tests {
