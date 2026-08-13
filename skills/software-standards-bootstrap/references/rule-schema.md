@@ -16,6 +16,9 @@ inventory:
 report:
   path: .software-standards/report.md
   sha256: sha256:<exact raw file digest>
+orientation:
+  path: .software-standards/orientation.yaml
+  sha256: sha256:<exact raw file digest>
 artifacts:
   - id: keep-public-apis-compatible
     kind: rule
@@ -72,6 +75,45 @@ Artifact kinds and canonical paths are:
 | `skill` | `.agents/skills/<id>/SKILL.md` |
 | `automation` | `.software-standards/automation/<id>.yaml` |
 
+Orientation is an optional manifest-layout reference, not an artifact kind.
+When present, its canonical path is
+`.software-standards/orientation.yaml` and its schema is
+`ssb.dev/orientation/v1`:
+
+```yaml
+schema: ssb.dev/orientation/v1
+summary:
+  text: This repository provides a local standards-pack CLI.
+  evidence:
+    - role: declares
+      path: README.md
+      lines: 1-12
+      excerpt_sha256: sha256:<64 lowercase hex>
+areas:
+  - path: internal/rulepack
+    purpose: Validates and normalizes supported pack layouts.
+    evidence:
+      - role: declares
+        path: docs/architecture.md
+        lines: 160-205
+        excerpt_sha256: sha256:<64 lowercase hex>
+related_artifacts: [verify-repository]
+guidance:
+  - kind: handoff
+    text: Report tests run and remaining acceptance gaps.
+    evidence:
+      - role: declares
+        path: CONTRIBUTING.md
+        lines: 30-40
+        excerpt_sha256: sha256:<64 lowercase hex>
+```
+
+Optional collections are `areas`, `prerequisites`, `documents`,
+`related_artifacts`, and `guidance`. Guidance kinds are `planning`,
+`implementation`, `verification`, and `handoff`. Evidence uses only
+`declares` or `enforces`; related IDs resolve only to verification recipes or
+Agent Skills. Orientation does not enter artifact counts or ADR eligibility.
+
 IDs are globally unique lower-case kebab-case. Relationships name accepted
 artifact IDs and cannot dangle, repeat, or refer to the source artifact.
 
@@ -93,7 +135,7 @@ normalized rule contract remains `ssb.dev/rule/v2`.
 ## Verification recipe
 
 ```yaml
-schema: ssb.dev/verification/v1
+schema: ssb.dev/verification/v2
 id: verify-api-compatibility
 title: Verify API compatibility
 category: compatibility
@@ -112,6 +154,7 @@ evidence:
 when: Before handing off a public API change.
 steps:
   - run: make verify-compatibility
+    working_directory: .
     source_evidence: compatibility-command
     expected_result: The command reports no incompatible API changes.
 ```
@@ -119,6 +162,11 @@ steps:
 Recipes contain one or more ordered existing commands. Every step references
 exact `enforces` evidence and states an expected successful result. Recipes
 contain no branching, edits, setup decisions, or semantic judgment.
+
+New generation emits only `ssb.dev/verification/v2`, whose every step requires
+`working_directory: .` or a canonical tracked directory outside submodules.
+Existing `ssb.dev/verification/v1` recipes remain readable and normalize to
+root `.`. A v1 document must not contain the v2-only field.
 
 ## Agent Skill
 

@@ -1,0 +1,83 @@
+schema: ssb.dev/benchmark-run/v1
+target:
+  repository: hoophq/hoop
+  url: https://github.com/hoophq/hoop
+  commit: 3e0091b89fdaa3912f4f8e7b33fbb3104e47d71e
+ssb:
+  source_commit: a1b7a9317bb8dbbc5a001d2fa2f535d2bdef6a06
+  binary_sha256: sha256:896eecfb6adb87976623ee39203046f6c9af1e0837997877bbf7f7010e7f1dd9
+  skill_version: 0.6.0
+host:
+  name: Codex CLI
+  version: 0.145.0
+  model: gpt-5.6-sol
+  os: macOS 15.7.3 (24G419)
+  architecture: arm64
+inventory:
+  schema_version: 2
+  complete: true
+  truncated: false
+  candidate_files: 2285
+  candidate_bytes: 21798146
+  indexed_files: 2239
+  indexed_bytes: 13968340
+proposal:
+  artifact_count: 11
+  semantic_rules: 5
+  verification_recipes: 3
+  agent_skills: 2
+  automation_proposals: 1
+  orientation: true
+  orientation_artifacts: 0
+  source_digest: sha256:8e7ac51d033b957b03b4752bc1cf262a35c0e80198ab81a5283ea555f7774708
+  content_digest: sha256:35a67321268fe4e78bd2e0b3dd00eb5656b607b265619814eb358c51b715f87a
+  output_digest: sha256:1e393809b222347b8e5d0adde9e37421529e2dafd4dada6a674952cbc9a635c8
+  retained_path: proposal/AGENTS.proposed.md
+verification:
+  validate: pass
+  dry_run: pass
+  render: pass
+  canonical_replay: byte-identical
+  commands_displayed_only: true
+routing:
+  - lens: planning
+    status: pass
+    path: routing/planning.md
+    active_artifact_ids:
+      - preserve-analytics-event-continuity
+      - use-protocol-packet-constants
+      - synchronize-environment-configuration
+  - lens: implementation
+    status: pass
+    path: routing/implementation.md
+    active_artifact_ids:
+      - use-protocol-packet-constants
+      - preserve-analytics-event-continuity
+      - synchronize-environment-configuration
+      - change-gateway-api-route
+  - lens: verification
+    status: pass
+    path: routing/verification.md
+    active_artifact_ids:
+      - use-protocol-packet-constants
+      - preserve-analytics-event-continuity
+      - synchronize-environment-configuration
+      - regenerate-openapi-artifacts
+      - verify-go-changes
+execution_boundaries:
+  target_commands_executed: []
+  repository_code_executed: false
+  evaluator_checkout_branch_created: true
+  ssb_or_host_git_mutation: false
+  generated_adr: false
+  pull_request_opened: false
+  adoption_claimed: false
+files:
+  - path: proposal/AGENTS.proposed.md
+    sha256: sha256:1e393809b222347b8e5d0adde9e37421529e2dafd4dada6a674952cbc9a635c8
+  - path: routing/implementation.md
+    sha256: sha256:72c1fcea1cb995cfab7652c40d9339b2fbe473e1fce2b99da702d0a56c765564
+  - path: routing/planning.md
+    sha256: sha256:6059eedbdcefa7bbd2dfae2667777bfbcb76af9aecafbe38cb6dcedba7ec06e3
+  - path: routing/verification.md
+    sha256: sha256:a3d566a8f3a48cf985eb2268cc64b4d3ba4c3dd562c7dae8804889be2b01aac7

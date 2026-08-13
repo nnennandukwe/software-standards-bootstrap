@@ -7,7 +7,7 @@ metadata:
   project: software-standards-bootstrap
   schema: ssb.dev/manifest/v1
   category: developer-experience
-  version: 0.5.0
+  version: 0.6.0
 ---
 
 # Software Standards Bootstrap
@@ -49,7 +49,10 @@ Do not run `ssb inspect`, `ssb validate`, or `ssb render`, and do not rewrite
 the pack.
 
 1. Read `.software-standards/manifest.yaml` and the linked human report and
-   inventory for a manifest-layout pack. For an embedded-layout pack, read
+   optional orientation for a manifest-layout pack. Inspect the inventory's
+   top-level baseline, completeness, limits, and counts plus only the file rows
+   needed to confirm active evidence. Do not load the complete raw inventory
+   into context. For an embedded-layout pack, read
    `.software-standards/report.md` and its accepted artifact index.
 2. If the pack contains no rule, verification recipe, or Agent Skill, report
    that it has no active guidance. Automation proposals are not active policy.
@@ -68,6 +71,11 @@ the pack.
 8. Read the complete canonical source for every active semantic rule and Agent
    Skill. Recipes remain links to existing commands with explicit use
    conditions and expected results.
+
+Treat projected repository orientation as reviewed context, not active policy.
+Use it to understand the repository, important areas, prerequisites, canonical
+documents, and evidence-backed task guidance. It does not change artifact
+selection or prove that a related command ran.
 
 Report active artifact IDs before applying them. Follow semantic rules and
 procedural skills as applicable. Run recipe commands only when the developer's
@@ -174,6 +182,16 @@ For every candidate, collect exact one-based line ranges and hashes from the
 pinned Git blobs. Narrow scope when the evidence supports only one package,
 family, seam, or surface.
 
+Separately collect concise repository orientation only when authoritative
+repository evidence supports useful context that does not belong in a rule,
+verification recipe, Agent Skill, or automation proposal. Orientation may
+describe the repository summary, important areas, prerequisites, canonical
+documents, related verification recipes or skills, and `planning`,
+`implementation`, `verification`, or `handoff` guidance. Every rendered
+statement requires exact `declares` or `enforces` evidence. Do not infer
+orientation from `demonstrates` evidence. If no reviewed orientation is useful,
+write no orientation file or manifest reference.
+
 ### 3. Route and evaluate candidates
 
 Before presenting final candidates:
@@ -209,6 +227,7 @@ Create only accepted outputs:
 ```text
 .software-standards/inventory.json
 .software-standards/manifest.yaml
+.software-standards/orientation.yaml
 .software-standards/report.md
 .software-standards/rules/<rule-id>.md
 .software-standards/verification/<recipe-id>.yaml
@@ -222,6 +241,14 @@ repository-relative scopes, directive where applicable, derivation, exact
 evidence, `medium` or `high` confidence, utility of at least 45,
 relationships, and each primary file's SHA-256 digest. Hash exact raw file
 bytes, including line endings. IDs are globally unique stable kebab-case.
+
+When orientation was retained, write `.software-standards/orientation.yaml`
+with `ssb.dev/orientation/v1`, then bind its exact raw bytes through the
+manifest `orientation` reference. Orientation is optional reviewed context.
+It is not a manifest artifact, does not contribute to actionable artifact
+counts, and is not eligible for the ADR. Use only eligible pinned-baseline
+paths and exact `declares` or `enforces` evidence. Related IDs may name only a
+retained verification recipe or Agent Skill.
 
 Evidence roles are:
 
@@ -242,9 +269,13 @@ Semantic-rule Markdown has no frontmatter. It begins with one H1 title, then
 immediately presents nonempty actionable text. The H1 supplies the normalized
 title; machine metadata lives only in `manifest.yaml`.
 
-Verification recipes contain ordered existing commands, exact `enforces`
+New verification recipes use only `ssb.dev/verification/v2`. They contain
+ordered existing commands, a required `working_directory` of `.` or a
+canonical tracked repository directory for each step, exact `enforces`
 evidence references, when they apply, and expected successful results. They
-contain no branching, edits, or semantic judgment.
+contain no branching, edits, or semantic judgment; existing v1 recipes remain
+readable and normalize each step to repository root; never add
+`working_directory` to a v1 document.
 
 Agent Skills use portable `name` and `description` frontmatter plus a
 meaningful standard `license` or `compatibility` field. Generation omits
@@ -262,8 +293,8 @@ contains nonempty narrative, and links to `manifest.yaml` and
 `inventory.json`. It summarizes limitations and accepted outputs without
 inventory rows or machine metadata. A zero-artifact manifest is valid.
 
-Verification recipes and automation proposals retain their existing native
-YAML schemas. Their exact primary bytes are digest-bound by the manifest.
+Verification recipes and automation proposals use their native YAML schemas.
+Their exact primary bytes are digest-bound by the manifest.
 
 If any target exists, stop instead of overwriting developer work.
 
@@ -281,10 +312,13 @@ Stop on diagnostics before projection. Do not edit the managed `AGENTS.md`
 section. When a digest-bound source changes, update its exact manifest digest,
 then rerun.
 
-The projection inlines base semantic rules, links contextual rules and recipes,
-indexes primary Agent Skills, and omits automation proposals. An empty or
-automation-only pack does not create or rewrite an unprojected `AGENTS.md`, but
-removes a stale generated managed section when one exists.
+The projection identifies its derived lifecycle boundary, presents populated
+orientation first, explains routing, inlines action-first base semantic rules,
+links contextual rules, displays recipe commands and expected results without
+executing them, indexes primary Agent Skills, and omits automation proposals.
+An empty, orientation-only, or automation-only pack does not create or rewrite
+an unprojected `AGENTS.md`, but removes a stale generated managed section when
+one exists.
 
 ### 6. Disclose the complete uncommitted result
 
@@ -300,8 +334,8 @@ List every changed and untracked path. State explicitly:
 - no automation proposal was implemented;
 - no Git mutation was performed;
 - `AGENTS.md` is derived; and
-- the manifest, inventory, report, and canonical artifact files are the
-  editable sources.
+- the manifest, inventory, optional orientation, report, and canonical
+  artifact files are the editable sources.
 
 Stop before the ADR. The developer-created pull request and its merge are the
 adoption decision.

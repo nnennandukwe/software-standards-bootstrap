@@ -8,7 +8,7 @@ Software Standards Bootstrap turns a pinned repository snapshot into a Git-revie
 host agent semantic reads
           │
           ▼
-manifest + inventory + human report + four actionable artifact types
+manifest + inventory + human report + optional orientation + four artifact types
           │
           ├── ssb validate ── schema, inventory, evidence, confidence,
           │                   utility, and relationship checks
@@ -177,9 +177,24 @@ rendering, JSON, ADR creation, and governed prune.
 Manifest-layout loading checks file type, symlinks, and canonical paths before
 parsing.
 `manifest.yaml` is limited to 1 MiB and `inventory.json` to 128 MiB. The
-manifest binds the exact raw bytes of the inventory, human report, and each
-primary artifact, including line endings. Human report and rule presentation
-are validated rather than silently normalized.
+manifest binds the exact raw bytes of the inventory, human report, optional
+orientation, and each primary artifact, including line endings. Human report
+and rule presentation are validated rather than silently normalized.
+
+Optional `.software-standards/orientation.yaml` uses
+`ssb.dev/orientation/v1`. It is bounded to 1 MiB and provides reviewed summary,
+area, prerequisite, document, relationship, and task-guidance context backed
+by exact `declares` or `enforces` evidence. Paths resolve against the pinned
+baseline. Orientation is normalized with the pack but is not a manifest
+artifact, actionable-artifact count, or ADR source. In the manifest layout, an
+unreferenced canonical orientation file is rejected rather than inferred.
+
+Verification decoding is version-specific and private to `rulepack`.
+`ssb.dev/verification/v2` requires a `working_directory` for every ordered
+step. The value is `.` or a canonical tracked directory outside submodules at
+the pinned baseline. Strict `ssb.dev/verification/v1` input rejects that v2-only
+field and normalizes valid steps to `working_directory: .`. Consumers see only
+the normalized `VerificationRecipe` type.
 
 The module owns:
 
@@ -190,6 +205,10 @@ The module owns:
 - category, lenses, scopes, directive, and derivation validation;
 - evidence roles, thresholds, exact line-range hashing, and inventory
   eligibility;
+- bounded `ssb.dev/orientation/v1` context, path checks, and authoritative
+  evidence;
+- strict verification/v1 and verification/v2 decoding with normalized working
+  directories;
 - recipe step-to-`enforces` evidence references;
 - portable Agent Skill frontmatter and manifest-owned SSB metadata;
 - automation proposal completeness;
@@ -203,20 +222,41 @@ executes a recipe or implements an automation proposal.
 Valid `ssb validate --format json` output includes the normalized pack in
 response schema 3. It reports `pack.layout` as `manifest` or `embedded` and
 exposes separate manifest, inventory, and report paths for the manifest layout.
-Invalid output omits the pack. This is a local interchange boundary, not a
-catalog import or synchronization mechanism.
+When referenced, it also exposes the orientation path, manifest reference, and
+normalized `ssb.dev/orientation/v1` content. Verification steps expose their
+normalized `working_directory`. Invalid output omits the pack. This is a local
+interchange boundary, not a catalog import or synchronization mechanism.
 
 ### Renderer
 
-The renderer creates one marked root `AGENTS.md` section and preserves every
-pre-existing byte outside it. It orders base semantic rules by directive,
-utility, and stable ID. It inlines base rule bodies, links contextual semantic
-rules and verification recipes, and indexes primary Agent Skills by activation
-context. It shows related recipe and skill links and omits automation proposals.
+The renderer consumes an already validated `rulepack.Pack`; it never reads
+orientation files, parses YAML, resolves repository paths, or runs commands.
+It constructs one complete marked root `AGENTS.md` section before entering the
+existing atomic replacement path and preserves every pre-existing byte outside
+it.
 
-An empty or automation-only pack does not create or rewrite an unprojected
-`AGENTS.md`; if a generated managed section remains from an earlier pack, the
-renderer removes that stale section and preserves all surrounding bytes.
+The reading order is lifecycle boundary, populated repository orientation,
+routing instructions, standing orders, contextual semantic rules,
+verification commands, and Agent Skills. Base semantic rules remain ordered by
+directive, utility, and stable ID, but put the operative canonical Markdown
+body in a blockquote before metadata so body headings cannot escape the rule.
+Contextual rules remain link-only. Verification steps stay in source
+order and render exact command bytes inside dynamically safe Markdown fences;
+non-root `working_directory` and expected results are explicit. Rendering does
+not execute a command. Relationships show only explicitly declared rule,
+recipe, and skill IDs in declared order. Automation proposals remain absent.
+
+The lifecycle copy distinguishes a derived unmerged proposal from review and
+merge adoption. It states that file presence is not adoption proof, and that
+SSB did not stage, commit, push, open a pull request, execute any displayed
+recipe command, or activate another system. Recipe presence and expected
+results are not execution evidence.
+
+An empty, orientation-only, or automation-only pack does not create or rewrite
+an unprojected `AGENTS.md`; if a generated managed section remains from an
+earlier pack, the renderer removes that stale section and preserves all
+surrounding bytes. Embedded packs receive the common projection behavior but
+never orientation.
 
 The section stores:
 
@@ -249,8 +289,9 @@ status.
 | `.software-standards/manifest.yaml` | Manifest-layout accepted index, selection metadata, provenance, relationships, and primary-file digests | Yes | Exact file and evidence binding |
 | `.software-standards/inventory.json` | Complete unedited inspection response | Yes | Exact baseline inventory accounting |
 | `.software-standards/report.md` | Human limitations and accepted-output narrative; embedded-layout packs also retain their `ssb.dev/report/v1` machine contract here | Yes | Manifest layout: digest-bound narrative; embedded layout: inventory and evidence index |
+| `.software-standards/orientation.yaml` | Optional `ssb.dev/orientation/v1` reviewed repository context | Yes | Exact file and statement evidence binding; not an artifact or ADR source |
 | `.software-standards/rules/*.md` | Human-first semantic rules; embedded-layout files retain `ssb.dev/rule/v2` frontmatter | Yes | Manifest-owned evidence mapping |
-| `.software-standards/verification/*.yaml` | Canonical existing-command recipes | Yes | Records commands, never a run result |
+| `.software-standards/verification/*.yaml` | Canonical strict verification/v1 or verification/v2 existing-command recipes | Yes | Records commands and normalized `working_directory`, never a run result |
 | `.agents/skills/*/SKILL.md` | Canonical procedural workflows | Yes | No |
 | `.software-standards/automation/*.yaml` | Reviewable proposed-check designs | Yes | Not implemented or adopted |
 | Root `AGENTS.md` managed section | Derived rule, recipe, and skill router | No | No |

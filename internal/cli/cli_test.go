@@ -1009,6 +1009,119 @@ func TestValidateJSONReportsManifestLayout(t *testing.T) {
 	}
 }
 
+func TestValidateJSONExportsOrientationAndNormalizedVerificationV2(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+	orientation := fmt.Sprintf(`schema: ssb.dev/orientation/v1
+summary:
+  text: This repository is a Go command.
+  evidence:
+    - role: declares
+      path: main.go
+      lines: 1-1
+      excerpt_sha256: %s
+`, excerptHash("package main\n"))
+	recipe := fmt.Sprintf(`schema: ssb.dev/verification/v2
+id: verify-repository
+title: Verify the repository
+category: testability
+lenses:
+  - kind: task
+    value: verification
+scopes:
+  - "**/*"
+derivation: extracted
+evidence:
+  - ref: make-verify
+    role: enforces
+    path: Makefile
+    lines: 1-2
+    excerpt_sha256: %s
+when: Before handoff.
+steps:
+  - run: go test ./...
+    working_directory: .
+    source_evidence: make-verify
+    expected_result: Tests exit successfully.
+`, excerptHash("verify:\n\tgo test ./...\n"))
+	manifestPath := filepath.Join(repo, ".software-standards", "manifest.yaml")
+	manifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withOrientation := strings.Replace(string(manifest), "artifacts:\n", fmt.Sprintf(`orientation:
+  path: .software-standards/orientation.yaml
+  sha256: %s
+artifacts:
+`, excerptHash(orientation)), 1)
+	withRecipe := withOrientation + fmt.Sprintf(`  - id: verify-repository
+    kind: verification
+    path: .software-standards/verification/verify-repository.yaml
+    sha256: %s
+    category: testability
+    lenses:
+      - kind: task
+        value: verification
+    scopes:
+      - "**/*"
+    derivation: extracted
+    evidence:
+      - ref: make-verify
+        role: enforces
+        path: Makefile
+        lines: 1-2
+        excerpt_sha256: %s
+    confidence: high
+    utility:
+      method: ssb-utility-v1
+      total: 70
+      factors:
+        marginal_value: 20
+        risk_reduction: 15
+        actionability: 15
+        applicability: 10
+        earlier_feedback: 10
+`, excerptHash(recipe), excerptHash("verify:\n\tgo test ./...\n"))
+	writeFile(t, manifestPath, withRecipe)
+	writeFile(t, filepath.Join(repo, ".software-standards", "orientation.yaml"), orientation)
+	writeFile(t, filepath.Join(repo, ".software-standards", "verification", "verify-repository.yaml"), recipe)
+	before := git(t, repo, "status", "--porcelain=v1", "-z")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{"validate", "--repo", repo, "--format", "json"}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("validate failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	var response struct {
+		SchemaVersion int `json:"schema_version"`
+		Pack          *struct {
+			OrientationPath string `json:"orientation_path"`
+			Manifest        struct {
+				Orientation rulepack.FileReference      `json:"orientation"`
+				Artifacts   []rulepack.AcceptedArtifact `json:"artifacts"`
+			} `json:"manifest"`
+			Orientation *rulepack.Orientation         `json:"orientation"`
+			Recipes     []rulepack.VerificationRecipe `json:"verification_recipes"`
+		} `json:"pack"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("decode response %q: %v", stdout.String(), err)
+	}
+	if response.SchemaVersion != 3 || response.Pack == nil ||
+		response.Pack.OrientationPath != ".software-standards/orientation.yaml" ||
+		response.Pack.Manifest.Orientation.Path != response.Pack.OrientationPath ||
+		len(response.Pack.Manifest.Artifacts) != 2 || response.Pack.Orientation == nil ||
+		response.Pack.Orientation.Summary == nil || len(response.Pack.Recipes) != 1 ||
+		response.Pack.Recipes[0].Schema != rulepack.VerificationSchemaV2 ||
+		response.Pack.Recipes[0].Steps[0].WorkingDirectory != "." {
+		t.Fatalf("unexpected schema 3 response: %#v\n%s", response, stdout.String())
+	}
+	if after := git(t, repo, "status", "--porcelain=v1", "-z"); after != before {
+		t.Fatalf("validate changed repository: before=%q after=%q", before, after)
+	}
+}
+
 func TestRenderDryRunAndValidationFailureHaveNoFilesystemEffects(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
 	writeValidPack(t, repo, baseline)
@@ -1041,6 +1154,44 @@ func TestRenderDryRunAndValidationFailureHaveNoFilesystemEffects(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(repo, "AGENTS.md")); !os.IsNotExist(err) {
 		t.Fatalf("invalid render created AGENTS.md: %v", err)
+	}
+}
+
+func TestOrientationValidationFailureStopsBeforeAgentsMutation(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+	writeFile(t, filepath.Join(repo, ".software-standards", "orientation.yaml"), "schema: ssb.dev/orientation/v1\n")
+	agentsPath := filepath.Join(repo, "AGENTS.md")
+	before := "# Human guidance\n"
+	writeFile(t, agentsPath, before)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{"render", "--repo", repo}, &stdout, &stderr)
+	if code != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "bind it in the manifest or remove it") {
+		t.Fatalf("render failure: exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	after, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != before {
+		t.Fatalf("failed validation changed AGENTS.md: %q", after)
+	}
+	matches, err := filepath.Glob(filepath.Join(repo, ".ssb-agents-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("failed validation left staged files: %#v", matches)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = cli.Run([]string{"validate", "--repo", repo, "--format", "json"}, &stdout, &stderr)
+	if code != 1 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"valid": false`) ||
+		!strings.Contains(stdout.String(), "bind it in the manifest or remove it") {
+		t.Fatalf("JSON validation failure: exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
 

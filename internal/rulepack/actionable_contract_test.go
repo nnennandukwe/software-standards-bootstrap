@@ -299,14 +299,31 @@ func TestValidateManifestPresentation(t *testing.T) {
 			wantLayout: rulepack.LayoutManifest,
 		},
 		{
+			name:       "lone CR lower heading after actionable text",
+			rule:       []byte("# Keep public APIs compatible\n\nKeep APIs stable.\r## Rationale\rDownstream consumers pin versions.\r"),
+			wantBody:   "Keep APIs stable.\r## Rationale\rDownstream consumers pin versions.\r",
+			wantTitle:  "Keep public APIs compatible",
+			wantLayout: rulepack.LayoutManifest,
+		},
+		{
 			name: "second H1",
 			rule: []byte("# Keep public APIs compatible\n\nKeep APIs stable.\n\n# Hidden replacement\n\nBreak them.\n"),
+			want: "semantic rule must contain exactly one H1 title",
+		},
+		{
+			name: "second H1 after lone CR",
+			rule: []byte("# Keep public APIs compatible\n\nKeep APIs stable.\r# Hidden replacement\rBreak them.\r"),
 			want: "semantic rule must contain exactly one H1 title",
 		},
 		{
 			name: "heading before actionable text",
 			rule: []byte("# Keep public APIs compatible\n\n## Details\n\nKeep APIs stable.\n"),
 			want: "actionable text must immediately follow the H1 title",
+		},
+		{
+			name: "Unicode format character in body",
+			rule: []byte("# Keep public APIs compatible\n\nKeep APIs \u202estable.\n"),
+			want: "format characters",
 		},
 	}
 
@@ -1755,7 +1772,13 @@ func diagnosticsContain(diagnostics []rulepack.Diagnostic, want string) bool {
 
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	command := append([]string{"-c", "user.name=SSB Test", "-c", "user.email=ssb@example.invalid", "-C", dir}, args...)
+	command := append([]string{
+		"-c", "user.name=SSB Test",
+		"-c", "user.email=ssb@example.invalid",
+		"-c", "maintenance.auto=false",
+		"-c", "gc.auto=0",
+		"-C", dir,
+	}, args...)
 	cmd := exec.Command("git", command...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

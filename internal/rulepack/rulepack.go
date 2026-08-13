@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"go.yaml.in/yaml/v4"
 
@@ -29,15 +30,17 @@ import (
 type Layout string
 
 const (
-	ManifestSchema            = "ssb.dev/manifest/v1"
-	ReportSchema              = "ssb.dev/report/v1"
-	RuleSchema                = "ssb.dev/rule/v2"
-	VerificationSchema        = "ssb.dev/verification/v1"
-	AutomationSchema          = "ssb.dev/automation/v1"
-	UtilityMethod             = "ssb-utility-v1"
-	LayoutManifest     Layout = "manifest"
-	LayoutEmbedded     Layout = "embedded"
-	categoryRecovery          = "use one primary category: architecture, compatibility, compliance, correctness, developer-experience, documentation, maintainability, operability, performance, quality, reliability, security, or testability"
+	ManifestSchema              = "ssb.dev/manifest/v1"
+	ReportSchema                = "ssb.dev/report/v1"
+	RuleSchema                  = "ssb.dev/rule/v2"
+	VerificationSchemaV1        = "ssb.dev/verification/v1"
+	VerificationSchemaV2        = "ssb.dev/verification/v2"
+	VerificationSchema          = VerificationSchemaV1
+	AutomationSchema            = "ssb.dev/automation/v1"
+	UtilityMethod               = "ssb-utility-v1"
+	LayoutManifest       Layout = "manifest"
+	LayoutEmbedded       Layout = "embedded"
+	categoryRecovery            = "use one primary category: architecture, compatibility, compliance, correctness, developer-experience, documentation, maintainability, operability, performance, quality, reliability, security, or testability"
 )
 
 var (
@@ -141,6 +144,7 @@ type Manifest struct {
 	BaselineCommit string             `yaml:"baseline_commit" json:"baseline_commit"`
 	Inventory      FileReference      `yaml:"inventory,omitempty" json:"inventory,omitzero"`
 	Report         FileReference      `yaml:"report,omitempty" json:"report,omitzero"`
+	Orientation    FileReference      `yaml:"orientation,omitempty" json:"orientation,omitzero"`
 	Artifacts      []AcceptedArtifact `yaml:"artifacts" json:"artifacts"`
 }
 
@@ -317,9 +321,10 @@ type Skill struct {
 
 // VerificationStep is one existing command in a recorded recipe.
 type VerificationStep struct {
-	Run            string `yaml:"run" json:"run"`
-	SourceEvidence string `yaml:"source_evidence" json:"source_evidence"`
-	ExpectedResult string `yaml:"expected_result" json:"expected_result"`
+	Run              string `yaml:"run" json:"run"`
+	WorkingDirectory string `yaml:"working_directory" json:"working_directory"`
+	SourceEvidence   string `yaml:"source_evidence" json:"source_evidence"`
+	ExpectedResult   string `yaml:"expected_result" json:"expected_result"`
 }
 
 // VerificationRecipe records an ordered, deliberately invoked existing
@@ -359,19 +364,21 @@ type AutomationProposal struct {
 // Pack contains parsed artifacts even when diagnostics are returned. Consumers
 // must not render or create an ADR unless diagnostics is empty.
 type Pack struct {
-	Layout         Layout               `json:"layout"`
-	BaselineCommit string               `json:"baseline_commit"`
-	ManifestPath   string               `json:"manifest_path,omitempty"`
-	InventoryPath  string               `json:"inventory_path,omitempty"`
-	ReportPath     string               `json:"report_path,omitempty"`
-	Manifest       Manifest             `json:"manifest"`
-	Inventory      ReportInventory      `json:"inventory"`
-	HumanReport    HumanReport          `json:"report"`
-	Report         Report               `json:"-"`
-	Rules          []Rule               `json:"rules"`
-	Recipes        []VerificationRecipe `json:"verification_recipes"`
-	Skills         []Skill              `json:"skills"`
-	Automations    []AutomationProposal `json:"automation_proposals"`
+	Layout          Layout               `json:"layout"`
+	BaselineCommit  string               `json:"baseline_commit"`
+	ManifestPath    string               `json:"manifest_path,omitempty"`
+	InventoryPath   string               `json:"inventory_path,omitempty"`
+	ReportPath      string               `json:"report_path,omitempty"`
+	OrientationPath string               `json:"orientation_path,omitempty"`
+	Manifest        Manifest             `json:"manifest"`
+	Orientation     *Orientation         `json:"orientation,omitempty"`
+	Inventory       ReportInventory      `json:"inventory"`
+	HumanReport     HumanReport          `json:"report"`
+	Report          Report               `json:"-"`
+	Rules           []Rule               `json:"rules"`
+	Recipes         []VerificationRecipe `json:"verification_recipes"`
+	Skills          []Skill              `json:"skills"`
+	Automations     []AutomationProposal `json:"automation_proposals"`
 }
 
 type skillFrontmatter struct {
@@ -480,6 +487,32 @@ func validateManifestLayoutPack(
 	}
 	pack.BaselineCommit = pack.Manifest.BaselineCommit
 	diagnostics = append(diagnostics, validateManifest(repo, pack.Manifest, retained)...)
+	if pack.Manifest.Orientation.Path == orientationPath {
+		pack.OrientationPath = orientationPath
+	}
+	if pack.Manifest.Orientation.IsZero() {
+		orientationInfo, orientationErr := os.Lstat(filepath.Join(repo.Root(), filepath.FromSlash(orientationPath)))
+		switch {
+		case orientationErr == nil:
+			message := orientationPath + " is present without a manifest reference"
+			recovery := "bind it in the manifest or remove it"
+			if orientationInfo.Mode()&os.ModeSymlink != 0 {
+				message = orientationPath + " is a symlink present without a manifest reference"
+				recovery = "replace it with reviewed regular-file bytes and bind those bytes in the manifest, or remove the symlink"
+			} else if !orientationInfo.Mode().IsRegular() {
+				message = orientationPath + " is a non-regular entry present without a manifest reference"
+				recovery = "replace it with reviewed regular-file bytes and bind those bytes in the manifest, or remove the entry"
+			}
+			diagnostics = append(diagnostics, diagnostic(
+				orientationPath,
+				"file",
+				message,
+				recovery,
+			))
+		case !errors.Is(orientationErr, os.ErrNotExist):
+			return Pack{}, nil, fmt.Errorf("inspect %s: %w", orientationPath, orientationErr)
+		}
+	}
 
 	var inventoryBytes []byte
 	if pack.Manifest.Inventory.Path == inventoryPath {
@@ -569,6 +602,19 @@ func validateManifestLayoutPack(
 		}
 		diagnostics = append(diagnostics, inventoryDiagnostics...)
 	}
+	if pack.Manifest.Orientation.Path == orientationPath {
+		orientation, orientationDiagnostics, orientationErr := loadOrientation(
+			ctx,
+			evidenceRepo,
+			repo.Root(),
+			pack.Manifest.Orientation,
+		)
+		if orientationErr != nil {
+			return Pack{}, nil, orientationErr
+		}
+		diagnostics = append(diagnostics, orientationDiagnostics...)
+		pack.Orientation = orientation
+	}
 
 	entriesByID := make(map[string]AcceptedArtifact, len(pack.Manifest.Artifacts))
 	entriesByPath := make(map[string]AcceptedArtifact, len(pack.Manifest.Artifacts))
@@ -649,6 +695,9 @@ func validateManifestLayoutPack(
 	}
 
 	diagnostics = append(diagnostics, validateRelationships(manifestPath, pack.Manifest.Artifacts, entriesByID)...)
+	if pack.Orientation != nil {
+		diagnostics = append(diagnostics, validateOrientationRelationships(orientationPath, pack.Orientation, entriesByID)...)
+	}
 	unlisted, scanDiagnostics, scanErr := unlistedNativeArtifacts(repo.Root(), entriesByPath)
 	if scanErr != nil {
 		return Pack{}, nil, scanErr
@@ -695,6 +744,14 @@ func validateManifest(repo *workspace.Repository, manifest Manifest, retained bo
 	}
 	if !digestPattern.MatchString(manifest.Report.SHA256) {
 		add("report.sha256", "report sha256 must use sha256:<64 lowercase hex characters>", "hash the exact report.md bytes")
+	}
+	if !manifest.Orientation.IsZero() {
+		if manifest.Orientation.Path != orientationPath {
+			add("orientation.path", "orientation path must be "+orientationPath, "use the canonical manifest-layout orientation path")
+		}
+		if !digestPattern.MatchString(manifest.Orientation.SHA256) {
+			add("orientation.sha256", "orientation sha256 must use sha256:<64 lowercase hex characters>", "hash the exact orientation.yaml bytes")
+		}
 	}
 	return diagnostics
 }
@@ -827,8 +884,13 @@ func parseHumanRule(sourcePath string, data []byte) (string, string, []Diagnosti
 	if strings.TrimSpace(string(bodyBytes)) == "" {
 		return title, "", []Diagnostic{diagnostic(sourcePath, "body", "semantic rule actionable text must not be empty", "write the actionable obligation immediately after the H1 title")}
 	}
+	if containsUnicodeFormatCharacter(string(bodyBytes)) {
+		return title, string(bodyBytes), []Diagnostic{diagnostic(sourcePath, "body", "semantic rule body must not contain Unicode format characters", "remove bidirectional overrides and other invisible format characters")}
+	}
 	firstContent := true
-	for _, line := range strings.Split(strings.ReplaceAll(string(bodyBytes), "\r\n", "\n"), "\n") {
+	normalizedBody := strings.ReplaceAll(string(bodyBytes), "\r\n", "\n")
+	normalizedBody = strings.ReplaceAll(normalizedBody, "\r", "\n")
+	for _, line := range strings.Split(normalizedBody, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
@@ -907,15 +969,11 @@ func loadManifestVerificationRecipe(
 	if err != nil || len(data) == 0 {
 		return VerificationRecipe{}, diagnostics, err
 	}
-	var recipe VerificationRecipe
-	if err := yaml.Load(data, &recipe, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
-		return VerificationRecipe{}, append(diagnostics, yamlDiagnostic(
-			manifest.Path,
-			err,
-			"use only fields from the ssb.dev/verification/v1 schema",
-		)), nil
+	recipe, recipeDiagnostics := decodeVerificationRecipe(manifest.Path, data)
+	diagnostics = append(diagnostics, recipeDiagnostics...)
+	if len(recipeDiagnostics) != 0 {
+		return VerificationRecipe{}, diagnostics, nil
 	}
-	recipe.SourcePath = manifest.Path
 	diagnostics = append(diagnostics, validateVerificationRecipe(ctx, evidenceRepo, recipe, manifest)...)
 	diagnostics = append(diagnostics, validateNativeMetadataBinding(manifest.Path, recipe.ID, recipe.Category, recipe.Lenses, recipe.Scopes, recipe.Derivation, recipe.Evidence, manifest)...)
 	return recipe, diagnostics, nil
@@ -1734,6 +1792,9 @@ func validateActionableRule(
 	if strings.TrimSpace(rule.Body) == "" {
 		add("body", "rule body is required", "write the actionable semantic obligation")
 	}
+	if containsUnicodeFormatCharacter(rule.Body) {
+		add("body", "rule body must not contain Unicode format characters", "remove bidirectional overrides and other invisible format characters")
+	}
 	diagnostics = append(diagnostics, validateActionableLenses(rule.SourcePath, "lenses", rule.Lenses)...)
 	if _, supported := supportedDirectives[rule.Directive]; !supported {
 		add("directive", fmt.Sprintf("directive %q is not supported", rule.Directive), "use always, ask-first, never, or prefer")
@@ -1741,6 +1802,15 @@ func validateActionableRule(
 	diagnostics = append(diagnostics, validateScopes(rule.SourcePath, rule.Scopes)...)
 	diagnostics = append(diagnostics, validateDerivationEvidence(ctx, repo, rule.SourcePath, rule.Derivation, rule.Evidence)...)
 	return diagnostics
+}
+
+func containsUnicodeFormatCharacter(value string) bool {
+	for _, character := range value {
+		if unicode.In(character, unicode.Cf) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateActionableLenses(sourcePath, field string, lenses []Lens) []Diagnostic {
@@ -1863,82 +1933,13 @@ func loadVerificationRecipe(
 	if err != nil || len(data) == 0 {
 		return VerificationRecipe{}, diagnostics, err
 	}
-	var recipe VerificationRecipe
-	if err := yaml.Load(data, &recipe, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
-		return VerificationRecipe{}, append(diagnostics, yamlDiagnostic(
-			manifest.Path,
-			err,
-			"use only fields from the ssb.dev/verification/v1 schema",
-		)), nil
+	recipe, recipeDiagnostics := decodeVerificationRecipe(manifest.Path, data)
+	diagnostics = append(diagnostics, recipeDiagnostics...)
+	if len(recipeDiagnostics) != 0 {
+		return VerificationRecipe{}, diagnostics, nil
 	}
-	recipe.SourcePath = manifest.Path
 	diagnostics = append(diagnostics, validateVerificationRecipe(ctx, evidenceRepo, recipe, manifest)...)
 	return recipe, diagnostics, nil
-}
-
-func validateVerificationRecipe(
-	ctx context.Context,
-	repo *workspace.Repository,
-	recipe VerificationRecipe,
-	manifest AcceptedArtifact,
-) []Diagnostic {
-	diagnostics := make([]Diagnostic, 0)
-	add := func(field, message, recovery string) {
-		diagnostics = append(diagnostics, diagnostic(recipe.SourcePath, field, message, recovery))
-	}
-	if recipe.Schema != VerificationSchema {
-		add("schema", "schema must be "+VerificationSchema, "update the verification recipe schema value")
-	}
-	if recipe.ID != manifest.ID {
-		add("id", fmt.Sprintf("recipe id %q must match manifest id %q", recipe.ID, manifest.ID), "align the recipe id, filename, and report entry")
-	}
-	if strings.TrimSpace(recipe.Title) == "" {
-		add("title", "title is required", "add a concise developer-facing title")
-	}
-	if _, supported := supportedCategories[recipe.Category]; recipe.Category == "" || !supported {
-		add("category", fmt.Sprintf("category %q is not supported", recipe.Category), categoryRecovery)
-	}
-	diagnostics = append(diagnostics, validateActionableLenses(recipe.SourcePath, "lenses", recipe.Lenses)...)
-	diagnostics = append(diagnostics, validateScopes(recipe.SourcePath, recipe.Scopes)...)
-	diagnostics = append(diagnostics, validateDerivationEvidence(ctx, repo, recipe.SourcePath, recipe.Derivation, recipe.Evidence)...)
-	if strings.TrimSpace(recipe.When) == "" {
-		add("when", "when is required", "state the exact handoff context in which the recipe applies")
-	}
-	enforcesByRef := make(map[string]struct{})
-	seenRefs := make(map[string]struct{})
-	for index, evidence := range recipe.Evidence {
-		field := fmt.Sprintf("evidence[%d].ref", index)
-		if !stableIDPattern.MatchString(evidence.Ref) {
-			add(field, "recipe evidence ref must be lower-case kebab-case", "give every evidence citation a stable ref")
-		}
-		if _, duplicate := seenRefs[evidence.Ref]; duplicate {
-			add(field, fmt.Sprintf("duplicate evidence ref %q", evidence.Ref), "give every recipe evidence citation a unique ref")
-		}
-		seenRefs[evidence.Ref] = struct{}{}
-		if evidence.Role == "enforces" {
-			enforcesByRef[evidence.Ref] = struct{}{}
-		}
-	}
-	if len(recipe.Steps) == 0 {
-		add("steps", "verification recipe requires at least one ordered command", "record an existing deliberately invoked command")
-	}
-	for index, step := range recipe.Steps {
-		field := fmt.Sprintf("steps[%d]", index)
-		if strings.TrimSpace(step.Run) == "" {
-			add(field+".run", "run is required", "record the exact existing repository command")
-		}
-		if _, exists := enforcesByRef[step.SourceEvidence]; !exists {
-			add(
-				field+".source_evidence",
-				fmt.Sprintf("step references missing enforces evidence %q", step.SourceEvidence),
-				"reference an evidence ref whose role is enforces",
-			)
-		}
-		if strings.TrimSpace(step.ExpectedResult) == "" {
-			add(field+".expected_result", "expected_result is required", "state the observable successful result")
-		}
-	}
-	return diagnostics
 }
 
 func loadActionableSkill(

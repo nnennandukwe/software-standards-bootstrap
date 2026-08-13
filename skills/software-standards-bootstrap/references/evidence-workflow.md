@@ -14,6 +14,12 @@ The manifest also hashes every complete primary artifact plus the
 inventory and human report. Those digests cover raw bytes, including line
 endings, rather than normalized YAML, JSON, or Markdown.
 
+When present, the manifest also binds the exact raw
+`.software-standards/orientation.yaml` bytes. Orientation statements use only
+`declares` or `enforces` evidence because they are reviewed repository context,
+not inference-only observations. Each statement cites its own authoritative
+baseline lines; do not reuse a copied summary as evidence.
+
 ## Roles and derivation
 
 Use evidence roles literally:
@@ -46,6 +52,12 @@ that it passed.
   rule without command metadata.
 - If an automatic check would be valuable but does not exist, emit an
   automation proposal rather than inventing a command or checker.
+
+For each newly generated verification-v2 step, record `working_directory: .`
+or the exact canonical repository-relative directory in which the existing
+command is meant to run. Confirm that the working directory resolves to a
+tracked tree at the pinned baseline and does not pass through a submodule.
+Never infer a missing directory as repository root.
 
 ## Preferred examples and counterexamples
 
