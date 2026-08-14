@@ -38,14 +38,32 @@ jobs:
         with:
           syft-version: v1.49.0
 
+      - name: Prepare curated release notes
+        shell: bash
+        run: |
+          if ! sh scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"; then
+            echo "Could not extract substantive release notes for $GITHUB_REF_NAME from CHANGELOG.md." >&2
+            exit 1
+          fi
+          cp "$RUNNER_TEMP/release-notes.md" "$RUNNER_TEMP/expected-release-body.md"
+          # GoReleaser v2.17.0 renders one final LF after ReleaseNotes.
+          printf '\n' >> "$RUNNER_TEMP/expected-release-body.md"
+
       - name: Build archives, checksums, SBOMs, and draft release
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
           version: v2.17.0
-          args: release --clean
+          args: release --clean --release-notes ${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify draft release notes
+        run: |
+          gh release view "${GITHUB_REF_NAME}" --json body --template '{{.body}}' > "$RUNNER_TEMP/draft-release-notes.md"
+          diff -u "$RUNNER_TEMP/expected-release-body.md" "$RUNNER_TEMP/draft-release-notes.md"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify complete Agent Skill in every release archive
         run: go test ./internal/releaseconfig -run '^TestGeneratedReleaseArchivesContainCompleteSkill$'

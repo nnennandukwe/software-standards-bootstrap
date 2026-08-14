@@ -22,7 +22,7 @@ Usage:
   install.sh [--version VERSION] [--install-dir DIRECTORY] [--skill-dir DIRECTORY]
 
 Options:
-  --version VERSION       Release tag to install, such as v0.1.0.
+  --version VERSION       Release tag to install, such as v0.2.0.
                           Defaults to the latest published release.
   --install-dir DIRECTORY Destination for the ssb binary.
                           Defaults to $HOME/.local/bin.
@@ -164,7 +164,7 @@ case "$version" in
   v[0-9]*.[0-9]*.[0-9]*)
     ;;
   *)
-    fail "invalid release tag: $version. Expected a tag such as v0.1.0."
+    fail "invalid release tag: $version. Expected a tag such as v0.2.0."
     ;;
 esac
 case "$version" in

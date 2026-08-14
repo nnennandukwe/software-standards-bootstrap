@@ -2,7 +2,9 @@ package releaseconfig_test
 
 import (
 	"bufio"
+	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -57,6 +59,12 @@ func TestReleaseConfigurationKeepsToolchainTargetsAndAttestationGates(t *testing
 		"attestations: write",
 		"subject-checksums: dist/checksums.txt",
 		"sbom-path:",
+		"sh scripts/release-notes.sh \"$GITHUB_REF_NAME\"",
+		"args: release --clean --release-notes ${{ runner.temp }}/release-notes.md",
+		"cp \"$RUNNER_TEMP/release-notes.md\" \"$RUNNER_TEMP/expected-release-body.md\"",
+		"printf '\\n' >> \"$RUNNER_TEMP/expected-release-body.md\"",
+		"gh release view \"${GITHUB_REF_NAME}\" --json body --template '{{.body}}'",
+		"diff -u \"$RUNNER_TEMP/expected-release-body.md\" \"$RUNNER_TEMP/draft-release-notes.md\"",
 		"--draft=false",
 	} {
 		if !strings.Contains(release, required) {
@@ -92,6 +100,106 @@ func TestReleaseConfigurationKeepsToolchainTargetsAndAttestationGates(t *testing
 	}
 }
 
+func TestReleaseNotesScript(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("release workflow runs this POSIX shell script on Ubuntu")
+	}
+
+	root := repositoryRoot(t)
+	script := filepath.Join(root, "scripts", "release-notes.sh")
+	shell, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("sh is unavailable")
+	}
+	tests := []struct {
+		name      string
+		changelog string
+		want      string
+		wantErr   string
+	}{
+		{
+			name: "extracts only the requested adjacent section",
+			changelog: "# Changelog\n\n## Unreleased\n\nNo changes yet.\n\n" +
+				"## [0.2.1] - 2026-08-15\n\n- Later.\n\n" +
+				"## [0.2.0] - 2026-08-14\n\n### Added\n\n- Feature.\n\n" +
+				"## [0.1.1] - 2026-07-31\n\n- Earlier.\n",
+			want: "\n### Added\n\n- Feature.\n\n",
+		},
+		{
+			name:      "rejects a missing section",
+			changelog: "# Changelog\n\n## [0.1.1] - 2026-07-31\n\n- Earlier.\n",
+			wantErr:   "release notes heading not found",
+		},
+		{
+			name:      "rejects a whitespace-only section",
+			changelog: "# Changelog\n\n## [0.2.0] - 2026-08-14\n\n \t\n## [0.1.1] - 2026-07-31\n",
+			wantErr:   "release notes section is empty",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			changelog := filepath.Join(t.TempDir(), "CHANGELOG.md")
+			if err := os.WriteFile(changelog, []byte(test.changelog), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			command := exec.Command(shell, script, "v0.2.0", changelog)
+			command.Stdout = &stdout
+			command.Stderr = &stderr
+			err := command.Run()
+			if test.wantErr != "" {
+				if err == nil {
+					t.Fatalf("release-notes.sh unexpectedly succeeded: %q", stdout.String())
+				}
+				if stdout.Len() != 0 {
+					t.Errorf("release-notes.sh wrote partial output: %q", stdout.String())
+				}
+				if !strings.Contains(stderr.String(), test.wantErr) {
+					t.Errorf("release-notes.sh error = %q, want substring %q", stderr.String(), test.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("release-notes.sh failed: %v: %s", err, stderr.String())
+			}
+			if got := stdout.String(); got != test.want {
+				t.Errorf("release-notes.sh output = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestReleaseWorkflowPublishesAfterVerification(t *testing.T) {
+	root := repositoryRoot(t)
+	release := readText(t, filepath.Join(root, ".github", "workflows", "release.yml"))
+	steps := []string{
+		"- name: Prepare curated release notes",
+		"- name: Build archives, checksums, SBOMs, and draft release",
+		"- name: Verify draft release notes",
+		"- name: Verify complete Agent Skill in every release archive",
+		"- name: Attest archive provenance from the SHA-256 manifest",
+		"- name: Attest macOS amd64 SBOM",
+		"- name: Attest macOS arm64 SBOM",
+		"- name: Attest Linux amd64 SBOM",
+		"- name: Attest Linux arm64 SBOM",
+		"- name: Attest Windows amd64 SBOM",
+		"- name: Attest Windows arm64 SBOM",
+		"- name: Publish the completed draft",
+	}
+	previous := -1
+	for _, step := range steps {
+		index := strings.Index(release, step)
+		if index < 0 {
+			t.Fatalf("release workflow missing %q", step)
+		}
+		if index <= previous {
+			t.Fatalf("release workflow step %q is out of order", step)
+		}
+		previous = index
+	}
+}
+
 func TestReleaseRunbookRequiresPinnedConfigurationPreflight(t *testing.T) {
 	root := repositoryRoot(t)
 	releasing := readText(t, filepath.Join(root, "docs", "releasing.md"))
@@ -101,15 +209,32 @@ func TestReleaseRunbookRequiresPinnedConfigurationPreflight(t *testing.T) {
 		"go run github.com/goreleaser/goreleaser/v2@v2.17.0 check",
 		"go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12",
 		"make verify-release-archives",
-		"./install.sh --version v0.1.1 --install-dir \"$install_root/bin\"",
+		"./install.sh --version v0.2.0 --install-dir \"$install_root/bin\"",
 		"\"$install_root/bin/ssb\" --help",
-		"SSB_RELEASE_ARCHIVE_DIR=\"$release_root\" SSB_RELEASE_SOURCE_REF=v0.1.1 go test ./internal/releaseconfig -run '^TestGeneratedReleaseArchivesContainCompleteSkill$'",
+		"gh release view v0.2.0 --repo nnennandukwe/software-standards-bootstrap --json body --jq .body",
+		"SSB_RELEASE_ARCHIVE_DIR=\"$release_root\" SSB_RELEASE_SOURCE_REF=v0.2.0 go test ./internal/releaseconfig -run '^TestGeneratedReleaseArchivesContainCompleteSkill$'",
 	} {
 		if !strings.Contains(releasing, required) {
 			t.Errorf("release runbook missing %q", required)
 		}
 		if !strings.Contains(verification, required) {
 			t.Errorf("verification contract missing %q", required)
+		}
+	}
+}
+
+func TestV020ReleaseNotesStateMigrationBoundary(t *testing.T) {
+	root := repositoryRoot(t)
+	changelog := strings.Join(strings.Fields(readText(t, filepath.Join(root, "CHANGELOG.md"))), " ")
+
+	for _, required := range []string{
+		"## [0.2.0] - 2026-08-14",
+		"Breaking for JSON consumers",
+		"response schema 3",
+		"Published v0.1.1 embedded-layout packs remain supported without migration",
+	} {
+		if !strings.Contains(changelog, required) {
+			t.Errorf("v0.2.0 release notes missing %q", required)
 		}
 	}
 }
@@ -158,7 +283,9 @@ func TestInstallerIsPackagedAndDocumentedBeforeProductDetail(t *testing.T) {
 		"curl -fsSL https://raw.githubusercontent.com/nnennandukwe/software-standards-bootstrap/main/install.sh | sh",
 		"sh -s -- --skill-dir .agents/skills",
 		"\"$HOME/.local/bin/ssb\" --help",
-		"sh -s -- --version v0.1.0",
+		"sh -s -- --version v0.2.0",
+		"-Version v0.2.0",
+		"go install github.com/nnennandukwe/software-standards-bootstrap/cmd/ssb@v0.2.0",
 		"installs the binary into `~/.local/bin`",
 		"verifies its SHA-256 checksum",
 	} {

@@ -48,10 +48,10 @@ With `--skill-dir`, the installer checks out the same release tag as the CLI
 and copies its `software-standards-bootstrap` skill into the requested host
 directory. It stops without replacing an existing skill.
 
-Pin both the CLI and Codex skill to v0.1.0:
+Pin both the CLI and Codex skill to v0.2.0:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nnennandukwe/software-standards-bootstrap/main/install.sh | sh -s -- --version v0.1.0 --skill-dir .agents/skills
+curl -fsSL https://raw.githubusercontent.com/nnennandukwe/software-standards-bootstrap/main/install.sh | sh -s -- --version v0.2.0 --skill-dir .agents/skills
 ```
 
 Use `--install-dir /path/to/bin` to choose another binary directory.
@@ -81,7 +81,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -SkillDir .agents\skills
 powershell -ExecutionPolicy Bypass -File .\install.ps1 -SkillDir .claude\skills
 
 # Pin both the CLI and skill to a release
-powershell -ExecutionPolicy Bypass -File .\install.ps1 -Version v0.1.0 -SkillDir .agents\skills
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Version v0.2.0 -SkillDir .agents\skills
 ```
 
 The matching `.zip` is also available from the
@@ -91,7 +91,7 @@ for a manual install.
 With Go 1.26.5 installed, the CLI alone can also be installed from source:
 
 ```bash
-go install github.com/nnennandukwe/software-standards-bootstrap/cmd/ssb@v0.1.0
+go install github.com/nnennandukwe/software-standards-bootstrap/cmd/ssb@v0.2.0
 ```
 
 ## What it generates

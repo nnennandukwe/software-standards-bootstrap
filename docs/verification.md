@@ -86,15 +86,16 @@ for this actionable-artifact cutover.
 ## Release controls
 
 Do not mark a release complete until the source commit, hosted checks, signed
-tag, archives, checksums, SBOMs, attestations, and clean installation are each
-verified independently. Pending evidence remains pending.
+tag, curated release body, archives, checksums, SBOMs, attestations, and clean
+installation are each verified independently. Pending evidence remains
+pending.
 
 Verify the public installer separately from the release workflow in an
 isolated destination:
 
 ```bash
 install_root=$(mktemp -d) || exit 1
-./install.sh --version v0.1.1 --install-dir "$install_root/bin"
+./install.sh --version v0.2.0 --install-dir "$install_root/bin"
 "$install_root/bin/ssb" --help
 rm -rf "$install_root"
 ```
@@ -103,7 +104,7 @@ On Windows, exercise the PowerShell installer the same way:
 
 ```powershell
 $installRoot = Join-Path $env:TEMP ([System.IO.Path]::GetRandomFileName())
-.\install.ps1 -Version v0.1.1 -InstallDir "$installRoot\bin"
+.\install.ps1 -Version v0.2.0 -InstallDir "$installRoot\bin"
 & "$installRoot\bin\ssb.exe" --help
 Remove-Item -LiteralPath $installRoot -Recurse -Force
 ```
@@ -118,10 +119,16 @@ from checksums, SBOMs, and attestations:
 
 ```bash
 release_root=$(mktemp -d) || exit 1
-gh release download v0.1.1 --repo nnennandukwe/software-standards-bootstrap --dir "$release_root"
-SSB_RELEASE_ARCHIVE_DIR="$release_root" SSB_RELEASE_SOURCE_REF=v0.1.1 go test ./internal/releaseconfig -run '^TestGeneratedReleaseArchivesContainCompleteSkill$'
+gh release view v0.2.0 --repo nnennandukwe/software-standards-bootstrap --json body --jq .body
+gh release download v0.2.0 --repo nnennandukwe/software-standards-bootstrap --dir "$release_root"
+SSB_RELEASE_ARCHIVE_DIR="$release_root" SSB_RELEASE_SOURCE_REF=v0.2.0 go test ./internal/releaseconfig -run '^TestGeneratedReleaseArchivesContainCompleteSkill$'
 rm -rf "$release_root"
 ```
+
+The published body must contain the `CHANGELOG.md` content beneath the
+`[0.2.0]` heading. While the release is still a draft, the workflow accounts
+for GoReleaser v2.17.0's final line feed and compares the rendered body byte for
+byte.
 
 This archive gate requires all six target archives and byte-for-byte copies of
 every regular file beneath `skills/software-standards-bootstrap`. The v0.1.0
