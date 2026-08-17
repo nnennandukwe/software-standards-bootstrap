@@ -213,13 +213,15 @@ func buildSection(pack rulepack.Pack) ([]byte, string, string, error) {
 	)
 	body.WriteString(
 		"- **SSB generator-defined:** Scopes and lenses are SSB routing metadata, not native `AGENTS.md` glob activation. " +
-			"A semantic rule applies when its affected path scope matches; contextual artifacts also require every represented " +
+			"A semantic rule applies when its affected path scope matches; " +
+			"contextual artifacts also require every represented " +
 			"lens dimension to match, with values inside one dimension treated as alternatives.\n",
 	)
 	body.WriteString("- If the language, framework, task, or affected path is uncertain, load the potentially relevant rule, recipe, or skill instead of excluding it.\n")
 	body.WriteString(
-		"- **SSB generator-defined:** Directives mean: `never` is prohibited, `ask-first` requires developer authorization, " +
-			"`always` is required, and `prefer` is the default when no documented exception or explicit user direction applies.\n",
+		"- **SSB generator-defined:** Directives mean: `never` is prohibited, " +
+			"`ask-first` requires developer authorization, `always` is required, " +
+			"and `prefer` is the default when no documented exception or explicit user direction applies.\n",
 	)
 	body.WriteString("- Linked artifact files are canonical. This projection is a concise router, not a replacement for their complete content.\n")
 

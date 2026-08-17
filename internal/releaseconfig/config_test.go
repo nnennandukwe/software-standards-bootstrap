@@ -113,6 +113,7 @@ func TestReleaseNotesScript(t *testing.T) {
 	}
 	tests := []struct {
 		name      string
+		tag       string
 		changelog string
 		want      string
 		wantErr   string
@@ -135,6 +136,31 @@ func TestReleaseNotesScript(t *testing.T) {
 			changelog: "# Changelog\n\n## [0.2.0] - 2026-08-14\n\n \t\n## [0.1.1] - 2026-07-31\n",
 			wantErr:   "release notes section is empty",
 		},
+		{
+			name:      "rejects a non-semantic release tag",
+			tag:       "v0.2",
+			changelog: "# Changelog\n\n## [0.2] - 2026-08-14\n\n- Invalid.\n",
+			wantErr:   "expected vMAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]",
+		},
+		{
+			name:      "rejects a semantic version with a leading zero",
+			tag:       "v00.2.0",
+			changelog: "# Changelog\n\n## [00.2.0] - 2026-08-14\n\n- Invalid.\n",
+			wantErr:   "expected vMAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]",
+		},
+		{
+			name: "extracts a semantic prerelease section",
+			tag:  "v0.3.0-rc.1+build.7",
+			changelog: "# Changelog\n\n## [0.3.0-rc.1+build.7] - 2026-08-17\n\n" +
+				"- Candidate.\n\n## [0.2.0] - 2026-08-17\n\n- Stable.\n",
+			want: "\n- Candidate.\n\n",
+		},
+		{
+			name:      "rejects a prerelease numeric identifier with a leading zero",
+			tag:       "v0.3.0-rc.01",
+			changelog: "# Changelog\n\n## [0.3.0-rc.01] - 2026-08-17\n\n- Invalid.\n",
+			wantErr:   "expected vMAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]",
+		},
 	}
 
 	for _, test := range tests {
@@ -144,7 +170,11 @@ func TestReleaseNotesScript(t *testing.T) {
 				t.Fatal(err)
 			}
 			var stdout, stderr bytes.Buffer
-			command := exec.Command(shell, script, "v0.2.0", changelog)
+			tag := test.tag
+			if tag == "" {
+				tag = "v0.2.0"
+			}
+			command := exec.Command(shell, script, tag, changelog)
 			command.Stdout = &stdout
 			command.Stderr = &stderr
 			err := command.Run()
@@ -209,10 +239,29 @@ func TestReleaseRunbookRequiresPinnedConfigurationPreflight(t *testing.T) {
 		"go run github.com/goreleaser/goreleaser/v2@v2.17.0 check",
 		"go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12",
 		"make verify-release-archives",
-		"./install.sh --version v0.2.0 --install-dir \"$install_root/bin\"",
+		"./install.sh --version v0.2.0 --install-dir \"$install_root/bin\" --skill-dir \"$install_root/skills\"",
 		"\"$install_root/bin/ssb\" --help",
+		"git archive --format=tar --output=\"$install_root/source.tar\" v0.2.0 skills/software-standards-bootstrap",
+		"diff -ru \"$install_root/source/skills/software-standards-bootstrap\" " +
+			"\"$install_root/skills/software-standards-bootstrap\"",
+		".\\install.ps1 -Version v0.2.0 -InstallDir \"$installRoot\\bin\" -SkillDir \"$installRoot\\skills\"",
+		"if ($LASTEXITCODE -ne 0) { throw \"installed ssb.exe failed its smoke test\" }",
+		"& git.exe archive --format=zip --output=$sourceArchive v0.2.0 skills/software-standards-bootstrap",
+		"if ($LASTEXITCODE -ne 0) { throw \"could not materialize tagged Agent Skill\" }",
+		"& git.exe diff --no-index --exit-code -- " +
+			"\"$sourceRoot\\skills\\software-standards-bootstrap\" " +
+			"\"$installRoot\\skills\\software-standards-bootstrap\"",
+		"if ($LASTEXITCODE -ne 0) { throw \"installed Agent Skill differs from tagged source\" }",
 		"gh release view v0.2.0 --repo nnennandukwe/software-standards-bootstrap --json body --jq .body",
-		"SSB_RELEASE_ARCHIVE_DIR=\"$release_root\" SSB_RELEASE_SOURCE_REF=v0.2.0 go test ./internal/releaseconfig -run '^TestGeneratedReleaseArchivesContainCompleteSkill$'",
+		"(cd \"$release_root\" && shasum -a 256 --check checksums.txt)",
+		"SSB_RELEASE_ARCHIVE_DIR=\"$release_root\" SSB_RELEASE_SOURCE_REF=v0.2.0 " +
+			"go test ./internal/releaseconfig " +
+			"-run '^TestGeneratedReleaseArchivesContainCompleteSkill$'",
+		"for artifact in \"$release_root\"/ssb_v0.2.0_*; do",
+		"--source-ref refs/tags/v0.2.0",
+		"--signer-workflow nnennandukwe/software-standards-bootstrap/.github/workflows/release.yml",
+		"--predicate-type https://slsa.dev/provenance/v1",
+		"--predicate-type https://spdx.dev/Document/v2.3",
 	} {
 		if !strings.Contains(releasing, required) {
 			t.Errorf("release runbook missing %q", required)

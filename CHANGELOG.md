@@ -50,6 +50,11 @@ No changes yet.
 
 ### Fixed
 
+- Strengthened public release verification to check installed Agent Skill
+  files, every checksum subject's provenance, and each archive's SPDX SBOM
+  attestation against the signed tag workflow.
+- Made curated release-note extraction reject tags that are not canonical
+  `vMAJOR.MINOR.PATCH` semantic versions.
 - Made rendered `AGENTS.md` identify manifest- or report-listed artifacts
   without implying developer acceptance, and distinguish host-specific
   `AGENTS.md` discovery and precedence from SSB-defined routing metadata.

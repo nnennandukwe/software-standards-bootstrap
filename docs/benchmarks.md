@@ -104,3 +104,15 @@ source/content/output digests are recorded. The raw replay bundle is not
 retained in Git. The retained projection is `proposal/AGENTS.proposed.md`, never
 a nested active `AGENTS.md`; `run.yaml` binds it and the routing records
 byte-for-byte.
+
+The [2026-08-17 v0.2.0 actionable-artifact acceptance](benchmarks/results/2026-08-17-v0.2.0-actionable/README.md)
+records the fresh four-fixture pass generated and reviewed on 2026-08-14, then
+explicitly approved and retained on 2026-08-17. Every fixture passed its exact
+per-repository threshold: 21/21 artifacts had resolvable evidence and were
+retained through 10 keep and 11 edit-and-keep decisions. The record binds the
+generation source separately from the later projection/ADR source, retains the
+four final `AGENTS.proposed.md` files and four `Proposed` ADRs, and records the
+edit/delete propagation check. Its exact 13-file tree omits raw inventories,
+manifests, reports, orientations, canonical artifacts, transcripts, and logs.
+Benchmark acceptance does not claim fixture adoption or a merged, tagged,
+published, installed, or adopted `v0.2.0` release.

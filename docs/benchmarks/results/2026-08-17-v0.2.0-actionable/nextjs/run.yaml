@@ -1,0 +1,171 @@
+schema: ssb.dev/actionable-benchmark-run/v1
+target:
+  fixture: nextjs
+  repository: vercel/next.js
+  url: https://github.com/vercel/next.js
+  commit: 6c6d1632e1e1f03e32db1dd8dc0a63dee49d68cd
+  attached_branch: ssb-evaluation
+dates:
+  generated: "2026-08-14"
+  reviewed: "2026-08-14"
+  approved: "2026-08-17"
+  retained: "2026-08-17"
+tools:
+  generation:
+    source_commit: a51431ef0faa417c6b9160d0bf9793b0f0db5538
+    binary_sha256: sha256:78318c6ac51bb12a42776522a47011e1e0a752d8ad1606167373a4eb10ee8981
+  projection_and_adr:
+    source_commit: 908f990ab63d775ca31c0be3fc1632acde9b843f
+    binary_sha256: sha256:7ff82f5429ce565da648ad2124870e680c35542b5886256897704fd61acb2783
+host:
+  name: Codex CLI
+  version: 0.145.0
+  model: gpt-5.6-sol
+  reasoning: xhigh
+  approval_policy: never
+  session_id: 01a001ed-1402-7cb2-b63c-2a727ed402ee
+  local_run_id: ssb-v020-acceptance-nextjs-a51431e
+  os: macOS 15.7.3 (24G419)
+  architecture: arm64
+inventory:
+  schema_version: 2
+  complete: true
+  truncated: false
+  candidate_files: 29073
+  candidate_bytes: 111110455
+  scanned_files: 29073
+  scanned_bytes: 111110455
+  indexed_files: 28403
+  indexed_bytes: 88643646
+  remaining_candidate_files: 0
+  remaining_candidate_bytes: 0
+  excluded:
+    binary: 652
+    generated: 18
+    oversized: 21
+    secret_like: 113
+    symlink: 29
+    submodule: 0
+    vendor_or_generated_tree: 1060
+    non_regular: 0
+proposal:
+  artifact_count: 7
+  semantic_rules: 6
+  verification_recipes: 1
+  agent_skills: 0
+  automation_proposals: 0
+  orientation_present: true
+  orientation_artifact_count: 0
+  evidence_resolvable: 7
+  retention:
+    keep: 2
+    edit_and_keep: 5
+    defer: 0
+    reject: 0
+    retained: 7
+    denominator: 7
+    exact_fraction: "7/7"
+    result: pass
+pre_review_projection:
+  source_digest: sha256:2501fc2478dda081c8742a9ba5a71c3059b9966a2541adf038189af905e6576f
+  content_digest: sha256:0b0250942c9b67d8b287504e5ecb3b00d8866ec85e495c1cdf48c71fc25af92e
+  output_sha256: sha256:c0a44f6a0907c8004c4064ad314dab91f4eaf0f19d9c47a9e3bf8b1f87f30703
+final_projection:
+  source_digest: sha256:c021daf472ad2b93c8b067c2dd2be080b0da869a575873705c4285c2835ab6fd
+  content_digest: sha256:7e3799840105bed29f2a1a9dd14bb1f8f2955b363ce46a1fe0e4d5d82d16b20d
+  output_sha256: sha256:dd8f32cfd759835cba10b8a657393f57b2c6b0e239e1264e12095fbf316eafb1
+  retained_path: proposal/AGENTS.proposed.md
+canonical_source_bindings:
+  inventory_sha256: sha256:791e4b443dad3b80eed3cd85e194f0c09fee2a2e6f222ec24456a8a18addc180
+  manifest_sha256: sha256:6475d9ca1329d71984bbc423dc80c9bab40eb49e8b45405c15b78d64d0262cea
+  orientation_sha256: sha256:d7bb23d9dc4ce563d375f03e0be3fe066eaa17925f0b5326abb7638599dbce24
+  report_sha256: sha256:5c3ca8970b65da592eb04a777a132222dd4eaeec409312fca4af36b000cefb33
+verification:
+  raw_inventory_matches_fixture_file: true
+  normalized_inventory_replay: byte-identical
+  schema_3_validate: pass
+  diagnostics_empty: true
+  render_dry_run_payload: byte-identical
+  render_write: pass
+  canonical_replay: no-write-current
+  commands_displayed_only: true
+  repository_code_executed: false
+  verification_recipes_executed: false
+  git_mutation_by_host: false
+  network_used_by_ssb_or_repository_tools: false
+adr:
+  status: Proposed
+  retained_path: adr/0001-actionable-standards.md
+  output_sha256: sha256:0a5bf3268cd50593201aa2b4f8baeb3b77c2abdbed2b8721077d224147fdcf12
+  artifact_ids:
+    - read-path-readmes-before-editing
+    - keep-pnpm-security-settings-synchronized
+    - wire-next-runtime-flags-across-all-consumers
+    - treat-unfiltered-internal-request-headers-as-forgeable
+    - use-next-test-fixtures-and-polling-conventions
+    - match-next-test-mode-and-bundler
+    - verify-next-package-types
+decisions:
+  - id: read-path-readmes-before-editing
+    kind: rule
+    canonical_path: .software-standards/rules/read-path-readmes-before-editing.md
+    decision: keep
+    pre_review_sha256: sha256:be048e7435c2d7b80738ad4858d84f98cf3d1e1bbc5ac9de9186113e47dfa047
+    final_sha256: sha256:be048e7435c2d7b80738ad4858d84f98cf3d1e1bbc5ac9de9186113e47dfa047
+    edit_summary: "No approved semantic edit; canonical artifact bytes retained."
+  - id: keep-pnpm-security-settings-synchronized
+    kind: rule
+    canonical_path: .software-standards/rules/keep-pnpm-security-settings-synchronized.md
+    decision: edit-and-keep
+    pre_review_sha256: sha256:3eee29c50d2a4fcbde9c06c880980d7746624fdbc2ccc7855b19d6c92823ab47
+    final_sha256: sha256:3eee29c50d2a4fcbde9c06c880980d7746624fdbc2ccc7855b19d6c92823ab47
+    edit_summary: "Canonical bytes retained; added test/lib/create-next-install.js to manifest scope and evidence as an additional consumer."
+  - id: wire-next-runtime-flags-across-all-consumers
+    kind: rule
+    canonical_path: .software-standards/rules/wire-next-runtime-flags-across-all-consumers.md
+    decision: keep
+    pre_review_sha256: sha256:37abee50d0ad00e19528b2cdfd6039673eadc92dcf4f0b8bdd64689f6488f22b
+    final_sha256: sha256:37abee50d0ad00e19528b2cdfd6039673eadc92dcf4f0b8bdd64689f6488f22b
+    edit_summary: "No approved semantic edit; canonical artifact bytes retained."
+  - id: treat-unfiltered-internal-request-headers-as-forgeable
+    kind: rule
+    canonical_path: .software-standards/rules/treat-unfiltered-internal-request-headers-as-forgeable.md
+    decision: edit-and-keep
+    pre_review_sha256: sha256:2e64fe11fcafc4b913382b673e1879beb39df959d4b50f9bf50f8b61e77cb564
+    final_sha256: sha256:2e64fe11fcafc4b913382b673e1879beb39df959d4b50f9bf50f8b61e77cb564
+    edit_summary: "Canonical bytes retained; removed the incorrect implementation-only task lens from the manifest so security review is not under-routed."
+  - id: use-next-test-fixtures-and-polling-conventions
+    kind: rule
+    canonical_path: .software-standards/rules/use-next-test-fixtures-and-polling-conventions.md
+    decision: edit-and-keep
+    pre_review_sha256: sha256:8bcbc0ce0293c1589f59fdefdeabbefcceb5c3aec82d42c86a93ee4333aae745
+    final_sha256: sha256:94aa0075d1e0f7b719aa0ff70b6fe6e4233e3403eff96c3ac6c8d754b98a2ef2
+    edit_summary: "Replaced the interactive pnpm new-test form with the repository's explicit non-interactive --args contract and accepted value set."
+  - id: match-next-test-mode-and-bundler
+    kind: rule
+    canonical_path: .software-standards/rules/match-next-test-mode-and-bundler.md
+    decision: edit-and-keep
+    pre_review_sha256: sha256:60a93f3a1ee5e593bc1558328ed45007f64185f3c56a06ad01cf329cd235234a
+    final_sha256: sha256:e4736371248c4cbd0c260c8a7d9cd0a9ef5670dd77cf6a2c77bc410bf707f5b9
+    edit_summary: "Added Rspack and exact root test-script coverage, and corrected core versus build-all rebuild guidance."
+  - id: verify-next-package-types
+    kind: verification
+    canonical_path: .software-standards/verification/verify-next-package-types.yaml
+    decision: edit-and-keep
+    pre_review_sha256: sha256:a117d93e4602245dd99639d4a0321604771fb63e86b33e026452d732b0c86134
+    final_sha256: sha256:502ec3b0e3db2d8b8354f9198dcecb583ef1952468a6afe95e5098c5d759500c
+    edit_summary: "Narrowed scope to packages/next/src, bound the build tsconfig evidence, and disclosed exclusions from declaration compilation."
+lifecycle:
+  human_approval: recorded
+  generated_guidance_state: retained-proposal
+  adr_state: proposed
+  release_claimed: false
+  adoption_claimed: false
+  publication_claimed: false
+files:
+  - path: proposal/AGENTS.proposed.md
+    sha256: sha256:dd8f32cfd759835cba10b8a657393f57b2c6b0e239e1264e12095fbf316eafb1
+    git_blob_sha1: 1e28ec98a341eaa982609727fb4b88c1c3a75ecf
+  - path: adr/0001-actionable-standards.md
+    sha256: sha256:0a5bf3268cd50593201aa2b4f8baeb3b77c2abdbed2b8721077d224147fdcf12
+    git_blob_sha1: 6d188d376ae30e7ce1ad03c1cbc873ce5359a816
