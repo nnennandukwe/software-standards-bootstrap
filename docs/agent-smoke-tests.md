@@ -79,6 +79,16 @@ fixture commit, SSB source commit, host and version, proposal file digest,
 source/content/output digests, and each validate, dry-run, render, and replay
 observation. A command shown in the proposal must remain inert.
 
+For a developer-approved acceptance run, retain the smallest reviewable record:
+one `run.yaml`, `proposal/AGENTS.proposed.md`, and `Proposed` ADR per fixture,
+plus a result README. The run record binds every artifact ID to its decision,
+pre-review and final hashes, and edit summary; binds retained projection and ADR
+bytes with SHA-256 and Git-blob hashes; and keeps generation, review, approval,
+retention, ADR creation, and release as separate states. Do not retain raw
+inventories, manifests, reports, orientations, canonical artifacts,
+transcripts, command logs, or disposable propagation files unless a separate
+debugging requirement explicitly needs them.
+
 ## Acceptance
 
 Require 100% resolvable evidence and at least 70% developer keep or

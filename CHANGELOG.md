@@ -4,6 +4,22 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## Unreleased
 
+No changes yet.
+
+## [0.2.0] - 2026-08-17
+
+### Changed
+
+- Breaking for JSON consumers: `ssb validate --format json` now emits response
+  schema 3 with an explicit normalized pack layout, separate manifest,
+  inventory, report, and optional orientation paths, and normalized recipe
+  working directories. Consumers of response schema 2 must update before
+  processing v0.2.0 output. `ssb inspect --format json` remains inventory
+  schema 2.
+- New proposals use the `ssb.dev/manifest/v1` manifest layout instead of
+  embedding machine metadata in human-facing Markdown. Published v0.1.1
+  embedded-layout packs remain supported without migration.
+
 ### Added
 
 - Optional, digest-bound `ssb.dev/orientation/v1` repository context with
@@ -31,6 +47,23 @@ All notable changes are documented here. The project follows semantic versioning
   SHA-256 verification before the binary reaches its destination, refusal to
   replace an existing Agent Skill, and no partial binary left behind on
   failure or interruption.
+
+### Fixed
+
+- Strengthened public release verification to check installed Agent Skill
+  files, every checksum subject's provenance, and each archive's SPDX SBOM
+  attestation against the signed tag workflow.
+- Made curated release-note extraction reject tags that are not canonical
+  `vMAJOR.MINOR.PATCH` semantic versions.
+- Made rendered `AGENTS.md` identify manifest- or report-listed artifacts
+  without implying developer acceptance, and distinguish host-specific
+  `AGENTS.md` discovery and precedence from SSB-defined routing metadata.
+- Hardened path validation and Markdown projection against Unicode format and
+  paragraph separators, carriage-return headings, and fence-like content while
+  preserving exact inert command bytes.
+- Made cross-platform release and benchmark fixtures compare committed Git
+  blob bytes so checkout line-ending transformations cannot change the
+  contract under test.
 
 ## [0.1.1] - 2026-07-31
 

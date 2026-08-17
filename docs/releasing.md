@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- All four behavior slices are reviewed on `main`.
+- Every change listed for the release is reviewed and merged to `main`.
 - `go test ./...`, `go test -race ./...`, `go vet ./...`, `go build ./cmd/ssb`, and `go tool govulncheck ./...` pass on Go 1.26.5.
 - The pinned release-configuration preflight below passes.
 - CI has built and tested macOS, Linux, and Windows.
@@ -29,21 +29,23 @@ make verify-release-archives
 Create and push a signed semantic-version tag after every gate passes:
 
 ```bash
-git tag -s v0.1.1 -m "Software Standards Bootstrap v0.1.1"
-git push origin v0.1.1
+git tag -s v0.2.0 -m "Software Standards Bootstrap v0.2.0"
+git push origin v0.2.0
 ```
 
 The release workflow:
 
 1. reruns tests, race tests, vet, and vulnerability scanning;
-2. builds CGO-free macOS, Linux, and Windows archives with Go 1.26.5;
-3. generates `checksums.txt` with SHA-256;
-4. generates one SPDX JSON SBOM per archive with pinned Syft;
-5. uploads all assets to a draft GitHub release;
-6. verifies that every archive contains the complete, source-matching Agent Skill;
-7. creates signed provenance over the checksum subjects;
-8. creates an SBOM attestation for each archive; and
-9. publishes the draft only after the archive gate and all attestations succeed.
+2. extracts the tagged version's section from `CHANGELOG.md` as curated release notes;
+3. builds CGO-free macOS, Linux, and Windows archives with Go 1.26.5;
+4. generates `checksums.txt` with SHA-256;
+5. generates one SPDX JSON SBOM per archive with pinned Syft;
+6. uploads all assets and the curated notes to a draft GitHub release;
+7. verifies the byte-exact GoReleaser-rendered draft body and complete,
+   source-matching Agent Skill;
+8. creates signed provenance over the checksum subjects;
+9. creates an SBOM attestation for each archive; and
+10. publishes the draft only after the release-note, archive, and attestation gates succeed.
 
 Every third-party action is pinned to a full commit SHA. GoReleaser and Syft versions are exact.
 
@@ -54,18 +56,39 @@ destination:
 
 ```bash
 install_root=$(mktemp -d) || exit 1
-./install.sh --version v0.1.1 --install-dir "$install_root/bin"
-"$install_root/bin/ssb" --help
-rm -rf "$install_root"
+(
+  set -e
+  trap 'rm -rf "$install_root"' EXIT
+  mkdir -p "$install_root/source"
+  git archive --format=tar --output="$install_root/source.tar" v0.2.0 skills/software-standards-bootstrap
+  tar -xf "$install_root/source.tar" -C "$install_root/source"
+  ./install.sh --version v0.2.0 --install-dir "$install_root/bin" --skill-dir "$install_root/skills"
+  "$install_root/bin/ssb" --help
+  diff -ru "$install_root/source/skills/software-standards-bootstrap" "$install_root/skills/software-standards-bootstrap"
+)
 ```
 
 On Windows, exercise the PowerShell installer the same way:
 
 ```powershell
 $installRoot = Join-Path $env:TEMP ([System.IO.Path]::GetRandomFileName())
-.\install.ps1 -Version v0.1.1 -InstallDir "$installRoot\bin"
-& "$installRoot\bin\ssb.exe" --help
-Remove-Item -LiteralPath $installRoot -Recurse -Force
+$sourceArchive = Join-Path $installRoot 'source.zip'
+$sourceRoot = Join-Path $installRoot 'source'
+try {
+    New-Item -ItemType Directory -Path $sourceRoot -Force | Out-Null
+    & git.exe archive --format=zip --output=$sourceArchive v0.2.0 skills/software-standards-bootstrap
+    if ($LASTEXITCODE -ne 0) { throw "could not materialize tagged Agent Skill" }
+    Expand-Archive -LiteralPath $sourceArchive -DestinationPath $sourceRoot
+    .\install.ps1 -Version v0.2.0 -InstallDir "$installRoot\bin" -SkillDir "$installRoot\skills"
+    & "$installRoot\bin\ssb.exe" --help
+    if ($LASTEXITCODE -ne 0) { throw "installed ssb.exe failed its smoke test" }
+    & git.exe diff --no-index --exit-code -- "$sourceRoot\skills\software-standards-bootstrap" "$installRoot\skills\software-standards-bootstrap"
+    if ($LASTEXITCODE -ne 0) { throw "installed Agent Skill differs from tagged source" }
+} finally {
+    if (Test-Path -LiteralPath $installRoot) {
+        Remove-Item -LiteralPath $installRoot -Recurse -Force
+    }
+}
 ```
 
 Installer scripts are served from `main` and shipped inside each release
@@ -78,13 +101,29 @@ isolated directory:
 
 ```bash
 release_root=$(mktemp -d) || exit 1
-gh release download v0.1.1 --repo nnennandukwe/software-standards-bootstrap --dir "$release_root"
+gh release view v0.2.0 --repo nnennandukwe/software-standards-bootstrap --json body --jq .body
+gh release download v0.2.0 --repo nnennandukwe/software-standards-bootstrap --dir "$release_root"
 (cd "$release_root" && shasum -a 256 --check checksums.txt)
-SSB_RELEASE_ARCHIVE_DIR="$release_root" SSB_RELEASE_SOURCE_REF=v0.1.1 go test ./internal/releaseconfig -run '^TestGeneratedReleaseArchivesContainCompleteSkill$'
-for archive in "$release_root"/ssb_v0.1.1_*.tar.gz "$release_root"/ssb_v0.1.1_*.zip; do
-  gh attestation verify "$archive" --repo nnennandukwe/software-standards-bootstrap
+SSB_RELEASE_ARCHIVE_DIR="$release_root" SSB_RELEASE_SOURCE_REF=v0.2.0 go test ./internal/releaseconfig -run '^TestGeneratedReleaseArchivesContainCompleteSkill$'
+for artifact in "$release_root"/ssb_v0.2.0_*; do
+  gh attestation verify "$artifact" \
+    --repo nnennandukwe/software-standards-bootstrap \
+    --source-ref refs/tags/v0.2.0 \
+    --signer-workflow nnennandukwe/software-standards-bootstrap/.github/workflows/release.yml \
+    --predicate-type https://slsa.dev/provenance/v1
+done
+for archive in "$release_root"/ssb_v0.2.0_*.tar.gz "$release_root"/ssb_v0.2.0_*.zip; do
+  gh attestation verify "$archive" \
+    --repo nnennandukwe/software-standards-bootstrap \
+    --source-ref refs/tags/v0.2.0 \
+    --signer-workflow nnennandukwe/software-standards-bootstrap/.github/workflows/release.yml \
+    --predicate-type https://spdx.dev/Document/v2.3
 done
 ```
+
+Confirm that the published body contains the `CHANGELOG.md` content beneath the
+`[0.2.0]` heading. Before publication, the workflow accounts for GoReleaser
+v2.17.0's final line feed and compares the rendered draft body byte for byte.
 
 Inspect the matching `.spdx.json` assets and confirm all six archives are present:
 

@@ -9,7 +9,7 @@ checksums.txt, and installs the ssb binary. It never replaces a developer-owned
 Agent Skill and never leaves a partially installed binary behind.
 
 .PARAMETER Version
-Release tag to install, such as v0.1.0. Defaults to the latest published
+Release tag to install, such as v0.2.0. Defaults to the latest published
 release. Also read from the SSB_VERSION environment variable.
 
 .PARAMETER InstallDir
@@ -27,7 +27,7 @@ Show usage and exit.
 .\install.ps1
 
 .EXAMPLE
-.\install.ps1 -Version v0.1.0 -SkillDir .claude\skills
+.\install.ps1 -Version v0.2.0 -SkillDir .claude\skills
 #>
 
 #Requires -Version 5.0
@@ -66,7 +66,7 @@ Usage:
   install.ps1 [-Version VERSION] [-InstallDir DIRECTORY] [-SkillDir DIRECTORY]
 
 Options:
-  -Version VERSION        Release tag to install, such as v0.1.0.
+  -Version VERSION        Release tag to install, such as v0.2.0.
                           Defaults to the latest published release.
   -InstallDir DIRECTORY   Destination for the ssb binary.
                           Defaults to $HOME\.local\bin.
@@ -239,7 +239,7 @@ try {
 
     # \z rather than $, because .NET's $ also matches before a trailing newline.
     if ($Version -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9._+-]*\z') {
-        throw "invalid release tag: $Version. Expected a tag such as v0.1.0."
+        throw "invalid release tag: $Version. Expected a tag such as v0.2.0."
     }
 
     $asset = "ssb_${Version}_windows_${releaseArch}.zip"

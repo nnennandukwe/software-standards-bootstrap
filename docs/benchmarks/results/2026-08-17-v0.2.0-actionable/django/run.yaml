@@ -1,0 +1,163 @@
+schema: ssb.dev/actionable-benchmark-run/v1
+target:
+  fixture: django
+  repository: django/django
+  url: https://github.com/django/django
+  commit: 50c2b7c83661a61da48f78dd0130fc3cbf8ed39f
+  attached_branch: ssb-evaluation
+dates:
+  generated: "2026-08-14"
+  reviewed: "2026-08-14"
+  approved: "2026-08-17"
+  retained: "2026-08-17"
+tools:
+  generation:
+    source_commit: a51431ef0faa417c6b9160d0bf9793b0f0db5538
+    binary_sha256: sha256:78318c6ac51bb12a42776522a47011e1e0a752d8ad1606167373a4eb10ee8981
+  projection_and_adr:
+    source_commit: 908f990ab63d775ca31c0be3fc1632acde9b843f
+    binary_sha256: sha256:7ff82f5429ce565da648ad2124870e680c35542b5886256897704fd61acb2783
+host:
+  name: Codex CLI
+  version: 0.145.0
+  model: gpt-5.6-sol
+  reasoning: xhigh
+  approval_policy: never
+  session_id: 01a001ed-1402-7ce3-812b-c555405b0e14
+  local_run_id: ssb-v020-acceptance-django-a51431e
+  os: macOS 15.7.3 (24G419)
+  architecture: arm64
+inventory:
+  schema_version: 2
+  complete: true
+  truncated: false
+  candidate_files: 7001
+  candidate_bytes: 45506636
+  scanned_files: 7001
+  scanned_bytes: 45506636
+  indexed_files: 5619
+  indexed_bytes: 36820618
+  remaining_candidate_files: 0
+  remaining_candidate_bytes: 0
+  excluded:
+    binary: 1382
+    generated: 0
+    oversized: 0
+    secret_like: 0
+    symlink: 4
+    submodule: 0
+    vendor_or_generated_tree: 72
+    non_regular: 0
+proposal:
+  artifact_count: 6
+  semantic_rules: 3
+  verification_recipes: 2
+  agent_skills: 1
+  automation_proposals: 0
+  orientation_present: true
+  orientation_artifact_count: 0
+  evidence_resolvable: 6
+  retention:
+    keep: 3
+    edit_and_keep: 3
+    defer: 0
+    reject: 0
+    retained: 6
+    denominator: 6
+    exact_fraction: "6/6"
+    result: pass
+pre_review_projection:
+  source_digest: sha256:ca275421a671428b78ab8da95ed2d591f46d5ce0f0e866545d332a30dd51ae5a
+  content_digest: sha256:83fc5bd03984e43bf7c22967b1bee1184127c267cb4fd4b8df5198d22a070c0e
+  output_sha256: sha256:f516585aaf953677ead0d58ec27f6da04a87aae3c4de83087933dc944d6736ea
+final_projection:
+  source_digest: sha256:4b26e1cd9a90669832c351290e9cb6b943689ce91a3e8990064bf29ce45c6c7b
+  content_digest: sha256:f4a4f2bc62a59ff77948935716b68ad1e083950117a7325a22db4fc36487b09e
+  output_sha256: sha256:7f2f1a954170dcf97b92928d001383d1db88d9bdec2b12e19481af26ff2f6878
+  retained_path: proposal/AGENTS.proposed.md
+canonical_source_bindings:
+  inventory_sha256: sha256:7dfbdc561cf24d8d2bef2807e4e1bf4b81266740deff444f36da9dee230d585c
+  manifest_sha256: sha256:613a50858fc33960cdc89e7fbdc153555b32802d8e7fea48b21cec6fdbc34232
+  orientation_sha256: sha256:cca9e978c48fed075b258aab5c0872c5e9db3f73e8fa4d3cca651b3354247bd6
+  report_sha256: sha256:f457ad1d3ed3694172e20e2f40d3e4b732dbfd243d055561f6648a2bcb664b95
+verification:
+  raw_inventory_matches_fixture_file: true
+  normalized_inventory_replay: byte-identical
+  schema_3_validate: pass
+  diagnostics_empty: true
+  render_dry_run_payload: byte-identical
+  render_write: pass
+  canonical_replay: no-write-current
+  commands_displayed_only: true
+  repository_code_executed: false
+  verification_recipes_executed: false
+  git_mutation_by_host: false
+  network_used_by_ssb_or_repository_tools: false
+adr:
+  status: Proposed
+  retained_path: adr/0001-actionable-standards.md
+  output_sha256: sha256:732890fc9f253e158b3548c290c1d78c8fa7ca5410664d6b4892754cceb05b5c
+  artifact_ids:
+    - cover-behavior-changes-with-tests
+    - document-user-visible-behavior-changes
+    - gate-database-tests-by-feature
+    - run-django-tests
+    - check-documentation
+    - deprecate-django-feature
+decisions:
+  - id: cover-behavior-changes-with-tests
+    kind: rule
+    canonical_path: .software-standards/rules/cover-behavior-changes-with-tests.md
+    decision: edit-and-keep
+    pre_review_sha256: sha256:f644735aaba7d7cbef5ca1584c39d737d90a6ee9c512d064ebdca0f672d63005
+    final_sha256: sha256:e66a5c2dde1fd40f2a63cd92fb58dada4bbb4760cac4810b3a111ee64c75053e
+    edit_summary: "Aligned the rule with the documented bug-fix and new-feature test requirements and added exact contributor evidence."
+  - id: document-user-visible-behavior-changes
+    kind: rule
+    canonical_path: .software-standards/rules/document-user-visible-behavior-changes.md
+    decision: keep
+    pre_review_sha256: sha256:c2a3fea6a219a11baec9bb1761e50097859fd9e9a685123fdd5c4a963b5b2640
+    final_sha256: sha256:c2a3fea6a219a11baec9bb1761e50097859fd9e9a685123fdd5c4a963b5b2640
+    edit_summary: "No approved semantic edit; canonical artifact bytes retained."
+  - id: gate-database-tests-by-feature
+    kind: rule
+    canonical_path: .software-standards/rules/gate-database-tests-by-feature.md
+    decision: edit-and-keep
+    pre_review_sha256: sha256:a11d395dd402da0615089cc41df81c14d40be2cb5e5ebc963fecf8d07ecd4b09
+    final_sha256: sha256:a11d395dd402da0615089cc41df81c14d40be2cb5e5ebc963fecf8d07ecd4b09
+    edit_summary: "Canonical bytes retained; corrected manifest evidence to the actual database-feature gating lines in tests/queries/test_qs_combinators.py."
+  - id: run-django-tests
+    kind: verification
+    canonical_path: .software-standards/verification/run-django-tests.yaml
+    decision: keep
+    pre_review_sha256: sha256:2d56b7f4a3dabe9a6851272d2ffae91a7954341daf415a85d502025c0cf93daf
+    final_sha256: sha256:2d56b7f4a3dabe9a6851272d2ffae91a7954341daf415a85d502025c0cf93daf
+    edit_summary: "No approved semantic edit; canonical artifact bytes retained."
+  - id: check-documentation
+    kind: verification
+    canonical_path: .software-standards/verification/check-documentation.yaml
+    decision: keep
+    pre_review_sha256: sha256:2232bf85dc5bdc8018756b5652fbf02d7db4f1fefa3d122f8016f4e0795ee645
+    final_sha256: sha256:2232bf85dc5bdc8018756b5652fbf02d7db4f1fefa3d122f8016f4e0795ee645
+    edit_summary: "No approved semantic edit; canonical artifact bytes retained."
+  - id: deprecate-django-feature
+    kind: skill
+    canonical_path: .agents/skills/deprecate-django-feature/SKILL.md
+    decision: edit-and-keep
+    pre_review_sha256: sha256:47a6b94e3932a77c66038cc8d1f54ebda9ab893010b72758bbfa8cbc2c53d8ae
+    final_sha256: sha256:e38af415eddf949a352bba461581181ef1fa7654cc3b1a3c00296c75cb8dbd78
+    edit_summary: "Removed approval-sounding wording; Django's own uses must be removed first, not before accepting a warning."
+lifecycle:
+  human_approval: recorded
+  generated_guidance_state: retained-proposal
+  adr_state: proposed
+  release_claimed: false
+  adoption_claimed: false
+  publication_claimed: false
+files:
+  - path: proposal/AGENTS.proposed.md
+    sha256: sha256:7f2f1a954170dcf97b92928d001383d1db88d9bdec2b12e19481af26ff2f6878
+    git_blob_sha1: 8b7de42218e83e4b29e65634adf4a918c7e545d9
+  - path: adr/0001-actionable-standards.md
+    sha256: sha256:732890fc9f253e158b3548c290c1d78c8fa7ca5410664d6b4892754cceb05b5c
+    git_blob_sha1: dc0674e287a02dce9b73500a12109c019bccdca2

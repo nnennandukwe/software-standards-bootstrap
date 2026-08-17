@@ -188,9 +188,17 @@ func buildSection(pack rulepack.Pack) ([]byte, string, string, error) {
 		if pack.Orientation != nil {
 			sources = append(sources, pack.OrientationPath)
 		}
-		fmt.Fprintf(&body, "Generated from %s and the accepted artifacts by `ssb render`. Edit canonical sources and the manifest together, then rerun the command.\n\n", codeList(sources))
+		fmt.Fprintf(
+			&body,
+			"Generated from %s and the manifest-listed artifacts by `ssb render`. "+
+				"Edit canonical sources and the manifest together, then rerun the command.\n\n",
+			codeList(sources),
+		)
 	} else {
-		body.WriteString("Generated from `.software-standards/report.md` and its accepted artifacts by `ssb render`. Edit canonical sources and the report index together, then rerun the command.\n\n")
+		body.WriteString(
+			"Generated from `.software-standards/report.md` and its report-listed artifacts by `ssb render`. " +
+				"Edit canonical sources and the report index together, then rerun the command.\n\n",
+		)
 	}
 	fmt.Fprintf(&body, "Baseline: `%s`\n\n", pack.BaselineCommit)
 	body.WriteString("SSB did not stage, commit, push, open a pull request, execute any displayed recipe command, or activate another system. Recipe presence and expected results are not execution evidence.\n")
@@ -199,10 +207,22 @@ func buildSection(pack rulepack.Pack) ([]byte, string, string, error) {
 		writeOrientation(&body, pack.Orientation, manifest, titles)
 	}
 	body.WriteString("\n### How routing works\n\n")
-	body.WriteString("- Directory placement and nearest-file precedence are host-level `AGENTS.md` behavior.\n")
-	body.WriteString("- Scopes and lenses are SSB's agent-readable routing contract, not native `AGENTS.md` glob activation. A semantic rule applies when its affected path scope matches; contextual artifacts also require every represented lens dimension to match, with values inside one dimension treated as alternatives.\n")
+	body.WriteString(
+		"- **Host-specific:** `AGENTS.md` discovery, directory placement, and nested-file precedence " +
+			"depend on the active host; consult that host's documented behavior.\n",
+	)
+	body.WriteString(
+		"- **SSB generator-defined:** Scopes and lenses are SSB routing metadata, not native `AGENTS.md` glob activation. " +
+			"A semantic rule applies when its affected path scope matches; " +
+			"contextual artifacts also require every represented " +
+			"lens dimension to match, with values inside one dimension treated as alternatives.\n",
+	)
 	body.WriteString("- If the language, framework, task, or affected path is uncertain, load the potentially relevant rule, recipe, or skill instead of excluding it.\n")
-	body.WriteString("- Directives mean: `never` is prohibited, `ask-first` requires developer authorization, `always` is required, and `prefer` is the default when no documented exception or explicit user direction applies.\n")
+	body.WriteString(
+		"- **SSB generator-defined:** Directives mean: `never` is prohibited, " +
+			"`ask-first` requires developer authorization, `always` is required, " +
+			"and `prefer` is the default when no documented exception or explicit user direction applies.\n",
+	)
 	body.WriteString("- Linked artifact files are canonical. This projection is a concise router, not a replacement for their complete content.\n")
 
 	writeStandingOrders(&body, orderedRules, manifest, titles)

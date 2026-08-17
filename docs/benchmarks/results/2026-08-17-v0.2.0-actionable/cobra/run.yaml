@@ -1,0 +1,155 @@
+schema: ssb.dev/actionable-benchmark-run/v1
+target:
+  fixture: cobra
+  repository: spf13/cobra
+  url: https://github.com/spf13/cobra
+  commit: adbc8813901bba65827259daa8e22ff94ec1f30e
+  attached_branch: ssb-evaluation
+dates:
+  generated: "2026-08-14"
+  reviewed: "2026-08-14"
+  approved: "2026-08-17"
+  retained: "2026-08-17"
+tools:
+  generation:
+    source_commit: a51431ef0faa417c6b9160d0bf9793b0f0db5538
+    binary_sha256: sha256:78318c6ac51bb12a42776522a47011e1e0a752d8ad1606167373a4eb10ee8981
+  projection_and_adr:
+    source_commit: 908f990ab63d775ca31c0be3fc1632acde9b843f
+    binary_sha256: sha256:7ff82f5429ce565da648ad2124870e680c35542b5886256897704fd61acb2783
+host:
+  name: Codex CLI
+  version: 0.145.0
+  model: gpt-5.6-sol
+  reasoning: xhigh
+  approval_policy: never
+  session_id: 01a001ed-1402-7ac2-983d-f79d2eb8cd6d
+  local_run_id: ssb-v020-acceptance-cobra-a51431e
+  os: macOS 15.7.3 (24G419)
+  architecture: arm64
+inventory:
+  schema_version: 2
+  complete: true
+  truncated: false
+  candidate_files: 66
+  candidate_bytes: 705271
+  scanned_files: 66
+  scanned_bytes: 705271
+  indexed_files: 65
+  indexed_bytes: 631792
+  remaining_candidate_files: 0
+  remaining_candidate_bytes: 0
+  excluded:
+    binary: 1
+    generated: 0
+    oversized: 0
+    secret_like: 0
+    symlink: 0
+    submodule: 0
+    vendor_or_generated_tree: 0
+    non_regular: 0
+proposal:
+  artifact_count: 5
+  semantic_rules: 3
+  verification_recipes: 0
+  agent_skills: 2
+  automation_proposals: 0
+  orientation_present: true
+  orientation_artifact_count: 0
+  evidence_resolvable: 5
+  retention:
+    keep: 3
+    edit_and_keep: 2
+    defer: 0
+    reject: 0
+    retained: 5
+    denominator: 5
+    exact_fraction: "5/5"
+    result: pass
+pre_review_projection:
+  source_digest: sha256:1430a8917b00835474072bc04477e9f98c1eb3f80fd99e49aa9e55cf1bb5bfc5
+  content_digest: sha256:b3348b42ee32f961e22060826d360a4565857e7a97e542b95b399c137d921576
+  output_sha256: sha256:7e8c0f70d634b06ec91fedde901a24b62746dcfc050e9f08c50e8d6db9c2959d
+final_projection:
+  source_digest: sha256:9031b05ab3cccbc2d9feff8ad16d17d563e600e488036a6f3230e5fdf4bde8de
+  content_digest: sha256:68d7ad02a1fbc9d60962c92f8dc426a5b5644ba6c2f6b815b7e4b157cb1e9f5c
+  output_sha256: sha256:3c5a23aa45a4cfaf445459a536a6f863a55e253b0df4d360de50e067d2b3c612
+  retained_path: proposal/AGENTS.proposed.md
+canonical_source_bindings:
+  inventory_sha256: sha256:98e65eea07a092693e3de5a5cc945996bd13b8a970a5370dbc631760ac43ddf3
+  manifest_sha256: sha256:41194f22e2367205657d6a9b8cd132167f318d95561a683591ab2df63651efdf
+  orientation_sha256: sha256:7764c47bd376259b9d4e6f12a81bff3eb9d3204ec1f36164e31dbc9d158fa317
+  report_sha256: sha256:2a3e5c6d336a1875684a556449dfb5090181eb638aef727cf3fbb56dea31703f
+verification:
+  raw_inventory_matches_fixture_file: true
+  normalized_inventory_replay: byte-identical
+  schema_3_validate: pass
+  diagnostics_empty: true
+  render_dry_run_payload: byte-identical
+  render_write: pass
+  canonical_replay: no-write-current
+  commands_displayed_only: true
+  repository_code_executed: false
+  verification_recipes_executed: false
+  git_mutation_by_host: false
+  network_used_by_ssb_or_repository_tools: false
+adr:
+  status: Proposed
+  retained_path: adr/0001-actionable-standards.md
+  output_sha256: sha256:e915c6b56ab3bc0e29e5468bf4e6b1cd37f0de434ebfe5cdae1a66403898fec9
+  artifact_ids:
+    - cover-go-code-changes-with-tests
+    - preserve-compatibility-apis-until-cobra-v2
+    - keep-build-constraints-compatible-with-go-1-15
+    - change-shell-completion-behavior
+    - change-document-generation
+decisions:
+  - id: cover-go-code-changes-with-tests
+    kind: rule
+    canonical_path: .software-standards/rules/cover-go-code-changes-with-tests.md
+    decision: edit-and-keep
+    pre_review_sha256: sha256:1ebd242e55e47184f82f0d756ea411c64adeb852b7e52888577d22938193f853
+    final_sha256: sha256:bf7375d626434d34c6fe4b97dc7351cef04866491ec0827753029319a57accb6
+    edit_summary: "Narrowed the rule from every Go code change to submitted feature or behavior changes, matching the contributor evidence."
+  - id: preserve-compatibility-apis-until-cobra-v2
+    kind: rule
+    canonical_path: .software-standards/rules/preserve-compatibility-apis-until-cobra-v2.md
+    decision: keep
+    pre_review_sha256: sha256:f1c7695b6d045381977d186b20a6f235f95384f2d534e385f9aebba64d978d28
+    final_sha256: sha256:f1c7695b6d045381977d186b20a6f235f95384f2d534e385f9aebba64d978d28
+    edit_summary: "No approved semantic edit; canonical artifact bytes retained."
+  - id: keep-build-constraints-compatible-with-go-1-15
+    kind: rule
+    canonical_path: .software-standards/rules/keep-build-constraints-compatible-with-go-1-15.md
+    decision: keep
+    pre_review_sha256: sha256:064bbd3de8837ea86bfe7fccd5b0b7dd0415e4650579f8c99fda907f39095a33
+    final_sha256: sha256:064bbd3de8837ea86bfe7fccd5b0b7dd0415e4650579f8c99fda907f39095a33
+    edit_summary: "No approved semantic edit; canonical artifact bytes retained."
+  - id: change-shell-completion-behavior
+    kind: skill
+    canonical_path: .agents/skills/change-shell-completion-behavior/SKILL.md
+    decision: edit-and-keep
+    pre_review_sha256: sha256:81c493d64710209aa8dad84caef584451eead903b1d9a624e9be6f59b98aa61f
+    final_sha256: sha256:48714e636d31d17db00b0cb0206dcbde92c2156ed6d0c4658f739557df6b843b
+    edit_summary: "Added ActiveHelp to the procedure, scope, and exact evidence for shared completion behavior."
+  - id: change-document-generation
+    kind: skill
+    canonical_path: .agents/skills/change-document-generation/SKILL.md
+    decision: keep
+    pre_review_sha256: sha256:788195ec559ab2b634eea75742cdd6e172e30f442d2db68c45a24218302be120
+    final_sha256: sha256:788195ec559ab2b634eea75742cdd6e172e30f442d2db68c45a24218302be120
+    edit_summary: "No approved semantic edit; canonical artifact bytes retained."
+lifecycle:
+  human_approval: recorded
+  generated_guidance_state: retained-proposal
+  adr_state: proposed
+  release_claimed: false
+  adoption_claimed: false
+  publication_claimed: false
+files:
+  - path: proposal/AGENTS.proposed.md
+    sha256: sha256:3c5a23aa45a4cfaf445459a536a6f863a55e253b0df4d360de50e067d2b3c612
+    git_blob_sha1: 4c2134f5cd376d8741e3b76b106615bbfdb6b94b
+  - path: adr/0001-actionable-standards.md
+    sha256: sha256:e915c6b56ab3bc0e29e5468bf4e6b1cd37f0de434ebfe5cdae1a66403898fec9
+    git_blob_sha1: e83ab8cc9593e26efdaf696a81d688fa4c596040

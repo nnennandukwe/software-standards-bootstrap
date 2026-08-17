@@ -1,0 +1,139 @@
+schema: ssb.dev/actionable-benchmark-run/v1
+target:
+  fixture: flask
+  repository: pallets/flask
+  url: https://github.com/pallets/flask
+  commit: 36e4a824f340fdee7ed50937ba8e7f6bc7d17f81
+  attached_branch: ssb-evaluation
+dates:
+  generated: "2026-08-14"
+  reviewed: "2026-08-14"
+  approved: "2026-08-17"
+  retained: "2026-08-17"
+tools:
+  generation:
+    source_commit: a51431ef0faa417c6b9160d0bf9793b0f0db5538
+    binary_sha256: sha256:78318c6ac51bb12a42776522a47011e1e0a752d8ad1606167373a4eb10ee8981
+  projection_and_adr:
+    source_commit: 908f990ab63d775ca31c0be3fc1632acde9b843f
+    binary_sha256: sha256:7ff82f5429ce565da648ad2124870e680c35542b5886256897704fd61acb2783
+host:
+  name: Codex CLI
+  version: 0.145.0
+  model: gpt-5.6-sol
+  reasoning: xhigh
+  approval_policy: never
+  session_id: 01a001ed-1402-7aa3-83a5-53439c9fcdb5
+  local_run_id: ssb-v020-acceptance-flask-a51431e
+  os: macOS 15.7.3 (24G419)
+  architecture: arm64
+inventory:
+  schema_version: 2
+  complete: true
+  truncated: false
+  candidate_files: 235
+  candidate_bytes: 1814782
+  scanned_files: 235
+  scanned_bytes: 1814782
+  indexed_files: 230
+  indexed_bytes: 1474850
+  remaining_candidate_files: 0
+  remaining_candidate_bytes: 0
+  excluded:
+    binary: 5
+    generated: 0
+    oversized: 0
+    secret_like: 1
+    symlink: 0
+    submodule: 0
+    vendor_or_generated_tree: 0
+    non_regular: 0
+proposal:
+  artifact_count: 3
+  semantic_rules: 3
+  verification_recipes: 0
+  agent_skills: 0
+  automation_proposals: 0
+  orientation_present: true
+  orientation_artifact_count: 0
+  evidence_resolvable: 3
+  retention:
+    keep: 2
+    edit_and_keep: 1
+    defer: 0
+    reject: 0
+    retained: 3
+    denominator: 3
+    exact_fraction: "3/3"
+    result: pass
+pre_review_projection:
+  source_digest: sha256:83224f59b37cf91ce6b6adcd9ad33ea082972ea4a49eecd542acf2ffb19cda1e
+  content_digest: sha256:034f2733c8a7ff9b35fc38cc6f9982ea526ebc4d4cc546658fde34d2b1473949
+  output_sha256: sha256:d289c5d2db51a92c50449abe208f6a3a42b8fe341e8182424756e864e62d31bb
+final_projection:
+  source_digest: sha256:af86995fa2dbddfde27f460f2ad24b7a38df5f83817680ed76779d7ec4789fe7
+  content_digest: sha256:8d18558410b8dc61f77b58d60a6673e56d7b499a7da2d63669a65a7e67652bf7
+  output_sha256: sha256:25419cf7ab9b4d4566a7e8a11e82b20a7fc78e966836fa09c9e778fafc71090f
+  retained_path: proposal/AGENTS.proposed.md
+canonical_source_bindings:
+  inventory_sha256: sha256:ed8013e208958ef189a329644ea1ddfcc4d73657c17c9a27f25576d4cf7e84ef
+  manifest_sha256: sha256:f8b563509dd0f69dc986829ca08560685d8675ec86564b790b3b869dfb51e40e
+  orientation_sha256: sha256:64346f12999afe4f22dc48ab55964aa4d1bc3c975ad262fff9ddf4503d7fd645
+  report_sha256: sha256:3988be67bcbf6af373640784985535232a8e1d50ba495aafcb7caff6c317ec45
+verification:
+  raw_inventory_matches_fixture_file: true
+  normalized_inventory_replay: byte-identical
+  schema_3_validate: pass
+  diagnostics_empty: true
+  render_dry_run_payload: byte-identical
+  render_write: pass
+  canonical_replay: no-write-current
+  commands_displayed_only: true
+  repository_code_executed: false
+  verification_recipes_executed: false
+  git_mutation_by_host: false
+  network_used_by_ssb_or_repository_tools: false
+adr:
+  status: Proposed
+  retained_path: adr/0001-actionable-standards.md
+  output_sha256: sha256:0a68f2e52d028e22733534e701e2d0c1027bbae08f47edbe1b716edf4e49638f
+  artifact_ids:
+    - keep-sansio-free-of-io-and-globals
+    - keep-change-evidence-synchronized
+    - deprecate-public-apis-before-removal
+decisions:
+  - id: keep-sansio-free-of-io-and-globals
+    kind: rule
+    canonical_path: .software-standards/rules/keep-sansio-free-of-io-and-globals.md
+    decision: keep
+    pre_review_sha256: sha256:48e8f2e3543b8bfc522961d52323a55f32f6e989c3eaf1dccbb825109b1270a5
+    final_sha256: sha256:48e8f2e3543b8bfc522961d52323a55f32f6e989c3eaf1dccbb825109b1270a5
+    edit_summary: "No approved semantic edit; canonical artifact bytes retained."
+  - id: keep-change-evidence-synchronized
+    kind: rule
+    canonical_path: .software-standards/rules/keep-change-evidence-synchronized.md
+    decision: keep
+    pre_review_sha256: sha256:5235913b2acfff2e7e590f5eed2050471d53f02b40adb5ca9b3787f3e15b9aed
+    final_sha256: sha256:5235913b2acfff2e7e590f5eed2050471d53f02b40adb5ca9b3787f3e15b9aed
+    edit_summary: "No approved semantic edit; canonical artifact bytes retained."
+  - id: deprecate-public-apis-before-removal
+    kind: rule
+    canonical_path: .software-standards/rules/deprecate-public-apis-before-removal.md
+    decision: edit-and-keep
+    pre_review_sha256: sha256:108a3a20c1253a222b372f5ef962ca8f1eebc3152145284c307fa600b7ff30c2
+    final_sha256: sha256:541988a1d471693c440bc131d14275a72ab4a9ec9825d208797f7b71146aee17
+    edit_summary: "Narrowed the rule to the supported removal lifecycle and made replacement guidance conditional on a replacement existing."
+lifecycle:
+  human_approval: recorded
+  generated_guidance_state: retained-proposal
+  adr_state: proposed
+  release_claimed: false
+  adoption_claimed: false
+  publication_claimed: false
+files:
+  - path: proposal/AGENTS.proposed.md
+    sha256: sha256:25419cf7ab9b4d4566a7e8a11e82b20a7fc78e966836fa09c9e778fafc71090f
+    git_blob_sha1: 78a71200a95305b82f970c2dbd4073542d397201
+  - path: adr/0001-actionable-standards.md
+    sha256: sha256:0a68f2e52d028e22733534e701e2d0c1027bbae08f47edbe1b716edf4e49638f
+    git_blob_sha1: 9b703d235c237647de1171d17c71ea0906be9eee
