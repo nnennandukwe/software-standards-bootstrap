@@ -31,9 +31,15 @@ func TestApplyProjectsActionFirstRulesInertCommandsAndScannableSkills(t *testing
 		"An unmerged generated change is a proposal",
 		"review and merge are the adoption decision",
 		"File presence alone does not prove adoption",
+		"report-listed artifacts",
 		"did not stage, commit, push, open a pull request, execute any displayed recipe command, or activate another system",
 		"Recipe presence and expected results are not execution evidence",
 		"### How routing works",
+		"**Host-specific:** `AGENTS.md` discovery, directory placement, and nested-file precedence " +
+			"depend on the active host; consult that host's documented behavior.",
+		"**SSB generator-defined:** Scopes and lenses are SSB routing metadata, " +
+			"not native `AGENTS.md` glob activation.",
+		"**SSB generator-defined:** Directives mean:",
 		"### Standing orders",
 		"Keep public APIs compatible.",
 		"- Category: `compatibility`",
@@ -59,6 +65,8 @@ func TestApplyProjectsActionFirstRulesInertCommandsAndScannableSkills(t *testing
 		}
 	}
 	for _, forbidden := range []string{
+		"accepted artifacts",
+		"Directory placement and nearest-file precedence are host-level",
 		"Contextual body must stay canonical.",
 		"execute any command",
 		"automate-check",
@@ -268,6 +276,7 @@ func TestApplyBindsManifestSources(t *testing.T) {
 		"`.software-standards/manifest.yaml`",
 		"`.software-standards/inventory.json`",
 		"`.software-standards/report.md`",
+		"manifest-listed artifacts",
 	} {
 		if !strings.Contains(content, source) {
 			t.Errorf("manifest-layout projection missing source %s:\n%s", source, content)
@@ -293,6 +302,7 @@ func TestApplyPreservesEmbeddedLayoutBehavior(t *testing.T) {
 	content := string(result.Content)
 	for _, required := range []string{
 		"Generated from `.software-standards/report.md`",
+		"report-listed artifacts",
 		"Edit canonical sources and the report index together",
 		"### How routing works",
 		"### Standing orders",

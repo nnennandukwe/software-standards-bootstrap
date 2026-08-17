@@ -228,7 +228,7 @@ func TestV020ReleaseNotesStateMigrationBoundary(t *testing.T) {
 	changelog := strings.Join(strings.Fields(readText(t, filepath.Join(root, "CHANGELOG.md"))), " ")
 
 	for _, required := range []string{
-		"## [0.2.0] - 2026-08-14",
+		"## [0.2.0] - 2026-08-17",
 		"Breaking for JSON consumers",
 		"response schema 3",
 		"Published v0.1.1 embedded-layout packs remain supported without migration",
@@ -236,6 +236,18 @@ func TestV020ReleaseNotesStateMigrationBoundary(t *testing.T) {
 		if !strings.Contains(changelog, required) {
 			t.Errorf("v0.2.0 release notes missing %q", required)
 		}
+	}
+}
+
+func TestV020ReleaseNotesRoutingBoundaries(t *testing.T) {
+	root := repositoryRoot(t)
+	changelog := strings.Join(strings.Fields(readText(t, filepath.Join(root, "CHANGELOG.md"))), " ")
+
+	if !strings.Contains(
+		changelog,
+		"distinguish host-specific `AGENTS.md` discovery and precedence from SSB-defined routing metadata",
+	) {
+		t.Fatal("v0.2.0 release notes omit the generated routing ownership boundary")
 	}
 }
 

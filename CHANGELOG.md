@@ -6,7 +6,7 @@ All notable changes are documented here. The project follows semantic versioning
 
 No changes yet.
 
-## [0.2.0] - 2026-08-14
+## [0.2.0] - 2026-08-17
 
 ### Changed
 
@@ -50,6 +50,9 @@ No changes yet.
 
 ### Fixed
 
+- Made rendered `AGENTS.md` identify manifest- or report-listed artifacts
+  without implying developer acceptance, and distinguish host-specific
+  `AGENTS.md` discovery and precedence from SSB-defined routing metadata.
 - Hardened path validation and Markdown projection against Unicode format and
   paragraph separators, carriage-return headings, and fence-like content while
   preserving exact inert command bytes.
