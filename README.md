@@ -1,22 +1,21 @@
 # Software Standards Bootstrap
 
-Software Standards Bootstrap (`ssb`) generates four actionable artifact kinds
-for an existing Git repository:
+Software Standards Bootstrap (`ssb`) generates four agent-friendly artifacts
+for a Git repository:
 
 1. **Semantic rules** for evidence-backed implementation conditions.
 2. **Verification recipes** for deliberately invoked existing commands.
 3. **Agent Skills** for multi-step engineering workflows.
 4. **Automation proposals** for valuable checks that do not yet exist.
 
-A machine manifest indexes accepted artifacts, while the inventory, human
-report, optional evidence-backed orientation, and human-first rules remain
-separate. A derived root `AGENTS.md` orients future coding agents and routes
-them to active rules, recipes, and skills.
+An `AGENTS.md` file is derived from the codebase context and
+orients coding agents to reason about and routes them to coding rules, code verification processes, and agent skills.
 
-Run `ssb` in a repository whose engineering conventions are not yet documented for AI tools. A compatible coding agent analyzes the committed repository and proposes these files. Developers review, edit, delete, or approve them before adoption.
+Run `ssb` in a repository whose engineering conventions are not yet documented for AI tools. A coding agent analyzes the repository and proposes these files.
+Developers review, edit, delete, or approve them before official adoption via an ADR (architectural decision record), which `ssb` will create for you.
 
 The coding agent performs semantic analysis. The offline `ssb` CLI pins the
-input commit, builds and replays a safe inventory, validates schemas and exact
+input commit, builds, validates schemas, and exact
 evidence, renders `AGENTS.md`, and creates an optional Proposed ADR.
 
 ## Install
