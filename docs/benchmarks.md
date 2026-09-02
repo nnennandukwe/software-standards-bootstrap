@@ -116,3 +116,9 @@ edit/delete propagation check. Its exact 13-file tree omits raw inventories,
 manifests, reports, orientations, canonical artifacts, transcripts, and logs.
 Benchmark acceptance does not claim fixture adoption or a merged, tagged,
 published, installed, or adopted `v0.2.0` release.
+
+The [2026-09-01 portable-routing Codex conformance](benchmarks/results/2026-09-01-portable-routing/README.md)
+binds one Codex CLI 0.145.0 session to issue 35's exact finite-root, catalog,
+and bundle bytes. It records five independent path/lens selections, integrity
+bindings, linked-skill readback, and the fact that displayed recipe commands
+remained inert.

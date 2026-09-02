@@ -1,0 +1,80 @@
+schema: ssb.dev/portable-routing-host-run/v1
+issue: 35
+date: "2026-09-01"
+source:
+  projection_commit: f83f5c3c337819565207e910ce24df5392db3bdb
+  hardened_implementation_commit: 3a4c4763ba9750cc967577d75b0c1764ea1abd5b
+  hardened_replay: byte-identical
+host:
+  name: Codex CLI
+  version: 0.145.0
+  model: configured default; not emitted by the JSON invocation
+  session_id: 01a0606e-ceaa-7460-b4b9-a9f1fc0ddf64
+  sandbox: read-only
+  ephemeral: true
+  os: macOS 26.6 (25G72)
+  architecture: arm64
+fixture:
+  generated_file_count: 11
+  root:
+    output_sha256: sha256:a2db2625e39dce5b8486e28ac09878bf585b795405c993edb67184eefbc7bf1e
+    content_digest: sha256:9044cf6eb6a918d65b4ce454ba639f8756cbc81540cd6538bd79c177c571b0d9
+  catalog:
+    output_sha256: sha256:c857b55cbb7be4ea8949c19e3a00d7d535e31225983a25714a774d4b8bd7ea54
+    content_digest: sha256:191d91c4d3294caa71508c73045cca9396aa6d516f0612db2d81ae000183d42d
+  routing_tree_digest: sha256:52f42cac777003c426ac2797b72bb7c9a6908956fa6dd9249aa683092256d682
+  bundles:
+    route-1111111111111111111111111111111111111111111111111111111111111111: sha256:be34e9ee5f8eb0812ca9052cd961ec165be8a5c4e9ece857f94abba8c51c3f32
+    route-2222222222222222222222222222222222222222222222222222222222222222: sha256:3fa38e7b5f081adb912082bce674cb4045fc42aed447deacaf74895b7873f86c
+    route-3333333333333333333333333333333333333333333333333333333333333333: sha256:d459ddd98d3395b7a98dabd10b9d4f7ac5b00766f7fc0b704483bfcb2c0a27a4
+    route-4444444444444444444444444444444444444444444444444444444444444444: sha256:b78a2c37b76a622b49aafa185fb5ebbbd6826f30bf55e5d96d2b4dcc8a703a9b
+    route-5555555555555555555555555555555555555555555555555555555555555555: sha256:ef4c7f1b577a8cd7b1a08aef5c6f82b1a63f59dc58a649f7e2e4bc1219cafe95
+    route-6666666666666666666666666666666666666666666666666666666666666666: sha256:e012a1ae39b4da4ff02ba54782ed47dcff4cbb020c64410b2ad06cfcdc63c6f0
+    route-7777777777777777777777777777777777777777777777777777777777777777: sha256:a91031a672d748d756e41594588c22e27b4370c7b9db47d67c839090313598ad
+    route-8888888888888888888888888888888888888888888888888888888888888888: sha256:cf631799af678040636aec80f381d0770d8a1dee15081983fdb06986a6c1a36f
+    route-9999999999999999999999999999999999999999999999999999999999999999: sha256:c9acf9e483bb612618565676d58f0551270b045c0dd18fef5453361d5e7bd936
+integrity:
+  root_self_digest: pass
+  catalog_self_digest: pass
+  bundle_self_digests: 9/9 pass
+  catalog_bundle_bindings: 9/9 pass
+  root_tree_binding: pass
+  replay_at_hardened_commit: byte-identical
+scenarios:
+  - request: app implementation
+    path: app/service.go
+    dimensions: [task:implementation, language:go]
+    selected_artifacts: [global-safety, app-boundary, go-contract, implementation-contract]
+    excluded_artifacts: [planning-contract, renderer-purity, rulepack-validation-seam, verify-change, release-contract]
+  - request: app verification
+    path: app/service_test.go
+    dimensions: [task:verification, language:go]
+    selected_artifacts: [global-safety, app-boundary, go-contract, verify-change]
+    excluded_artifacts: [implementation-contract, planning-contract, renderer-purity, rulepack-validation-seam, release-contract]
+  - request: renderer implementation
+    path: internal/render/render.go
+    dimensions: [task:implementation, language:go]
+    selected_artifacts: [global-safety, go-contract, implementation-contract, renderer-purity]
+    excluded_artifacts: [app-boundary, planning-contract, rulepack-validation-seam, verify-change, release-contract]
+  - request: rulepack implementation
+    path: internal/rulepack/rulepack.go
+    dimensions: [task:implementation, language:go]
+    selected_artifacts: [global-safety, go-contract, implementation-contract, rulepack-validation-seam]
+    excluded_artifacts: [app-boundary, planning-contract, renderer-purity, verify-change, release-contract]
+  - request: release verification
+    path: .github/workflows/release.yml
+    dimensions: [task:verification]
+    selected_artifacts: [global-safety, verify-change, release-contract]
+    excluded_artifacts: [app-boundary, go-contract, implementation-contract, planning-contract, renderer-purity, rulepack-validation-seam]
+    linked_skill_read_to_eof: .agents/skills/release-contract/SKILL.md
+execution_boundaries:
+  local_read_and_hash_commands_only: true
+  ssb_commands_executed: []
+  repository_code_executed: false
+  recipe_commands_displayed: [go test ./...]
+  recipe_commands_executed: []
+  files_edited: false
+  git_mutation: false
+  adoption_claimed: false
+  release_claimed: false
+result: pass
