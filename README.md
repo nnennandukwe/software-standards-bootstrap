@@ -361,6 +361,11 @@ ssb prune    <inspect|validate|approve|apply|recover|status|verify> [options]
   packs, the generated routing catalog and bundles. With no active rule,
   recipe, or skill, it removes the stale managed section and generated routing
   tree while preserving human-authored root content.
+- Existing generated files and review rollback snapshots are read under hard
+  limits of 8 MiB per file, 64 MiB per routing tree, 10,000 files per tree, and
+  20,000 total tree entries.
+  If only post-commit backup cleanup fails, the command succeeds and warns with
+  the repository-relative backup path for manual cleanup.
 - `adr` creates one new Proposed ADR from retained rules, recipes, and skills.
 
 `inspect` supports `--max-candidate-files` and `--max-candidate-bytes`. `--allow-partial` permits diagnostic output from an incomplete inventory, but that output cannot be used to generate a proposal. Exit code `4`: inventory coverage incomplete.

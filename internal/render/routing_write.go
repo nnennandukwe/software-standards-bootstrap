@@ -15,6 +15,13 @@ import (
 
 var catalogBundleLinkPattern = regexp.MustCompile(`\]\((bundles/[^)]+\.md)\)`)
 
+const (
+	maxRoutingFileBytes = int64(8 << 20)
+	maxRoutingTreeBytes = int64(64 << 20)
+	maxRoutingFiles     = 10_000
+	maxRoutingEntries   = 20_000
+)
+
 func inspectRoutingTarget(repoRoot string, routing *RoutingResult) error {
 	store, err := openRoutingFileSystem(repoRoot)
 	if err != nil {
@@ -74,12 +81,18 @@ func inspectRoutingTargetWithFS(store routingFileSystem, routing *RoutingResult)
 
 func readExistingRoutingTreeWithFS(store routingFileSystem, target string) (map[string][]byte, error) {
 	files := make(map[string][]byte)
+	var totalBytes int64
+	entryCount := 0
 	err := store.walkDir(target, func(current string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if current == target {
 			return nil
+		}
+		entryCount++
+		if entryCount > maxRoutingEntries {
+			return fmt.Errorf("%w: routing directory exceeds the %d-entry limit", ErrUnsafeTarget, maxRoutingEntries)
 		}
 		relative := strings.TrimPrefix(current, target+"/")
 		if relative == current || relative == "" {
@@ -104,9 +117,16 @@ func readExistingRoutingTreeWithFS(store routingFileSystem, target string) (map[
 		if relative != "catalog.md" && !strings.HasPrefix(relative, "bundles/") {
 			return fmt.Errorf("%w: routing directory contains unexpected file %s", ErrUnsafeTarget, relative)
 		}
-		content, err := store.readFile(current)
+		if len(files) >= maxRoutingFiles {
+			return fmt.Errorf("%w: routing directory exceeds the %d-file limit", ErrUnsafeTarget, maxRoutingFiles)
+		}
+		content, err := store.readFile(current, maxRoutingFileBytes)
 		if err != nil {
 			return err
+		}
+		totalBytes += int64(len(content))
+		if totalBytes > maxRoutingTreeBytes {
+			return fmt.Errorf("%w: routing directory exceeds the %d-byte tree limit", ErrUnsafeTarget, maxRoutingTreeBytes)
 		}
 		if err := verifyRoutingFile(content); err != nil {
 			return fmt.Errorf("%s: %w", relative, err)
@@ -203,8 +223,14 @@ func stageRoutingTargetWithFS(store routingFileSystem, routing *RoutingResult) (
 			return "", err
 		}
 		target := path.Join(stage, relative)
-		if err := store.mkdirAll(path.Dir(target), 0o755); err != nil {
+		parent := path.Dir(target)
+		if err := store.mkdirAll(parent, 0o755); err != nil {
 			return "", fmt.Errorf("create staged routing parent: %w", err)
+		}
+		if parent != stage {
+			if err := store.chmod(parent, 0o755); err != nil {
+				return "", fmt.Errorf("set staged routing parent permissions: %w", err)
+			}
 		}
 		if err := writeSyncedFileWithFS(store, target, file.Content); err != nil {
 			return "", err
@@ -237,6 +263,9 @@ func writeSyncedFileWithFS(store routingFileSystem, target string, content []byt
 			returnErr = fmt.Errorf("close staged routing file: %w", err)
 		}
 	}()
+	if err := file.Chmod(0o644); err != nil {
+		return fmt.Errorf("set staged routing file permissions: %w", err)
+	}
 	if written, err := file.Write(content); err != nil {
 		return fmt.Errorf("write staged routing file: %w", err)
 	} else if written != len(content) {
@@ -543,7 +572,7 @@ func discardRoutingBackupWithFS(store routingFileSystem, backup string) error {
 		return nil
 	}
 	if err := store.removeAll(backup); err != nil {
-		return fmt.Errorf("remove routing backup: %w", err)
+		return fmt.Errorf("remove routing backup %s: %w; remove it after confirming no render is active", backup, err)
 	}
 	return nil
 }

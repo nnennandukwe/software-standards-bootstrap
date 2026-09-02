@@ -398,17 +398,9 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return 0
 	}
 	if *reviewID != "" {
-		after, err = captureFile(repo.Root(), "AGENTS.md")
-		if err != nil {
-			fmt.Fprintf(stderr, "error: capture AGENTS.md after review-aware render: %s\n", err)
-			return 3
-		}
+		after = projectedFileSnapshot(before, result.Content)
 		if pack.Layout == rulepack.LayoutManifest {
-			afterRouting, err = captureDirectory(repo.Root(), render.RoutingDirectory)
-			if err != nil {
-				fmt.Fprintf(stderr, "error: capture routing tree after review-aware render: %s\n", err)
-				return 3
-			}
+			afterRouting = projectedRoutingSnapshot(beforeRouting, result.Routing)
 		}
 		event, err := transition.Complete(result)
 		transitionErr := reconcileTransitionCompletion(
@@ -417,22 +409,25 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 			"render",
 			"AGENTS.md and the routing tree were restored",
 			func() error {
-				agentsErr := restoreFileIfCurrent(repo.Root(), "AGENTS.md", before, after)
-				if pack.Layout != rulepack.LayoutManifest {
-					return agentsErr
+				var routingRollback *directoryRollback
+				if pack.Layout == rulepack.LayoutManifest {
+					routingRollback = &directoryRollback{
+						target: render.RoutingDirectory, before: beforeRouting, expectedCurrent: afterRouting,
+					}
 				}
-				routingErr := restoreDirectoryIfCurrent(
+				return restoreSnapshotsIfCurrent(
 					repo.Root(),
-					render.RoutingDirectory,
-					beforeRouting,
-					afterRouting,
+					&fileRollback{target: "AGENTS.md", before: before, expectedCurrent: after},
+					routingRollback,
 				)
-				return errors.Join(agentsErr, routingErr)
 			},
 		)
 		if transitionErr != nil {
 			return writePruneError(stderr, transitionErr)
 		}
+	}
+	for _, warning := range result.OperationalWarnings {
+		fmt.Fprintf(stderr, "warning: %s\n", warning)
 	}
 	if result.Changed {
 		if len(pack.Rules) == 0 && len(pack.Recipes) == 0 && len(pack.Skills) == 0 {

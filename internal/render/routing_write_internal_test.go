@@ -3,6 +3,7 @@ package render
 import (
 	"errors"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -63,6 +64,25 @@ func TestRoutingRelativePathRejectsRootedRelativeSuffix(t *testing.T) {
 	}
 }
 
+func TestInspectRoutingTargetRejectsOversizedFile(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, filepath.FromSlash(RoutingDirectory))
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	catalog := filepath.Join(target, "catalog.md")
+	if err := os.WriteFile(catalog, []byte("placeholder\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(catalog, maxRoutingFileBytes+1); err != nil {
+		t.Fatal(err)
+	}
+	routing := &RoutingResult{Path: RoutingDirectory, Exists: true}
+	if err := inspectRoutingTarget(root, routing); !errors.Is(err, ErrUnsafeTarget) {
+		t.Fatalf("inspect error = %v, want bounded-read rejection", err)
+	}
+}
+
 func TestPublishProjectionRestoresRoutingWhenAgentsWriteFails(t *testing.T) {
 	root := t.TempDir()
 	standards := filepath.Join(root, ".software-standards")
@@ -104,7 +124,7 @@ func TestPublishProjectionRestoresRoutingWhenAgentsWriteFails(t *testing.T) {
 	}
 
 	injected := errors.New("injected AGENTS.md write failure")
-	err = publishProjection(
+	_, err = publishProjection(
 		root, routing, target, originalAgents, []byte("# Desired guidance\n"), 0o644, true, true,
 		func(_ string, _, _ []byte, _ os.FileMode, _ bool) error {
 			published, readErr := os.ReadFile(filepath.Join(routingTarget, "catalog.md"))
@@ -209,6 +229,80 @@ func TestPublishRoutingTargetCopiesBackupWhenRenameRestoreFails(t *testing.T) {
 	}
 }
 
+func TestPublishProjectionReportsBackupCleanupAsWarningAfterCommit(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".software-standards"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentsTarget := filepath.Join(root, "AGENTS.md")
+	originalAgents := []byte("# Original guidance\n")
+	desiredAgents := []byte("# Desired guidance\n")
+	if err := os.WriteFile(agentsTarget, originalAgents, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	originalCatalog := testRoutingCatalog(t, "original")
+	desiredCatalog := testRoutingCatalog(t, "desired")
+	routingTarget := filepath.Join(root, filepath.FromSlash(RoutingDirectory))
+	if err := os.MkdirAll(routingTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(routingTarget, "catalog.md"), originalCatalog, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	routing := &RoutingResult{
+		Path: RoutingDirectory, Exists: true,
+		TreeDigest: routingTreeDigest([]FileResult{{Path: RoutingDirectory + "/catalog.md", SHA256: digest(desiredCatalog)}}),
+		Files: []FileResult{{
+			Path: RoutingDirectory + "/catalog.md", Content: desiredCatalog,
+			SHA256: digest(desiredCatalog), Bytes: len(desiredCatalog),
+		}},
+	}
+	if err := inspectRoutingTarget(root, routing); err != nil {
+		t.Fatal(err)
+	}
+	base, err := openRoutingFileSystem(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer base.close()
+	cleanupFailure := errors.New("injected backup cleanup failure")
+	store := &removeAllFailingRoutingFileSystem{routingFileSystem: base, failure: cleanupFailure}
+	warning, err := publishProjectionWithFS(
+		store, routing, agentsTarget, originalAgents, desiredAgents, 0o644, true, true, writeAtomic,
+	)
+	if err != nil {
+		t.Fatalf("publish error = %v, want committed projection with warning", err)
+	}
+	if !strings.Contains(warning, cleanupFailure.Error()) {
+		t.Fatalf("warning = %q, want cleanup failure", warning)
+	}
+	assertFileContent(t, agentsTarget, desiredAgents)
+	assertFileContent(t, filepath.Join(routingTarget, "catalog.md"), desiredCatalog)
+}
+
+type removeAllFailingRoutingFileSystem struct {
+	routingFileSystem
+	failure error
+}
+
+func (fileSystem *removeAllFailingRoutingFileSystem) removeAll(name string) error {
+	if strings.Contains(path.Base(name), ".ssb-routing-backup-") {
+		return fileSystem.failure
+	}
+	return fileSystem.routingFileSystem.removeAll(name)
+}
+
+func assertFileContent(t *testing.T, target string, want []byte) {
+	t.Helper()
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("%s = %q, want %q", target, got, want)
+	}
+}
+
 func TestPublishProjectionPreservesConcurrentRoutingChangeDuringRollback(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".software-standards"), 0o755); err != nil {
@@ -242,7 +336,7 @@ func TestPublishProjectionPreservesConcurrentRoutingChangeDuringRollback(t *test
 	}
 
 	injected := errors.New("injected AGENTS.md write failure")
-	err := publishProjection(
+	_, err := publishProjection(
 		root, routing, agentsTarget, originalAgents, []byte("# Desired guidance\n"), 0o644, true, true,
 		func(_ string, _, _ []byte, _ os.FileMode, _ bool) error {
 			if err := os.WriteFile(filepath.Join(routingTarget, "catalog.md"), concurrentCatalog, 0o644); err != nil {
@@ -298,7 +392,7 @@ func TestPublishProjectionPreservesRoutingTreeThatAppearsDuringRemovalRollback(t
 	}
 
 	injected := errors.New("injected AGENTS.md write failure")
-	err := publishProjection(
+	_, err := publishProjection(
 		root, routing, agentsTarget, originalAgents, []byte("# Desired guidance\n"), 0o644, true, true,
 		func(_ string, _, _ []byte, _ os.FileMode, _ bool) error {
 			if err := os.MkdirAll(routingTarget, 0o755); err != nil {
