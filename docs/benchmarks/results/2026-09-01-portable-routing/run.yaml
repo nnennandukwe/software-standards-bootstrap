@@ -33,6 +33,16 @@ fixture:
     route-7777777777777777777777777777777777777777777777777777777777777777: sha256:a91031a672d748d756e41594588c22e27b4370c7b9db47d67c839090313598ad
     route-8888888888888888888888888888888888888888888888888888888888888888: sha256:cf631799af678040636aec80f381d0770d8a1dee15081983fdb06986a6c1a36f
     route-9999999999999999999999999999999999999999999999999999999999999999: sha256:c9acf9e483bb612618565676d58f0551270b045c0dd18fef5453361d5e7bd936
+  catalog_entry_ids: &catalog_entry_ids
+    - route-1111111111111111111111111111111111111111111111111111111111111111
+    - route-2222222222222222222222222222222222222222222222222222222222222222
+    - route-3333333333333333333333333333333333333333333333333333333333333333
+    - route-4444444444444444444444444444444444444444444444444444444444444444
+    - route-5555555555555555555555555555555555555555555555555555555555555555
+    - route-6666666666666666666666666666666666666666666666666666666666666666
+    - route-7777777777777777777777777777777777777777777777777777777777777777
+    - route-8888888888888888888888888888888888888888888888888888888888888888
+    - route-9999999999999999999999999999999999999999999999999999999999999999
 integrity:
   root_self_digest: pass
   catalog_self_digest: pass
@@ -44,28 +54,87 @@ scenarios:
   - request: app implementation
     path: app/service.go
     dimensions: ["task:implementation", "language:go"]
+    catalog_entries_considered: *catalog_entry_ids
+    selected_bundle_ids:
+      - route-1111111111111111111111111111111111111111111111111111111111111111
+      - route-2222222222222222222222222222222222222222222222222222222222222222
+      - route-3333333333333333333333333333333333333333333333333333333333333333
+      - route-4444444444444444444444444444444444444444444444444444444444444444
     selected_artifacts: [global-safety, app-boundary, go-contract, implementation-contract]
     excluded_artifacts: [planning-contract, renderer-purity, rulepack-validation-seam, verify-change, release-contract]
+    sentinels_read: [ROOT_CORE_SENTINEL, APP_PATH_SENTINEL, GO_LANGUAGE_SENTINEL, IMPLEMENTATION_SENTINEL]
+    linked_skills_read: []
+    displayed_recipe_commands: []
+    executed_recipe_commands: []
+    excluded_artifact_sentinels_observed: []
+    unselected_bundle_bodies_read: []
   - request: app verification
     path: app/service_test.go
     dimensions: ["task:verification", "language:go"]
+    catalog_entries_considered: *catalog_entry_ids
+    selected_bundle_ids:
+      - route-1111111111111111111111111111111111111111111111111111111111111111
+      - route-2222222222222222222222222222222222222222222222222222222222222222
+      - route-3333333333333333333333333333333333333333333333333333333333333333
+      - route-8888888888888888888888888888888888888888888888888888888888888888
     selected_artifacts: [global-safety, app-boundary, go-contract, verify-change]
     excluded_artifacts: [implementation-contract, planning-contract, renderer-purity, rulepack-validation-seam, release-contract]
+    sentinels_read: [ROOT_CORE_SENTINEL, APP_PATH_SENTINEL, GO_LANGUAGE_SENTINEL, VERIFICATION_SENTINEL]
+    linked_skills_read: []
+    displayed_recipe_commands: [go test ./...]
+    executed_recipe_commands: []
+    excluded_artifact_sentinels_observed: []
+    unselected_bundle_bodies_read: []
   - request: renderer implementation
     path: internal/render/render.go
     dimensions: ["task:implementation", "language:go"]
+    catalog_entries_considered: *catalog_entry_ids
+    selected_bundle_ids:
+      - route-1111111111111111111111111111111111111111111111111111111111111111
+      - route-3333333333333333333333333333333333333333333333333333333333333333
+      - route-4444444444444444444444444444444444444444444444444444444444444444
+      - route-6666666666666666666666666666666666666666666666666666666666666666
     selected_artifacts: [global-safety, go-contract, implementation-contract, renderer-purity]
     excluded_artifacts: [app-boundary, planning-contract, rulepack-validation-seam, verify-change, release-contract]
+    sentinels_read: [ROOT_CORE_SENTINEL, GO_LANGUAGE_SENTINEL, IMPLEMENTATION_SENTINEL, RENDERER_SENTINEL]
+    linked_skills_read: []
+    displayed_recipe_commands: []
+    executed_recipe_commands: []
+    excluded_artifact_sentinels_observed: []
+    unselected_bundle_bodies_read: []
   - request: rulepack implementation
     path: internal/rulepack/rulepack.go
     dimensions: ["task:implementation", "language:go"]
+    catalog_entries_considered: *catalog_entry_ids
+    selected_bundle_ids:
+      - route-1111111111111111111111111111111111111111111111111111111111111111
+      - route-3333333333333333333333333333333333333333333333333333333333333333
+      - route-4444444444444444444444444444444444444444444444444444444444444444
+      - route-7777777777777777777777777777777777777777777777777777777777777777
     selected_artifacts: [global-safety, go-contract, implementation-contract, rulepack-validation-seam]
     excluded_artifacts: [app-boundary, planning-contract, renderer-purity, verify-change, release-contract]
+    sentinels_read: [ROOT_CORE_SENTINEL, GO_LANGUAGE_SENTINEL, IMPLEMENTATION_SENTINEL, RULEPACK_SENTINEL]
+    linked_skills_read: []
+    displayed_recipe_commands: []
+    executed_recipe_commands: []
+    excluded_artifact_sentinels_observed: []
+    unselected_bundle_bodies_read: []
   - request: release verification
     path: .github/workflows/release.yml
     dimensions: ["task:verification"]
+    catalog_entries_considered: *catalog_entry_ids
+    selected_bundle_ids:
+      - route-1111111111111111111111111111111111111111111111111111111111111111
+      - route-8888888888888888888888888888888888888888888888888888888888888888
+      - route-9999999999999999999999999999999999999999999999999999999999999999
     selected_artifacts: [global-safety, verify-change, release-contract]
     excluded_artifacts: [app-boundary, go-contract, implementation-contract, planning-contract, renderer-purity, rulepack-validation-seam]
+    sentinels_read: [ROOT_CORE_SENTINEL, VERIFICATION_SENTINEL, RELEASE_INDEX_SENTINEL, RELEASE_SKILL_SENTINEL]
+    linked_skills_read: [.agents/skills/release-contract/SKILL.md]
+    displayed_recipe_commands: [go test ./...]
+    executed_recipe_commands: []
+    excluded_artifact_sentinels_observed: []
+    unselected_bundle_bodies_read: []
     linked_skill_read_to_eof: .agents/skills/release-contract/SKILL.md
 execution_boundaries:
   local_read_and_hash_commands_only: true

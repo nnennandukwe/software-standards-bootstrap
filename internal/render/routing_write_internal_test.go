@@ -131,3 +131,79 @@ func TestPublishProjectionRestoresRoutingWhenAgentsWriteFails(t *testing.T) {
 		t.Fatal("failed projection left partial root or routing output")
 	}
 }
+
+func TestPublishRoutingTargetCopiesBackupWhenRenameRestoreFails(t *testing.T) {
+	root := t.TempDir()
+	standards := filepath.Join(root, ".software-standards")
+	if err := os.MkdirAll(standards, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	originalCatalog, err := wrapRoutingFile(struct{ Version string }{"original"}, []byte("# Original catalog\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	routingTarget := filepath.Join(root, filepath.FromSlash(RoutingDirectory))
+	if err := os.MkdirAll(routingTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(routingTarget, "catalog.md"), originalCatalog, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	desiredCatalog, err := wrapRoutingFile(struct{ Version string }{"desired"}, []byte("# Desired catalog\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	routing := &RoutingResult{
+		Path: RoutingDirectory, Exists: true,
+		Files: []FileResult{{
+			Path: RoutingDirectory + "/catalog.md", Content: desiredCatalog,
+			SHA256: digest(desiredCatalog), Bytes: len(desiredCatalog),
+		}},
+	}
+	if err := inspectRoutingTarget(root, routing); err != nil {
+		t.Fatal(err)
+	}
+	staged, err := stageRoutingTarget(root, routing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(staged) })
+
+	publishFailure := errors.New("injected staged-tree publish failure")
+	restoreFailure := errors.New("injected backup rename failure")
+	renameCalls := 0
+	rename := func(oldPath, newPath string) error {
+		renameCalls++
+		switch renameCalls {
+		case 1:
+			return os.Rename(oldPath, newPath)
+		case 2:
+			return publishFailure
+		case 3:
+			return restoreFailure
+		default:
+			t.Fatalf("unexpected rename call %d: %s -> %s", renameCalls, oldPath, newPath)
+			return nil
+		}
+	}
+	if _, err := publishRoutingTargetWithRename(root, routing, staged, rename); !errors.Is(err, publishFailure) {
+		t.Fatalf("publish error = %v, want staged-tree failure", err)
+	}
+	if renameCalls != 3 {
+		t.Fatalf("rename calls = %d, want publish plus failed rename restoration", renameCalls)
+	}
+	after, err := os.ReadFile(filepath.Join(routingTarget, "catalog.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(originalCatalog) {
+		t.Fatal("copy fallback did not restore the original routing tree")
+	}
+	backups, err := filepath.Glob(filepath.Join(standards, ".ssb-routing-backup-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backups) != 0 {
+		t.Fatalf("successful copy fallback left routing backups: %v", backups)
+	}
+}

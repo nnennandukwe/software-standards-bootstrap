@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -225,6 +226,15 @@ func writeSyncedFile(target string, content []byte) (returnErr error) {
 }
 
 func publishRoutingTarget(repoRoot string, routing *RoutingResult, staged string) (string, error) {
+	return publishRoutingTargetWithRename(repoRoot, routing, staged, os.Rename)
+}
+
+func publishRoutingTargetWithRename(
+	repoRoot string,
+	routing *RoutingResult,
+	staged string,
+	rename func(string, string) error,
+) (string, error) {
 	if routing == nil || !routing.Changed {
 		return "", nil
 	}
@@ -242,7 +252,7 @@ func publishRoutingTarget(repoRoot string, routing *RoutingResult, staged string
 		if err := os.Remove(backup); err != nil {
 			return "", fmt.Errorf("prepare routing backup: %w", err)
 		}
-		if err := os.Rename(target, backup); err != nil {
+		if err := rename(target, backup); err != nil {
 			return "", fmt.Errorf("backup routing directory: %w", err)
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -251,13 +261,60 @@ func publishRoutingTarget(repoRoot string, routing *RoutingResult, staged string
 	if !routing.Exists {
 		return backup, nil
 	}
-	if err := os.Rename(staged, target); err != nil {
+	if err := rename(staged, target); err != nil {
 		if backup != "" {
-			_ = os.Rename(backup, target)
+			if restoreErr := restoreRoutingBackup(backup, target, rename); restoreErr != nil {
+				return backup, fmt.Errorf("publish routing directory: %w; restore previous tree: %v", err, restoreErr)
+			}
 		}
 		return "", fmt.Errorf("publish routing directory: %w", err)
 	}
 	return backup, nil
+}
+
+func restoreRoutingBackup(backup, target string, rename func(string, string) error) error {
+	if err := rename(backup, target); err == nil {
+		return nil
+	} else if copyErr := restoreRoutingBackupByCopy(backup, target); copyErr != nil {
+		return fmt.Errorf("rename backup: %v; copy recovery: %w; previous tree remains at %s", err, copyErr, backup)
+	}
+	if err := discardRoutingBackup(backup); err != nil {
+		return fmt.Errorf("copy recovery restored the target but backup cleanup failed: %w", err)
+	}
+	return nil
+}
+
+func restoreRoutingBackupByCopy(backup, target string) (returnErr error) {
+	existing, err := readExistingRoutingTree(backup)
+	if err != nil {
+		return fmt.Errorf("validate routing backup: %w", err)
+	}
+	if err := os.Mkdir(target, 0o755); err != nil {
+		return fmt.Errorf("create routing recovery target: %w", err)
+	}
+	defer func() {
+		if returnErr == nil {
+			return
+		}
+		if err := os.RemoveAll(target); err != nil {
+			returnErr = fmt.Errorf("%w; remove partial recovery target: %v", returnErr, err)
+		}
+	}()
+	paths := make([]string, 0, len(existing))
+	for relative := range existing {
+		paths = append(paths, relative)
+	}
+	sort.Strings(paths)
+	for _, relative := range paths {
+		fileTarget := filepath.Join(target, filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(fileTarget), 0o755); err != nil {
+			return fmt.Errorf("create routing recovery parent: %w", err)
+		}
+		if err := writeSyncedFile(fileTarget, existing[relative]); err != nil {
+			return fmt.Errorf("restore routing backup file %s: %w", relative, err)
+		}
+	}
+	return nil
 }
 
 func verifyRoutingPrestate(target string, routing *RoutingResult) error {
@@ -310,7 +367,7 @@ func rollbackRoutingTarget(repoRoot string, routing *RoutingResult, backup strin
 		return err
 	}
 	if backup != "" {
-		if err := os.Rename(backup, target); err != nil {
+		if err := restoreRoutingBackup(backup, target, os.Rename); err != nil {
 			return err
 		}
 	}
