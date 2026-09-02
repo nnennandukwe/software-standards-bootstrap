@@ -253,28 +253,35 @@ func publishProjection(
 	exists, agentsChanged bool,
 	writeTarget targetWriter,
 ) error {
+	store, err := openRoutingFileSystem(repoRoot)
+	if err != nil {
+		return err
+	}
+	defer store.close()
 	var stagedRouting string
-	var err error
 	if routing != nil && routing.Changed && routing.Exists {
-		stagedRouting, err = stageRoutingTarget(repoRoot, routing)
+		stagedRouting, err = stageRoutingTargetWithFS(store, routing)
 		if err != nil {
 			return err
 		}
-		defer func() { _ = os.RemoveAll(stagedRouting) }()
+		defer func() { _ = store.removeAll(stagedRouting) }()
 	}
-	backupRouting, err := publishRoutingTarget(repoRoot, routing, stagedRouting)
+	backupRouting, err := publishRoutingTargetWithFS(store, routing, stagedRouting)
 	if err != nil {
 		return err
 	}
 	if agentsChanged {
 		if err := writeTarget(target, existing, next, mode, exists); err != nil {
-			if rollbackErr := rollbackRoutingTarget(repoRoot, routing, backupRouting); rollbackErr != nil {
-				return fmt.Errorf("write AGENTS.md: %w; restore routing tree: %v", err, rollbackErr)
+			if rollbackErr := rollbackRoutingTargetWithFS(store, routing, backupRouting); rollbackErr != nil {
+				return errors.Join(
+					fmt.Errorf("write AGENTS.md: %w", err),
+					fmt.Errorf("restore routing tree: %w", rollbackErr),
+				)
 			}
 			return err
 		}
 	}
-	return discardRoutingBackup(backupRouting)
+	return discardRoutingBackupWithFS(store, backupRouting)
 }
 
 func buildSection(pack rulepack.Pack, routing *RoutingResult) ([]byte, string, string, error) {

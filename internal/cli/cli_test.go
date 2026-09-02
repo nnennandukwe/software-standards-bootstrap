@@ -1186,7 +1186,7 @@ func TestRenderManifestDryRunDisclosesFullDeterministicWriteSet(t *testing.T) {
 	rootAt := strings.Index(output, "--- AGENTS.md (")
 	catalogAt := strings.Index(output, "--- .software-standards/routing/catalog.md (")
 	bundleAt := strings.Index(output, "--- .software-standards/routing/bundles/route-")
-	if !strings.Contains(output, "Dry run — proposed render write set:") ||
+	if !strings.Contains(output, "Dry run - proposed render write set:") ||
 		rootAt < 0 || catalogAt <= rootAt || bundleAt <= catalogAt ||
 		!strings.Contains(output, "# Software Standards Bootstrap routing catalog") {
 		t.Fatalf("dry run did not disclose the ordered root/catalog/bundle write set:\n%s", output)
@@ -1221,7 +1221,7 @@ func TestRenderManifestStableDryRunDisclosesFullDeterministicWriteSet(t *testing
 	catalogAt := strings.Index(output, "--- .software-standards/routing/catalog.md (")
 	bundleAt := strings.Index(output, "--- .software-standards/routing/bundles/route-")
 	if !strings.Contains(output, "AGENTS.md is already current") ||
-		!strings.Contains(output, "Dry run — proposed render write set:") ||
+		!strings.Contains(output, "Dry run - proposed render write set:") ||
 		rootAt < 0 || catalogAt <= rootAt || bundleAt <= catalogAt {
 		t.Fatalf("stable dry run omitted the ordered root/catalog/bundle write set:\n%s", output)
 	}

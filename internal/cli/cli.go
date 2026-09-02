@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -325,6 +324,8 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 	var transition *prune.Transition
 	var before fileSnapshot
 	var beforeRouting directorySnapshot
+	var after fileSnapshot
+	var afterRouting directorySnapshot
 	if *reviewID != "" {
 		transition, err = prune.BeginTransition(repo.Root(), *reviewID, prune.EventRendered, nil)
 		if err != nil {
@@ -336,13 +337,13 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 				exitCode = 3
 			}
 		}()
-		before, err = captureFile(filepath.Join(repo.Root(), "AGENTS.md"))
+		before, err = captureFile(repo.Root(), "AGENTS.md")
 		if err != nil {
 			fmt.Fprintf(stderr, "error: capture AGENTS.md before review-aware render: %s\n", err)
 			return 3
 		}
 		if pack.Layout == rulepack.LayoutManifest {
-			beforeRouting, err = captureDirectory(filepath.Join(repo.Root(), filepath.FromSlash(render.RoutingDirectory)))
+			beforeRouting, err = captureDirectory(repo.Root(), render.RoutingDirectory)
 			if err != nil {
 				fmt.Fprintf(stderr, "error: capture routing tree before review-aware render: %s\n", err)
 				return 3
@@ -377,11 +378,11 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 		if result.Changed && len(pack.Rules) == 0 && len(pack.Recipes) == 0 && len(pack.Skills) == 0 {
 			fmt.Fprintf(
 				stdout,
-				"Dry run — %s would remove its managed Software Standards Bootstrap section.\n",
+				"Dry run - %s would remove its managed Software Standards Bootstrap section.\n",
 				result.Path,
 			)
 		}
-		fmt.Fprintln(stdout, "Dry run — proposed render write set:")
+		fmt.Fprintln(stdout, "Dry run - proposed render write set:")
 		writeRenderFilePreview(stdout, result.Path, result.Content)
 		if result.Routing != nil {
 			if result.Routing.Exists {
@@ -397,6 +398,18 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return 0
 	}
 	if *reviewID != "" {
+		after, err = captureFile(repo.Root(), "AGENTS.md")
+		if err != nil {
+			fmt.Fprintf(stderr, "error: capture AGENTS.md after review-aware render: %s\n", err)
+			return 3
+		}
+		if pack.Layout == rulepack.LayoutManifest {
+			afterRouting, err = captureDirectory(repo.Root(), render.RoutingDirectory)
+			if err != nil {
+				fmt.Fprintf(stderr, "error: capture routing tree after review-aware render: %s\n", err)
+				return 3
+			}
+		}
 		event, err := transition.Complete(result)
 		transitionErr := reconcileTransitionCompletion(
 			event,
@@ -404,13 +417,15 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 			"render",
 			"AGENTS.md and the routing tree were restored",
 			func() error {
-				agentsErr := restoreFile(filepath.Join(repo.Root(), "AGENTS.md"), before)
+				agentsErr := restoreFileIfCurrent(repo.Root(), "AGENTS.md", before, after)
 				if pack.Layout != rulepack.LayoutManifest {
 					return agentsErr
 				}
-				routingErr := restoreDirectory(
-					filepath.Join(repo.Root(), filepath.FromSlash(render.RoutingDirectory)),
+				routingErr := restoreDirectoryIfCurrent(
+					repo.Root(),
+					render.RoutingDirectory,
 					beforeRouting,
+					afterRouting,
 				)
 				return errors.Join(agentsErr, routingErr)
 			},
@@ -1201,154 +1216,6 @@ func commaList(value string) []string {
 		result = append(result, strings.TrimSpace(part))
 	}
 	return result
-}
-
-type fileSnapshot struct {
-	existed bool
-	mode    os.FileMode
-	content []byte
-}
-
-type directorySnapshot struct {
-	existed bool
-	files   map[string]fileSnapshot
-}
-
-func captureDirectory(target string) (directorySnapshot, error) {
-	info, err := os.Lstat(target)
-	if errors.Is(err, os.ErrNotExist) {
-		return directorySnapshot{files: make(map[string]fileSnapshot)}, nil
-	}
-	if err != nil {
-		return directorySnapshot{}, err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return directorySnapshot{}, fmt.Errorf("target is not a real directory")
-	}
-	snapshot := directorySnapshot{existed: true, files: make(map[string]fileSnapshot)}
-	err = filepath.WalkDir(target, func(current string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if current == target {
-			return nil
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("snapshot path is a symlink")
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("snapshot path is not a regular file")
-		}
-		relative, err := filepath.Rel(target, current)
-		if err != nil {
-			return err
-		}
-		content, err := os.ReadFile(current)
-		if err != nil {
-			return err
-		}
-		snapshot.files[filepath.ToSlash(relative)] = fileSnapshot{
-			existed: true, mode: info.Mode().Perm(), content: content,
-		}
-		return nil
-	})
-	if err != nil {
-		return directorySnapshot{}, err
-	}
-	return snapshot, nil
-}
-
-func restoreDirectory(target string, snapshot directorySnapshot) error {
-	if info, err := os.Lstat(target); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-			return fmt.Errorf("refuse to replace a non-directory rollback target")
-		}
-		if err := os.RemoveAll(target); err != nil {
-			return err
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if !snapshot.existed {
-		return nil
-	}
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		return err
-	}
-	paths := make([]string, 0, len(snapshot.files))
-	for relative := range snapshot.files {
-		paths = append(paths, relative)
-	}
-	sort.Strings(paths)
-	for _, relative := range paths {
-		filePath := filepath.Join(target, filepath.FromSlash(relative))
-		if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
-			return err
-		}
-		if err := restoreFile(filePath, snapshot.files[relative]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func captureFile(filePath string) (fileSnapshot, error) {
-	info, err := os.Lstat(filePath)
-	if errors.Is(err, os.ErrNotExist) {
-		return fileSnapshot{}, nil
-	}
-	if err != nil {
-		return fileSnapshot{}, err
-	}
-	if !info.Mode().IsRegular() {
-		return fileSnapshot{}, fmt.Errorf("target is not a regular file")
-	}
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return fileSnapshot{}, err
-	}
-	return fileSnapshot{existed: true, mode: info.Mode().Perm(), content: content}, nil
-}
-
-func restoreFile(filePath string, snapshot fileSnapshot) error {
-	if !snapshot.existed {
-		if err := os.Remove(filePath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		return nil
-	}
-	temp, err := os.CreateTemp(filepath.Dir(filePath), ".ssb-restore-*")
-	if err != nil {
-		return err
-	}
-	tempPath := temp.Name()
-	defer os.Remove(tempPath)
-	if err := temp.Chmod(snapshot.mode); err != nil {
-		temp.Close()
-		return err
-	}
-	if written, err := temp.Write(snapshot.content); err != nil {
-		temp.Close()
-		return err
-	} else if written != len(snapshot.content) {
-		temp.Close()
-		return io.ErrShortWrite
-	}
-	if err := temp.Sync(); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tempPath, filePath)
 }
 
 func missingDirectories(root, target string) ([]string, error) {

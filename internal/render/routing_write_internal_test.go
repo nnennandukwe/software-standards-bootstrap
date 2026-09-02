@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -206,4 +207,212 @@ func TestPublishRoutingTargetCopiesBackupWhenRenameRestoreFails(t *testing.T) {
 	if len(backups) != 0 {
 		t.Fatalf("successful copy fallback left routing backups: %v", backups)
 	}
+}
+
+func TestPublishProjectionPreservesConcurrentRoutingChangeDuringRollback(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".software-standards"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentsTarget := filepath.Join(root, "AGENTS.md")
+	originalAgents := []byte("# Original guidance\n")
+	if err := os.WriteFile(agentsTarget, originalAgents, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	originalCatalog := testRoutingCatalog(t, "original")
+	desiredCatalog := testRoutingCatalog(t, "desired")
+	concurrentCatalog := testRoutingCatalog(t, "concurrent")
+	routingTarget := filepath.Join(root, filepath.FromSlash(RoutingDirectory))
+	if err := os.MkdirAll(routingTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(routingTarget, "catalog.md"), originalCatalog, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	routing := &RoutingResult{
+		Path: RoutingDirectory, Exists: true,
+		TreeDigest: routingTreeDigest([]FileResult{{Path: RoutingDirectory + "/catalog.md", SHA256: digest(desiredCatalog)}}),
+		Files: []FileResult{{
+			Path: RoutingDirectory + "/catalog.md", Content: desiredCatalog,
+			SHA256: digest(desiredCatalog), Bytes: len(desiredCatalog),
+		}},
+	}
+	if err := inspectRoutingTarget(root, routing); err != nil {
+		t.Fatal(err)
+	}
+
+	injected := errors.New("injected AGENTS.md write failure")
+	err := publishProjection(
+		root, routing, agentsTarget, originalAgents, []byte("# Desired guidance\n"), 0o644, true, true,
+		func(_ string, _, _ []byte, _ os.FileMode, _ bool) error {
+			if err := os.WriteFile(filepath.Join(routingTarget, "catalog.md"), concurrentCatalog, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return injected
+		},
+	)
+	if !errors.Is(err, injected) || !strings.Contains(err.Error(), "routing directory changed") {
+		t.Fatalf("publish error = %v, want write failure plus rollback drift", err)
+	}
+	after, err := os.ReadFile(filepath.Join(routingTarget, "catalog.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(concurrentCatalog) {
+		t.Fatal("rollback deleted the concurrent routing change")
+	}
+	backups, err := filepath.Glob(filepath.Join(root, ".software-standards", ".ssb-routing-backup-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backups) != 1 {
+		t.Fatalf("routing backups = %v, want original tree retained for recovery", backups)
+	}
+}
+
+func TestPublishProjectionPreservesRoutingTreeThatAppearsDuringRemovalRollback(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".software-standards"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentsTarget := filepath.Join(root, "AGENTS.md")
+	originalAgents := []byte("# Original guidance\n")
+	if err := os.WriteFile(agentsTarget, originalAgents, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	originalCatalog := testRoutingCatalog(t, "original")
+	concurrentCatalog := testRoutingCatalog(t, "concurrent")
+	routingTarget := filepath.Join(root, filepath.FromSlash(RoutingDirectory))
+	if err := os.MkdirAll(routingTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(routingTarget, "catalog.md"), originalCatalog, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	routing := &RoutingResult{
+		Path: RoutingDirectory, Exists: false,
+		TreeDigest: routingTreeDigest(nil), Files: make([]FileResult, 0),
+	}
+	if err := inspectRoutingTarget(root, routing); err != nil {
+		t.Fatal(err)
+	}
+
+	injected := errors.New("injected AGENTS.md write failure")
+	err := publishProjection(
+		root, routing, agentsTarget, originalAgents, []byte("# Desired guidance\n"), 0o644, true, true,
+		func(_ string, _, _ []byte, _ os.FileMode, _ bool) error {
+			if err := os.MkdirAll(routingTarget, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(routingTarget, "catalog.md"), concurrentCatalog, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return injected
+		},
+	)
+	if !errors.Is(err, injected) || !errors.Is(err, ErrDrift) {
+		t.Fatalf("publish error = %v, want write failure plus rollback drift", err)
+	}
+	after, err := os.ReadFile(filepath.Join(routingTarget, "catalog.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(concurrentCatalog) {
+		t.Fatal("rollback deleted the routing tree that appeared after removal")
+	}
+	backups, err := filepath.Glob(filepath.Join(root, ".software-standards", ".ssb-routing-backup-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backups) != 1 {
+		t.Fatalf("routing backups = %v, want original tree retained for recovery", backups)
+	}
+}
+
+func TestPublishRoutingTargetRechecksTreeMovedToBackup(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".software-standards"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	originalCatalog := testRoutingCatalog(t, "original")
+	desiredCatalog := testRoutingCatalog(t, "desired")
+	concurrentCatalog := testRoutingCatalog(t, "concurrent")
+	routingTarget := filepath.Join(root, filepath.FromSlash(RoutingDirectory))
+	if err := os.MkdirAll(routingTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(routingTarget, "catalog.md"), originalCatalog, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	routing := &RoutingResult{
+		Path: RoutingDirectory, Exists: true,
+		Files: []FileResult{{
+			Path: RoutingDirectory + "/catalog.md", Content: desiredCatalog,
+			SHA256: digest(desiredCatalog), Bytes: len(desiredCatalog),
+		}},
+	}
+	if err := inspectRoutingTarget(root, routing); err != nil {
+		t.Fatal(err)
+	}
+	staged, err := stageRoutingTarget(root, routing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(staged) })
+
+	renameCalls := 0
+	rename := func(oldPath, newPath string) error {
+		renameCalls++
+		if renameCalls == 1 {
+			if err := os.WriteFile(filepath.Join(routingTarget, "catalog.md"), concurrentCatalog, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return os.Rename(oldPath, newPath)
+	}
+	if _, err := publishRoutingTargetWithRename(root, routing, staged, rename); !errors.Is(err, ErrDrift) {
+		t.Fatalf("publish error = %v, want moved-prestate drift rejection", err)
+	}
+	after, err := os.ReadFile(filepath.Join(routingTarget, "catalog.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(concurrentCatalog) {
+		t.Fatal("publish overwrote the concurrent prestate")
+	}
+}
+
+func TestStageRoutingTargetRejectsStandardsParentSymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, ".software-standards")); err != nil {
+		t.Fatal(err)
+	}
+	catalog := testRoutingCatalog(t, "desired")
+	routing := &RoutingResult{
+		Path: RoutingDirectory, Exists: true, Changed: true,
+		Files: []FileResult{{
+			Path: RoutingDirectory + "/catalog.md", Content: catalog,
+			SHA256: digest(catalog), Bytes: len(catalog),
+		}},
+	}
+	if _, err := stageRoutingTarget(root, routing); err == nil {
+		t.Fatal("staging followed .software-standards symlink outside the repository")
+	}
+	entries, err := os.ReadDir(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("unsafe staging wrote outside the repository: %v", entries)
+	}
+}
+
+func testRoutingCatalog(t *testing.T, version string) []byte {
+	t.Helper()
+	catalog, err := wrapRoutingFile(struct{ Version string }{version}, []byte("# "+version+" catalog\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return catalog
 }
