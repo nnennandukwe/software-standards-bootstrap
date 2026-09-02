@@ -504,7 +504,18 @@ func quarantineFile(
 	}
 	result.snapshot, err = captureFileWithFS(fileSystem, result.path)
 	if err != nil {
-		return result, fmt.Errorf("validate quarantined file: %w; current file remains at %s", err, result.path)
+		validationErr := fmt.Errorf(
+			"validate quarantined file: %w; quarantined candidate retained at %s",
+			err,
+			result.path,
+		)
+		if restoreErr := writeFileSnapshotExclusive(fileSystem, target, expectedCurrent); restoreErr != nil {
+			return result, errors.Join(
+				validationErr,
+				fmt.Errorf("restore expected file after quarantine validation failure: %w", restoreErr),
+			)
+		}
+		return result, fmt.Errorf("%w; restored expected file at %s", validationErr, target)
 	}
 	return result, nil
 }
@@ -539,7 +550,18 @@ func quarantineDirectory(
 	}
 	result.snapshot, err = captureDirectoryWithFS(fileSystem, result.path)
 	if err != nil {
-		return result, fmt.Errorf("validate quarantined directory: %w; current tree remains at %s", err, result.path)
+		validationErr := fmt.Errorf(
+			"validate quarantined directory: %w; quarantined candidate retained at %s",
+			err,
+			result.path,
+		)
+		if restoreErr := writeDirectorySnapshotExclusive(fileSystem, target, expectedCurrent); restoreErr != nil {
+			return result, errors.Join(
+				validationErr,
+				fmt.Errorf("restore expected directory after quarantine validation failure: %w", restoreErr),
+			)
+		}
+		return result, fmt.Errorf("%w; restored expected directory at %s", validationErr, target)
 	}
 	return result, nil
 }

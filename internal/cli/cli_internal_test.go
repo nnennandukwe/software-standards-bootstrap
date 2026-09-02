@@ -2,9 +2,11 @@ package cli
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -248,6 +250,98 @@ func TestProjectionSnapshotRollbackPreflightsBothArtifacts(t *testing.T) {
 	}
 	assertSnapshotTestFile(t, agentsTarget, "rendered agents\n")
 	assertSnapshotTestFile(t, routingTarget, "concurrent routing\n")
+}
+
+func TestQuarantineValidationFailureRestoresCanonicalTarget(t *testing.T) {
+	t.Run("file", func(t *testing.T) {
+		root := t.TempDir()
+		writeSnapshotTestFile(t, filepath.Join(root, "AGENTS.md"), "rendered agents\n")
+		expected, err := captureFile(root, "AGENTS.md")
+		if err != nil {
+			t.Fatal(err)
+		}
+		base, err := openSnapshotFileSystem(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer base.close()
+		failure := errors.New("injected quarantined file read failure")
+		fileSystem := &quarantineValidationFailingSnapshotFileSystem{
+			snapshotFileSystem: base,
+			fileFailure:        failure,
+		}
+		if _, err := quarantineFile(fileSystem, "AGENTS.md", expected); !errors.Is(err, failure) {
+			t.Fatalf("quarantine error = %v, want validation failure", err)
+		}
+		assertSnapshotTestFile(t, filepath.Join(root, "AGENTS.md"), "rendered agents\n")
+	})
+
+	t.Run("combined projection", func(t *testing.T) {
+		root := t.TempDir()
+		writeSnapshotTestFile(t, filepath.Join(root, "AGENTS.md"), "rendered agents\n")
+		writeSnapshotTestFile(
+			t,
+			filepath.Join(root, ".software-standards", "routing", "catalog.md"),
+			"rendered routing\n",
+		)
+		expectedFile, err := captureFile(root, "AGENTS.md")
+		if err != nil {
+			t.Fatal(err)
+		}
+		expectedDirectory, err := captureDirectory(root, ".software-standards/routing")
+		if err != nil {
+			t.Fatal(err)
+		}
+		base, err := openSnapshotFileSystem(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer base.close()
+		failure := errors.New("injected quarantined directory read failure")
+		fileSystem := &quarantineValidationFailingSnapshotFileSystem{
+			snapshotFileSystem: base,
+			directoryFailure:   failure,
+		}
+		err = restoreSnapshotsWithFS(
+			fileSystem,
+			&fileRollback{target: "AGENTS.md", before: expectedFile, expectedCurrent: expectedFile},
+			&directoryRollback{
+				target: ".software-standards/routing", before: expectedDirectory, expectedCurrent: expectedDirectory,
+			},
+		)
+		if !errors.Is(err, failure) {
+			t.Fatalf("rollback error = %v, want directory validation failure", err)
+		}
+		assertSnapshotTestFile(t, filepath.Join(root, "AGENTS.md"), "rendered agents\n")
+		assertSnapshotTestFile(
+			t,
+			filepath.Join(root, ".software-standards", "routing", "catalog.md"),
+			"rendered routing\n",
+		)
+	})
+}
+
+type quarantineValidationFailingSnapshotFileSystem struct {
+	snapshotFileSystem
+	fileFailure      error
+	directoryFailure error
+}
+
+func (fileSystem *quarantineValidationFailingSnapshotFileSystem) open(name string) (snapshotFile, error) {
+	if fileSystem.fileFailure != nil && strings.Contains(name, ".ssb-review-agents-") {
+		return nil, fileSystem.fileFailure
+	}
+	return fileSystem.snapshotFileSystem.open(name)
+}
+
+func (fileSystem *quarantineValidationFailingSnapshotFileSystem) walkDir(
+	name string,
+	walk fs.WalkDirFunc,
+) error {
+	if fileSystem.directoryFailure != nil && strings.Contains(name, ".ssb-review-routing-") {
+		return fileSystem.directoryFailure
+	}
+	return fileSystem.snapshotFileSystem.walkDir(name, walk)
 }
 
 func TestCaptureSnapshotRejectsOversizedFile(t *testing.T) {

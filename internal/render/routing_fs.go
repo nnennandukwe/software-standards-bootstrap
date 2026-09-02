@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -31,6 +32,12 @@ type routingFile interface {
 	Sync() error
 	Chmod(fs.FileMode) error
 	Close() error
+}
+
+type routingTempDirFileSystem interface {
+	mkdir(string, fs.FileMode) error
+	chmod(string, fs.FileMode) error
+	removeAll(string) error
 }
 
 type rootedRoutingFileSystem struct {
@@ -130,6 +137,10 @@ func (fileSystem *rootedRoutingFileSystem) walkDir(name string, walk fs.WalkDirF
 }
 
 func (fileSystem *rootedRoutingFileSystem) makeTempDir(parent, prefix string) (string, error) {
+	return makeTempDirWithFS(fileSystem, parent, prefix)
+}
+
+func makeTempDirWithFS(fileSystem routingTempDirFileSystem, parent, prefix string) (string, error) {
 	for range 100 {
 		var random [16]byte
 		if _, err := rand.Read(random[:]); err != nil {
@@ -138,7 +149,11 @@ func (fileSystem *rootedRoutingFileSystem) makeTempDir(parent, prefix string) (s
 		name := filepath.ToSlash(filepath.Join(parent, prefix+hex.EncodeToString(random[:])))
 		if err := fileSystem.mkdir(name, 0o700); err == nil {
 			if err := fileSystem.chmod(name, 0o700); err != nil {
-				return "", err
+				cleanupErr := fileSystem.removeAll(name)
+				if cleanupErr != nil {
+					cleanupErr = fmt.Errorf("remove temporary routing directory %s after chmod failure: %w", name, cleanupErr)
+				}
+				return "", errors.Join(err, cleanupErr)
 			}
 			return name, nil
 		} else if !os.IsExist(err) {

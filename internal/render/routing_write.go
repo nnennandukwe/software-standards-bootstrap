@@ -35,6 +35,9 @@ func inspectRoutingTargetWithFS(store routingFileSystem, routing *RoutingResult)
 	if routing == nil {
 		return nil
 	}
+	if err := validateGeneratedRoutingTree(routing); err != nil {
+		return err
+	}
 	target := routing.Path
 	info, err := store.lstat(target)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -137,9 +140,77 @@ func readExistingRoutingTreeWithFS(store routingFileSystem, target string) (map[
 	if err != nil {
 		return nil, err
 	}
+	if err := validateRoutingCatalogReferences(files); err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+func validateGeneratedRoutingTree(routing *RoutingResult) error {
+	if routing == nil {
+		return nil
+	}
+	if routing.Path != RoutingDirectory {
+		return fmt.Errorf("%w: generated routing target must be %s", ErrUnsafeTarget, RoutingDirectory)
+	}
+	if !routing.Exists {
+		if len(routing.Files) != 0 {
+			return fmt.Errorf("%w: absent generated routing tree contains files", ErrUnsafeTarget)
+		}
+		return nil
+	}
+	if len(routing.Files) > maxRoutingFiles {
+		return fmt.Errorf("%w: generated routing tree exceeds the %d-file limit", ErrUnsafeTarget, maxRoutingFiles)
+	}
+	files := make(map[string][]byte, len(routing.Files))
+	directories := make(map[string]struct{})
+	var totalBytes int64
+	for _, file := range routing.Files {
+		relative, err := routingRelativePath(file.Path)
+		if err != nil {
+			return err
+		}
+		if relative != "catalog.md" && path.Dir(relative) != "bundles" {
+			return fmt.Errorf("%w: generated routing file %s has an unsupported path", ErrUnsafeTarget, relative)
+		}
+		if _, exists := files[relative]; exists {
+			return fmt.Errorf("%w: generated routing file %s is duplicated", ErrUnsafeTarget, relative)
+		}
+		fileBytes := int64(len(file.Content))
+		if fileBytes > maxRoutingFileBytes {
+			return fmt.Errorf(
+				"%w: generated routing file %s exceeds the %d-byte file limit",
+				ErrUnsafeTarget,
+				relative,
+				maxRoutingFileBytes,
+			)
+		}
+		totalBytes += fileBytes
+		if totalBytes > maxRoutingTreeBytes {
+			return fmt.Errorf(
+				"%w: generated routing tree exceeds the %d-byte tree limit",
+				ErrUnsafeTarget,
+				maxRoutingTreeBytes,
+			)
+		}
+		if err := verifyRoutingFile(file.Content); err != nil {
+			return fmt.Errorf("generated routing file %s: %w", relative, err)
+		}
+		for parent := path.Dir(relative); parent != "."; parent = path.Dir(parent) {
+			directories[parent] = struct{}{}
+		}
+		files[relative] = file.Content
+	}
+	if len(files)+len(directories) > maxRoutingEntries {
+		return fmt.Errorf("%w: generated routing tree exceeds the %d-entry limit", ErrUnsafeTarget, maxRoutingEntries)
+	}
+	return validateRoutingCatalogReferences(files)
+}
+
+func validateRoutingCatalogReferences(files map[string][]byte) error {
 	catalog, exists := files["catalog.md"]
 	if !exists {
-		return nil, fmt.Errorf("%w: routing catalog is missing", ErrDrift)
+		return fmt.Errorf("%w: routing catalog is missing", ErrDrift)
 	}
 	referenced := make(map[string]struct{})
 	for _, match := range catalogBundleLinkPattern.FindAllSubmatch(catalog, -1) {
@@ -150,15 +221,15 @@ func readExistingRoutingTreeWithFS(store routingFileSystem, target string) (map[
 			continue
 		}
 		if _, exists := referenced[relative]; !exists {
-			return nil, fmt.Errorf("%w: routing bundle %s is not listed by catalog.md", ErrDrift, relative)
+			return fmt.Errorf("%w: routing bundle %s is not listed by catalog.md", ErrDrift, relative)
 		}
 	}
 	for relative := range referenced {
 		if _, exists := files[relative]; !exists {
-			return nil, fmt.Errorf("%w: routing catalog references missing bundle %s", ErrDrift, relative)
+			return fmt.Errorf("%w: routing catalog references missing bundle %s", ErrDrift, relative)
 		}
 	}
-	return files, nil
+	return nil
 }
 
 func verifyRoutingFile(content []byte) error {
@@ -207,6 +278,9 @@ func stageRoutingTarget(repoRoot string, routing *RoutingResult) (string, error)
 }
 
 func stageRoutingTargetWithFS(store routingFileSystem, routing *RoutingResult) (string, error) {
+	if err := validateGeneratedRoutingTree(routing); err != nil {
+		return "", err
+	}
 	stage, err := store.makeTempDir(".software-standards", ".ssb-routing-stage-")
 	if err != nil {
 		return "", fmt.Errorf("create staged routing directory: %w", err)

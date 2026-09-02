@@ -101,10 +101,14 @@ func buildRoutingResult(pack rulepack.Pack) (*RoutingResult, error) {
 		Path: pack.Routing.CatalogPath, SHA256: digest(catalogContent), Bytes: len(catalogContent), Content: catalogContent,
 	}
 	files := append([]FileResult{catalog}, bundleFiles...)
-	return &RoutingResult{
+	result := &RoutingResult{
 		Path: RoutingDirectory, Changed: true, Exists: true,
 		TreeDigest: routingTreeDigest(files), Files: files,
-	}, nil
+	}
+	if err := validateGeneratedRoutingTree(result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 type fileIdentity struct {

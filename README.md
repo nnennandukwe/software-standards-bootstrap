@@ -363,7 +363,9 @@ ssb prune    <inspect|validate|approve|apply|recover|status|verify> [options]
   tree while preserving human-authored root content.
 - Existing generated files and review rollback snapshots are read under hard
   limits of 8 MiB per file, 64 MiB per routing tree, 10,000 files per tree, and
-  20,000 total tree entries.
+  20,000 total tree entries. SSB applies the same limits to generated routing
+  output before writing it, so a successful render remains inspectable and can
+  be safely rerendered or removed.
   If only post-commit backup cleanup fails, the command succeeds and warns with
   the repository-relative backup path for manual cleanup.
 - `adr` creates one new Proposed ADR from retained rules, recipes, and skills.

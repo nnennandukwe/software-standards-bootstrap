@@ -77,10 +77,83 @@ func TestInspectRoutingTargetRejectsOversizedFile(t *testing.T) {
 	if err := os.Truncate(catalog, maxRoutingFileBytes+1); err != nil {
 		t.Fatal(err)
 	}
-	routing := &RoutingResult{Path: RoutingDirectory, Exists: true}
+	routing := &RoutingResult{Path: RoutingDirectory, Exists: false}
 	if err := inspectRoutingTarget(root, routing); !errors.Is(err, ErrUnsafeTarget) {
 		t.Fatalf("inspect error = %v, want bounded-read rejection", err)
 	}
+}
+
+func TestGeneratedRoutingTreeRejectsOutputAboveInspectionLimits(t *testing.T) {
+	t.Run("file bytes", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, ".software-standards"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		store, err := openRoutingFileSystem(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer store.close()
+		routing := &RoutingResult{
+			Path: RoutingDirectory, Exists: true,
+			Files: []FileResult{{
+				Path: RoutingDirectory + "/catalog.md", Content: make([]byte, maxRoutingFileBytes+1),
+			}},
+		}
+		if _, err := stageRoutingTargetWithFS(store, routing); !errors.Is(err, ErrUnsafeTarget) {
+			t.Fatalf("validation error = %v, want generated file limit rejection", err)
+		}
+		entries, err := os.ReadDir(filepath.Join(root, ".software-standards"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("oversized generated routing output created staging entries: %v", entries)
+		}
+	})
+
+	t.Run("file count", func(t *testing.T) {
+		routing := &RoutingResult{
+			Path: RoutingDirectory, Exists: true,
+			Files: make([]FileResult, maxRoutingFiles+1),
+		}
+		if err := validateGeneratedRoutingTree(routing); !errors.Is(err, ErrUnsafeTarget) {
+			t.Fatalf("validation error = %v, want generated file-count rejection", err)
+		}
+	})
+}
+
+func TestMakeTempDirRemovesDirectoryWhenChmodFails(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".software-standards"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	base, err := openRoutingFileSystem(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer base.close()
+	failure := errors.New("injected chmod failure")
+	store := &chmodFailingTempDirFileSystem{routingTempDirFileSystem: base, failure: failure}
+	if _, err := makeTempDirWithFS(store, ".software-standards", ".ssb-routing-test-"); !errors.Is(err, failure) {
+		t.Fatalf("make temp directory error = %v, want chmod failure", err)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, ".software-standards"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("failed chmod left temporary routing directories: %v", entries)
+	}
+}
+
+type chmodFailingTempDirFileSystem struct {
+	routingTempDirFileSystem
+	failure error
+}
+
+func (fileSystem *chmodFailingTempDirFileSystem) chmod(string, os.FileMode) error {
+	return fileSystem.failure
 }
 
 func TestPublishProjectionRestoresRoutingWhenAgentsWriteFails(t *testing.T) {
