@@ -255,6 +255,13 @@ func publishRoutingTargetWithRename(
 		if err := rename(target, backup); err != nil {
 			return "", fmt.Errorf("backup routing directory: %w", err)
 		}
+		// Validate after claiming the target so concurrent changes are preserved.
+		if err := verifyRoutingPrestate(backup, routing); err != nil {
+			if restoreErr := restoreRoutingBackup(backup, target, rename); restoreErr != nil {
+				return "", fmt.Errorf("routing tree changed while claiming it: %w; restore: %v", err, restoreErr)
+			}
+			return "", fmt.Errorf("routing tree changed while claiming it: %w", err)
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", fmt.Errorf("inspect routing directory before publish: %w", err)
 	}
@@ -347,6 +354,33 @@ func verifyRoutingPrestate(target string, routing *RoutingResult) error {
 	return nil
 }
 
+func verifyRoutingPoststate(target string, routing *RoutingResult) error {
+	info, err := os.Lstat(target)
+	if !routing.Exists {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("routing target was recreated")
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("routing target is no longer a directory")
+	}
+	existing, err := readExistingRoutingTree(target)
+	if err != nil {
+		return err
+	}
+	if digestExistingRoutingTree(existing) != routing.TreeDigest {
+		return fmt.Errorf("routing target changed after publication")
+	}
+	return nil
+}
+
 func digestExistingRoutingTree(existing map[string][]byte) string {
 	files := make([]FileResult, 0, len(existing))
 	for relative, content := range existing {
@@ -363,6 +397,9 @@ func rollbackRoutingTarget(repoRoot string, routing *RoutingResult, backup strin
 		return nil
 	}
 	target := filepath.Join(repoRoot, filepath.FromSlash(routing.Path))
+	if err := verifyRoutingPoststate(target, routing); err != nil {
+		return fmt.Errorf("refuse to roll back routing tree: %w", err)
+	}
 	if err := os.RemoveAll(target); err != nil {
 		return err
 	}
