@@ -43,27 +43,27 @@ integrity:
 scenarios:
   - request: app implementation
     path: app/service.go
-    dimensions: [task:implementation, language:go]
+    dimensions: ["task:implementation", "language:go"]
     selected_artifacts: [global-safety, app-boundary, go-contract, implementation-contract]
     excluded_artifacts: [planning-contract, renderer-purity, rulepack-validation-seam, verify-change, release-contract]
   - request: app verification
     path: app/service_test.go
-    dimensions: [task:verification, language:go]
+    dimensions: ["task:verification", "language:go"]
     selected_artifacts: [global-safety, app-boundary, go-contract, verify-change]
     excluded_artifacts: [implementation-contract, planning-contract, renderer-purity, rulepack-validation-seam, release-contract]
   - request: renderer implementation
     path: internal/render/render.go
-    dimensions: [task:implementation, language:go]
+    dimensions: ["task:implementation", "language:go"]
     selected_artifacts: [global-safety, go-contract, implementation-contract, renderer-purity]
     excluded_artifacts: [app-boundary, planning-contract, rulepack-validation-seam, verify-change, release-contract]
   - request: rulepack implementation
     path: internal/rulepack/rulepack.go
-    dimensions: [task:implementation, language:go]
+    dimensions: ["task:implementation", "language:go"]
     selected_artifacts: [global-safety, go-contract, implementation-contract, rulepack-validation-seam]
     excluded_artifacts: [app-boundary, planning-contract, renderer-purity, verify-change, release-contract]
   - request: release verification
     path: .github/workflows/release.yml
-    dimensions: [task:verification]
+    dimensions: ["task:verification"]
     selected_artifacts: [global-safety, verify-change, release-contract]
     excluded_artifacts: [app-boundary, go-contract, implementation-contract, planning-contract, renderer-purity, rulepack-validation-seam]
     linked_skill_read_to_eof: .agents/skills/release-contract/SKILL.md
