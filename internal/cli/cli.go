@@ -325,6 +325,7 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 	var transition *prune.Transition
 	var before fileSnapshot
 	var beforeRouting directorySnapshot
+	var afterRouting directorySnapshot
 	if *reviewID != "" {
 		transition, err = prune.BeginTransition(repo.Root(), *reviewID, prune.EventRendered, nil)
 		if err != nil {
@@ -361,6 +362,12 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 			return 2
 		}
 		return 3
+	}
+	if *reviewID != "" && pack.Layout == rulepack.LayoutManifest {
+		afterRouting, err = captureDirectory(filepath.Join(repo.Root(), filepath.FromSlash(render.RoutingDirectory)))
+		if err != nil {
+			return writePruneError(stderr, fmt.Errorf("capture rendered routing tree: %w", err))
+		}
 	}
 	if *dryRun {
 		if !result.Changed {
@@ -411,6 +418,7 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 				routingErr := restoreDirectory(
 					filepath.Join(repo.Root(), filepath.FromSlash(render.RoutingDirectory)),
 					beforeRouting,
+					afterRouting,
 				)
 				return errors.Join(agentsErr, routingErr)
 			},
@@ -1265,7 +1273,14 @@ func captureDirectory(target string) (directorySnapshot, error) {
 	return snapshot, nil
 }
 
-func restoreDirectory(target string, snapshot directorySnapshot) error {
+func restoreDirectory(target string, snapshot, expected directorySnapshot) error {
+	current, err := captureDirectory(target)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(current, expected) {
+		return fmt.Errorf("routing tree changed after render; recovery required")
+	}
 	if info, err := os.Lstat(target); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 			return fmt.Errorf("refuse to replace a non-directory rollback target")
