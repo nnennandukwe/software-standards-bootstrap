@@ -4,7 +4,19 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## Unreleased
 
-No changes yet.
+### Added
+
+- Optional manifest-v1 `root_core` selection for at most 16 explicit
+  repository-wide base rules, plus deterministic portable routing catalogs and
+  exact-selector Markdown bundles for on-demand agent guidance.
+- Additive validation response-schema-3 projection measurements and
+  non-blocking 16-KiB root and 64-KiB catalog warnings.
+
+### Changed
+
+- Manifest rendering now keeps root `AGENTS.md` finite, publishes the complete
+  root/catalog/bundle write set transactionally, records routing-tree evidence
+  in new prune rerender events, and preserves replay of older events.
 
 ## [0.2.0] - 2026-08-17
 

@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/workspace"
@@ -548,19 +550,115 @@ func verifyRenderedPoststate(repoRoot string, event Event) error {
 		if payload.OutputDigest != digestBytes(nil) {
 			return fmt.Errorf("%s recorded an invalid absent-file render digest", payload.Path)
 		}
+	} else {
+		if err := requireRegularBundleFile(repoRoot, target); err != nil {
+			return fmt.Errorf("%s is not a safe regular repository file: %w", payload.Path, err)
+		}
+		content, err := os.ReadFile(target)
+		if err != nil {
+			return err
+		}
+		if digestBytes(content) != payload.OutputDigest {
+			return fmt.Errorf("%s no longer matches the recorded render digest", payload.Path)
+		}
+	}
+	return verifyRenderedRoutingPoststate(repoRoot, payload.Routing)
+}
+
+func verifyRenderedRoutingPoststate(repoRoot string, payload *renderedRoutingPayload) error {
+	if payload == nil {
 		return nil
 	}
-	if err := requireRegularBundleFile(repoRoot, target); err != nil {
-		return fmt.Errorf("%s is not a safe regular repository file: %w", payload.Path, err)
-	}
-	content, err := os.ReadFile(target)
+	target, err := resolvePortablePath(repoRoot, payload.Path)
 	if err != nil {
 		return err
 	}
-	if digestBytes(content) != payload.OutputDigest {
-		return fmt.Errorf("%s no longer matches the recorded render digest", payload.Path)
+	if !payload.Exists {
+		if _, err := os.Lstat(target); !errors.Is(err, os.ErrNotExist) {
+			if err == nil {
+				return fmt.Errorf("routing tree exists but the recorded render removed it")
+			}
+			return fmt.Errorf("inspect routing tree: %w", err)
+		}
+		emptyDigest, err := canonicalDigest(make([]routingFileIdentity, 0))
+		if err != nil {
+			return err
+		}
+		if payload.TreeDigest != emptyDigest {
+			return fmt.Errorf("routing tree recorded an invalid absent-tree digest")
+		}
+		return nil
+	}
+	info, err := os.Lstat(target)
+	if err != nil {
+		return fmt.Errorf("inspect routing tree: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("routing tree is not a safe regular directory")
+	}
+	identities := make([]routingFileIdentity, 0)
+	hasCatalog := false
+	err = filepath.WalkDir(target, func(current string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if current == target {
+			return nil
+		}
+		relative, err := filepath.Rel(target, current)
+		if err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("routing tree path %s is a symlink", relative)
+		}
+		if entry.IsDir() {
+			if relative != "bundles" {
+				return fmt.Errorf("routing tree contains unexpected directory %s", relative)
+			}
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() ||
+			relative != "catalog.md" && !(strings.HasPrefix(relative, "bundles/") && strings.HasSuffix(relative, ".md")) {
+			return fmt.Errorf("routing tree contains unsafe file %s", relative)
+		}
+		if relative == "catalog.md" {
+			hasCatalog = true
+		}
+		content, err := os.ReadFile(current)
+		if err != nil {
+			return err
+		}
+		identities = append(identities, routingFileIdentity{
+			Path: payload.Path + "/" + relative, SHA256: digestBytes(content),
+		})
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if !hasCatalog {
+		return fmt.Errorf("routing tree catalog is missing")
+	}
+	sort.Slice(identities, func(i, j int) bool { return identities[i].Path < identities[j].Path })
+	actual, err := canonicalDigest(identities)
+	if err != nil {
+		return err
+	}
+	if actual != payload.TreeDigest {
+		return fmt.Errorf("routing tree no longer matches the recorded digest")
 	}
 	return nil
+}
+
+type routingFileIdentity struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
 }
 
 func changesRules(review Review) bool {

@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -57,7 +58,7 @@ const (
 
   --repo PATH              target Git repository (default ".")
   --review ID              record rerendering for an applied prune review
-  --dry-run                preview the proposed AGENTS.md or report that no write applies
+  --dry-run                preview the complete proposed root and routing write set
 `
 	adrHelp = `Usage: ssb adr [--repo PATH] [--review ID] [--adr-dir PATH] [--dry-run]
 
@@ -323,6 +324,7 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 	}
 	var transition *prune.Transition
 	var before fileSnapshot
+	var beforeRouting directorySnapshot
 	if *reviewID != "" {
 		transition, err = prune.BeginTransition(repo.Root(), *reviewID, prune.EventRendered, nil)
 		if err != nil {
@@ -339,12 +341,23 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 			fmt.Fprintf(stderr, "error: capture AGENTS.md before review-aware render: %s\n", err)
 			return 3
 		}
+		if pack.Layout == rulepack.LayoutManifest {
+			beforeRouting, err = captureDirectory(filepath.Join(repo.Root(), filepath.FromSlash(render.RoutingDirectory)))
+			if err != nil {
+				fmt.Fprintf(stderr, "error: capture routing tree before review-aware render: %s\n", err)
+				return 3
+			}
+		}
 	}
 	result, err := render.Apply(repo, pack, *dryRun)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %s\n", err)
 		if errors.Is(err, render.ErrDrift) || errors.Is(err, render.ErrMarkers) || errors.Is(err, render.ErrUnsafeTarget) {
-			fmt.Fprintln(stderr, "next: fix AGENTS.md or its canonical artifact sources, then rerun ssb render --repo PATH.")
+			if pack.Layout == rulepack.LayoutManifest {
+				fmt.Fprintln(stderr, "next: restore generated AGENTS.md and .software-standards/routing from reviewed version-control state, then edit canonical sources and rerun ssb render --repo PATH.")
+			} else {
+				fmt.Fprintln(stderr, "next: fix AGENTS.md or its canonical artifact sources, then rerun ssb render --repo PATH.")
+			}
 			return 2
 		}
 		return 3
@@ -360,21 +373,30 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 			} else {
 				fmt.Fprintf(stdout, "%s is already current; no write would occur.\n", result.Path)
 			}
+			writeProjectionMeasurements(stdout, result.Metrics)
+			writeProjectionWarnings(stderr, result.Warnings)
 			return 0
 		}
 		if len(pack.Rules) == 0 && len(pack.Recipes) == 0 && len(pack.Skills) == 0 {
 			fmt.Fprintf(
 				stdout,
-				"Dry run — %s would remove its managed Software Standards Bootstrap section; proposed file:\n\n",
+				"Dry run — %s would remove its managed Software Standards Bootstrap section.\n",
 				result.Path,
 			)
-		} else {
-			fmt.Fprintf(stdout, "Dry run — proposed %s:\n\n", result.Path)
 		}
-		_, _ = stdout.Write(result.Content)
-		if len(result.Content) == 0 || result.Content[len(result.Content)-1] != '\n' {
-			fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, "Dry run — proposed render write set:")
+		writeRenderFilePreview(stdout, result.Path, result.Content)
+		if result.Routing != nil {
+			if result.Routing.Exists {
+				for _, file := range result.Routing.Files {
+					writeRenderFilePreview(stdout, file.Path, file.Content)
+				}
+			} else if result.Routing.Changed {
+				fmt.Fprintf(stdout, "--- %s (remove generated directory) ---\n", result.Routing.Path)
+			}
 		}
+		writeProjectionMeasurements(stdout, result.Metrics)
+		writeProjectionWarnings(stderr, result.Warnings)
 		return 0
 	}
 	if *reviewID != "" {
@@ -383,9 +405,17 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 			event,
 			err,
 			"render",
-			"AGENTS.md was restored",
+			"AGENTS.md and the routing tree were restored",
 			func() error {
-				return restoreFile(filepath.Join(repo.Root(), "AGENTS.md"), before)
+				agentsErr := restoreFile(filepath.Join(repo.Root(), "AGENTS.md"), before)
+				if pack.Layout != rulepack.LayoutManifest {
+					return agentsErr
+				}
+				routingErr := restoreDirectory(
+					filepath.Join(repo.Root(), filepath.FromSlash(render.RoutingDirectory)),
+					beforeRouting,
+				)
+				return errors.Join(agentsErr, routingErr)
 			},
 		)
 		if transitionErr != nil {
@@ -409,15 +439,37 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 				len(pack.Skills),
 			)
 		}
+		if result.Routing != nil && result.Routing.Changed {
+			if result.Routing.Exists {
+				fmt.Fprintf(
+					stdout,
+					"Rendered %s with %d generated routing file(s).\n",
+					result.Routing.Path,
+					len(result.Routing.Files),
+				)
+			} else {
+				fmt.Fprintf(stdout, "Removed generated routing tree %s.\n", result.Routing.Path)
+			}
+		}
 	} else {
 		fmt.Fprintf(stdout, "%s requires no write for the current actionable artifacts.\n", result.Path)
 	}
+	writeProjectionMeasurements(stdout, result.Metrics)
+	writeProjectionWarnings(stderr, result.Warnings)
 	if pack.Layout == rulepack.LayoutManifest {
 		fmt.Fprintln(stdout, "Next: review the uncommitted diff; edit digest-bound sources and update manifest.yaml SHA-256 values together.")
 	} else {
 		fmt.Fprintln(stdout, "Next: review the uncommitted diff; edit canonical artifact sources and the report manifest together.")
 	}
 	return 0
+}
+
+func writeRenderFilePreview(output io.Writer, path string, content []byte) {
+	fmt.Fprintf(output, "--- %s (%d bytes) ---\n", path, len(content))
+	_, _ = output.Write(content)
+	if len(content) == 0 || content[len(content)-1] != '\n' {
+		fmt.Fprintln(output)
+	}
 }
 
 func reconcileTransitionCompletion(
@@ -449,16 +501,18 @@ func reconcileTransitionCompletion(
 }
 
 type validationResponse struct {
-	SchemaVersion   int                   `json:"schema_version"`
-	Valid           bool                  `json:"valid"`
-	BaselineCommit  string                `json:"baseline_commit,omitempty"`
-	ArtifactCount   int                   `json:"artifact_count"`
-	RuleCount       int                   `json:"rule_count"`
-	RecipeCount     int                   `json:"verification_recipe_count"`
-	SkillCount      int                   `json:"skill_count"`
-	AutomationCount int                   `json:"automation_proposal_count"`
-	Diagnostics     []rulepack.Diagnostic `json:"diagnostics"`
-	Pack            *rulepack.Pack        `json:"pack,omitempty"`
+	SchemaVersion   int                       `json:"schema_version"`
+	Valid           bool                      `json:"valid"`
+	BaselineCommit  string                    `json:"baseline_commit,omitempty"`
+	ArtifactCount   int                       `json:"artifact_count"`
+	RuleCount       int                       `json:"rule_count"`
+	RecipeCount     int                       `json:"verification_recipe_count"`
+	SkillCount      int                       `json:"skill_count"`
+	AutomationCount int                       `json:"automation_proposal_count"`
+	Diagnostics     []rulepack.Diagnostic     `json:"diagnostics"`
+	Projection      *render.ProjectionMetrics `json:"projection,omitempty"`
+	Warnings        []render.SizeWarning      `json:"warnings"`
+	Pack            *rulepack.Pack            `json:"pack,omitempty"`
 }
 
 func runValidate(args []string, stdout, stderr io.Writer) int {
@@ -513,7 +567,15 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 	if response.Diagnostics == nil {
 		response.Diagnostics = make([]rulepack.Diagnostic, 0)
 	}
+	response.Warnings = make([]render.SizeWarning, 0)
 	if response.Valid {
+		plan, err := render.Build(pack)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: build projection diagnostics: %s\n", err)
+			return 3
+		}
+		response.Projection = &plan.Metrics
+		response.Warnings = plan.Warnings
 		response.Pack = &pack
 	}
 
@@ -535,6 +597,8 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 			response.AutomationCount,
 			response.BaselineCommit,
 		)
+		writeProjectionMeasurements(stdout, *response.Projection)
+		writeProjectionWarnings(stderr, response.Warnings)
 		fmt.Fprintln(stdout, "Next: review and edit source files, then run ssb render --repo PATH.")
 	} else {
 		writeValidationDiagnostics(stderr, diagnostics)
@@ -543,6 +607,38 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+func writeProjectionMeasurements(output io.Writer, metrics render.ProjectionMetrics) {
+	fmt.Fprintf(
+		output,
+		"Projection sizes: %s %d bytes (warning threshold %d)",
+		metrics.Root.Path,
+		metrics.Root.Bytes,
+		metrics.Root.WarningThresholdBytes,
+	)
+	if metrics.Catalog != nil {
+		fmt.Fprintf(
+			output,
+			"; %s %d bytes (warning threshold %d)",
+			metrics.Catalog.Path,
+			metrics.Catalog.Bytes,
+			metrics.Catalog.WarningThresholdBytes,
+		)
+	}
+	fmt.Fprintln(output, ".")
+}
+
+func writeProjectionWarnings(stderr io.Writer, warnings []render.SizeWarning) {
+	for _, warning := range warnings {
+		fmt.Fprintf(
+			stderr,
+			"warning: %s is %d bytes; warning threshold is %d bytes\n",
+			warning.Path,
+			warning.ActualBytes,
+			warning.ThresholdBytes,
+		)
+	}
 }
 
 func writeValidationDiagnostics(stderr io.Writer, diagnostics []rulepack.Diagnostic) {
@@ -1114,6 +1210,96 @@ type fileSnapshot struct {
 	existed bool
 	mode    os.FileMode
 	content []byte
+}
+
+type directorySnapshot struct {
+	existed bool
+	files   map[string]fileSnapshot
+}
+
+func captureDirectory(target string) (directorySnapshot, error) {
+	info, err := os.Lstat(target)
+	if errors.Is(err, os.ErrNotExist) {
+		return directorySnapshot{files: make(map[string]fileSnapshot)}, nil
+	}
+	if err != nil {
+		return directorySnapshot{}, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return directorySnapshot{}, fmt.Errorf("target is not a real directory")
+	}
+	snapshot := directorySnapshot{existed: true, files: make(map[string]fileSnapshot)}
+	err = filepath.WalkDir(target, func(current string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if current == target {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("snapshot path is a symlink")
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("snapshot path is not a regular file")
+		}
+		relative, err := filepath.Rel(target, current)
+		if err != nil {
+			return err
+		}
+		content, err := os.ReadFile(current)
+		if err != nil {
+			return err
+		}
+		snapshot.files[filepath.ToSlash(relative)] = fileSnapshot{
+			existed: true, mode: info.Mode().Perm(), content: content,
+		}
+		return nil
+	})
+	if err != nil {
+		return directorySnapshot{}, err
+	}
+	return snapshot, nil
+}
+
+func restoreDirectory(target string, snapshot directorySnapshot) error {
+	if info, err := os.Lstat(target); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("refuse to replace a non-directory rollback target")
+		}
+		if err := os.RemoveAll(target); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if !snapshot.existed {
+		return nil
+	}
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		return err
+	}
+	paths := make([]string, 0, len(snapshot.files))
+	for relative := range snapshot.files {
+		paths = append(paths, relative)
+	}
+	sort.Strings(paths)
+	for _, relative := range paths {
+		filePath := filepath.Join(target, filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+			return err
+		}
+		if err := restoreFile(filePath, snapshot.files[relative]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func captureFile(filePath string) (fileSnapshot, error) {
