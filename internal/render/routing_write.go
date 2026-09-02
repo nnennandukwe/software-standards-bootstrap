@@ -20,6 +20,8 @@ func inspectRoutingTarget(repoRoot string, routing *RoutingResult) error {
 	target := filepath.Join(repoRoot, filepath.FromSlash(routing.Path))
 	info, err := os.Lstat(target)
 	if errors.Is(err, os.ErrNotExist) {
+		routing.targetExists = false
+		routing.targetDigest = ""
 		routing.Changed = routing.Exists
 		return nil
 	}
@@ -33,6 +35,8 @@ func inspectRoutingTarget(repoRoot string, routing *RoutingResult) error {
 	if err != nil {
 		return err
 	}
+	routing.targetExists = true
+	routing.targetDigest = digestExistingRoutingTree(existing)
 	if !routing.Exists {
 		routing.Changed = true
 		return nil
@@ -194,7 +198,8 @@ func routingRelativePath(filePath string) (string, error) {
 		return "", fmt.Errorf("%w: routing output %s is outside %s", ErrUnsafeTarget, filePath, RoutingDirectory)
 	}
 	relative := strings.TrimPrefix(filePath, prefix)
-	if relative == "" || filepath.ToSlash(filepath.Clean(filepath.FromSlash(relative))) != relative || strings.HasPrefix(relative, "../") {
+	if relative == "" || strings.HasPrefix(relative, "/") || filepath.IsAbs(filepath.FromSlash(relative)) ||
+		filepath.ToSlash(filepath.Clean(filepath.FromSlash(relative))) != relative || strings.HasPrefix(relative, "../") {
 		return "", fmt.Errorf("%w: routing output path %s is unsafe", ErrUnsafeTarget, filePath)
 	}
 	return relative, nil
@@ -225,6 +230,9 @@ func publishRoutingTarget(repoRoot string, routing *RoutingResult, staged string
 	}
 	parent := filepath.Join(repoRoot, ".software-standards")
 	target := filepath.Join(repoRoot, filepath.FromSlash(routing.Path))
+	if err := verifyRoutingPrestate(target, routing); err != nil {
+		return "", err
+	}
 	backup := ""
 	if _, err := os.Lstat(target); err == nil {
 		backup, err = os.MkdirTemp(parent, ".ssb-routing-backup-*")
@@ -250,6 +258,47 @@ func publishRoutingTarget(repoRoot string, routing *RoutingResult, staged string
 		return "", fmt.Errorf("publish routing directory: %w", err)
 	}
 	return backup, nil
+}
+
+func verifyRoutingPrestate(target string, routing *RoutingResult) error {
+	info, err := os.Lstat(target)
+	if !routing.targetExists {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("inspect routing directory before publish: %w", err)
+		}
+		return fmt.Errorf("%w: routing directory appeared while rendering", ErrUnsafeTarget)
+	}
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%w: routing directory disappeared while rendering", ErrDrift)
+		}
+		return fmt.Errorf("inspect routing directory before publish: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("%w: routing directory changed while rendering", ErrUnsafeTarget)
+	}
+	existing, err := readExistingRoutingTree(target)
+	if err != nil {
+		return err
+	}
+	if digestExistingRoutingTree(existing) != routing.targetDigest {
+		return fmt.Errorf("%w: routing directory changed while rendering", ErrDrift)
+	}
+	return nil
+}
+
+func digestExistingRoutingTree(existing map[string][]byte) string {
+	files := make([]FileResult, 0, len(existing))
+	for relative, content := range existing {
+		files = append(files, FileResult{
+			Path:   RoutingDirectory + "/" + relative,
+			SHA256: digest(content),
+		})
+	}
+	return routingTreeDigest(files)
 }
 
 func rollbackRoutingTarget(repoRoot string, routing *RoutingResult, backup string) error {

@@ -90,11 +90,13 @@ type FileResult struct {
 
 // RoutingResult describes the generated portable routing tree.
 type RoutingResult struct {
-	Path       string       `json:"path"`
-	Changed    bool         `json:"changed"`
-	Exists     bool         `json:"exists"`
-	TreeDigest string       `json:"tree_digest"`
-	Files      []FileResult `json:"-"`
+	Path         string       `json:"path"`
+	Changed      bool         `json:"changed"`
+	Exists       bool         `json:"exists"`
+	TreeDigest   string       `json:"tree_digest"`
+	Files        []FileResult `json:"-"`
+	targetExists bool
+	targetDigest string
 }
 
 // Build projects a validated pack into deterministic bytes without reading or writing targets.
@@ -155,6 +157,10 @@ func sizeWarning(measurement SizeMeasurement) SizeWarning {
 // Apply renders a valid pack. It never repairs malformed markers or overwrites
 // a symlink. Dry runs return the complete proposed file without writing it.
 func Apply(repo *workspace.Repository, pack rulepack.Pack, dryRun bool) (Result, error) {
+	plan, err := Build(pack)
+	if err != nil {
+		return Result{}, err
+	}
 	target := filepath.Join(repo.Root(), "AGENTS.md")
 	existing, mode, exists, err := readTarget(target)
 	if err != nil {
@@ -166,10 +172,6 @@ func Apply(repo *workspace.Repository, pack rulepack.Pack, dryRun bool) (Result,
 			if pack.Layout == rulepack.LayoutManifest && errors.Is(err, ErrDrift) {
 				return Result{}, fmt.Errorf("%w: edit digest-bound sources and update manifest.yaml SHA-256 values instead of editing the generated section", ErrDrift)
 			}
-			return Result{}, err
-		}
-		plan, err := Build(pack)
-		if err != nil {
 			return Result{}, err
 		}
 		var routing *RoutingResult
@@ -198,28 +200,12 @@ func Apply(repo *workspace.Repository, pack rulepack.Pack, dryRun bool) (Result,
 		if dryRun || !result.Changed {
 			return result, nil
 		}
-		backupRouting, err := publishRoutingTarget(repo.Root(), routing, "")
-		if err != nil {
-			return Result{}, err
-		}
-		if agentsChanged {
-			if err := writeAtomic(target, existing, next, mode, exists); err != nil {
-				if rollbackErr := rollbackRoutingTarget(repo.Root(), routing, backupRouting); rollbackErr != nil {
-					return Result{}, fmt.Errorf("write AGENTS.md: %w; restore routing tree: %v", err, rollbackErr)
-				}
-				return Result{}, err
-			}
-		}
-		if err := discardRoutingBackup(backupRouting); err != nil {
+		if err := publishProjection(repo.Root(), routing, target, existing, next, mode, exists, agentsChanged, writeAtomic); err != nil {
 			return Result{}, err
 		}
 		return result, nil
 	}
 
-	plan, err := Build(pack)
-	if err != nil {
-		return Result{}, err
-	}
 	routing := plan.Routing
 	if routing != nil {
 		if err := inspectRoutingTarget(repo.Root(), routing); err != nil {
@@ -250,30 +236,45 @@ func Apply(repo *workspace.Repository, pack rulepack.Pack, dryRun bool) (Result,
 	if dryRun || !result.Changed {
 		return result, nil
 	}
-	var stagedRouting string
-	if routing != nil && routing.Changed && routing.Exists {
-		stagedRouting, err = stageRoutingTarget(repo.Root(), routing)
-		if err != nil {
-			return Result{}, err
-		}
-		defer func() { _ = os.RemoveAll(stagedRouting) }()
-	}
-	backupRouting, err := publishRoutingTarget(repo.Root(), routing, stagedRouting)
-	if err != nil {
-		return Result{}, err
-	}
-	if agentsChanged {
-		if err := writeAtomic(target, existing, next, mode, exists); err != nil {
-			if rollbackErr := rollbackRoutingTarget(repo.Root(), routing, backupRouting); rollbackErr != nil {
-				return Result{}, fmt.Errorf("write AGENTS.md: %w; restore routing tree: %v", err, rollbackErr)
-			}
-			return Result{}, err
-		}
-	}
-	if err := discardRoutingBackup(backupRouting); err != nil {
+	if err := publishProjection(repo.Root(), routing, target, existing, next, mode, exists, agentsChanged, writeAtomic); err != nil {
 		return Result{}, err
 	}
 	return result, nil
+}
+
+type targetWriter func(string, []byte, []byte, os.FileMode, bool) error
+
+func publishProjection(
+	repoRoot string,
+	routing *RoutingResult,
+	target string,
+	existing, next []byte,
+	mode os.FileMode,
+	exists, agentsChanged bool,
+	writeTarget targetWriter,
+) error {
+	var stagedRouting string
+	var err error
+	if routing != nil && routing.Changed && routing.Exists {
+		stagedRouting, err = stageRoutingTarget(repoRoot, routing)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = os.RemoveAll(stagedRouting) }()
+	}
+	backupRouting, err := publishRoutingTarget(repoRoot, routing, stagedRouting)
+	if err != nil {
+		return err
+	}
+	if agentsChanged {
+		if err := writeTarget(target, existing, next, mode, exists); err != nil {
+			if rollbackErr := rollbackRoutingTarget(repoRoot, routing, backupRouting); rollbackErr != nil {
+				return fmt.Errorf("write AGENTS.md: %w; restore routing tree: %v", err, rollbackErr)
+			}
+			return err
+		}
+	}
+	return discardRoutingBackup(backupRouting)
 }
 
 func buildSection(pack rulepack.Pack, routing *RoutingResult) ([]byte, string, string, error) {

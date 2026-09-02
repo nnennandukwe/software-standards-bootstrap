@@ -373,11 +373,8 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 			} else {
 				fmt.Fprintf(stdout, "%s is already current; no write would occur.\n", result.Path)
 			}
-			writeProjectionMeasurements(stdout, result.Metrics)
-			writeProjectionWarnings(stderr, result.Warnings)
-			return 0
 		}
-		if len(pack.Rules) == 0 && len(pack.Recipes) == 0 && len(pack.Skills) == 0 {
+		if result.Changed && len(pack.Rules) == 0 && len(pack.Recipes) == 0 && len(pack.Skills) == 0 {
 			fmt.Fprintf(
 				stdout,
 				"Dry run — %s would remove its managed Software Standards Bootstrap section.\n",

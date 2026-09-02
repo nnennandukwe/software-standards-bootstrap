@@ -1201,6 +1201,32 @@ func TestRenderManifestDryRunDisclosesFullDeterministicWriteSet(t *testing.T) {
 	}
 }
 
+func TestRenderManifestStableDryRunDisclosesFullDeterministicWriteSet(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := cli.Run([]string{"render", "--repo", repo}, &stdout, &stderr); code != 0 {
+		t.Fatalf("initial render failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code := cli.Run([]string{"render", "--repo", repo, "--dry-run"}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("stable manifest dry run failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	output := stdout.String()
+	rootAt := strings.Index(output, "--- AGENTS.md (")
+	catalogAt := strings.Index(output, "--- .software-standards/routing/catalog.md (")
+	bundleAt := strings.Index(output, "--- .software-standards/routing/bundles/route-")
+	if !strings.Contains(output, "AGENTS.md is already current") ||
+		!strings.Contains(output, "Dry run — proposed render write set:") ||
+		rootAt < 0 || catalogAt <= rootAt || bundleAt <= catalogAt {
+		t.Fatalf("stable dry run omitted the ordered root/catalog/bundle write set:\n%s", output)
+	}
+}
+
 func TestOrientationValidationFailureStopsBeforeAgentsMutation(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
 	writeValidManifestLayoutPack(t, repo, baseline)
