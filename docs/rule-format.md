@@ -40,6 +40,8 @@ report:
 orientation:
   path: .software-standards/orientation.yaml
   sha256: sha256:<exact-file-digest>
+root_core:
+  - keep-public-apis-compatible
 artifacts:
   - id: keep-public-apis-compatible
     kind: rule
@@ -47,11 +49,10 @@ artifacts:
     sha256: sha256:<exact-file-digest>
     category: compatibility
     lenses:
-      - kind: language
-        value: go
+      - kind: base
     directive: always
     scopes:
-      - "**/*.go"
+      - "**/*"
     derivation: extracted
     evidence:
       - role: declares
@@ -84,6 +85,11 @@ The manifest owns:
 SHA-256 values cover raw file bytes, including line endings. A manifest with
 zero artifacts is valid. Relationships name accepted IDs. Self, duplicate,
 and dangling relationships fail validation.
+
+`root_core` is an optional list of at most 16 retained semantic-rule IDs and
+defaults to empty. A selected rule must have exactly one `base` lens and the
+sole scope `**/*`; contextual, language-, framework-, task-, or path-specific
+rules fail root-core validation and remain available through routing bundles.
 
 `inventory.json` is the complete, unedited `ssb inspect --format json`
 response. Validation rejects unknown or duplicate JSON fields, enforces its
@@ -331,15 +337,20 @@ endings. Validation also replays the complete inventory at the recorded limits.
 
 ## Projection, ADR, and JSON
 
-`AGENTS.md` follows this reading order: derived ownership and lifecycle
-boundary, populated repository orientation, routing, action-first standing
-orders, contextual semantic rules, verification commands, and Agent Skills.
-Contextual rules remain link-only. Recipe steps preserve source order and show
-exact inert command bytes, non-root `working_directory`, and expected results.
-Relationships show only explicitly declared rule, recipe, and skill IDs in
-declared order. Automation remains absent. Empty, orientation-only, and
-automation-only packs do not write a managed section; rendering either leaves
-an unprojected `AGENTS.md` unchanged or removes a stale managed section.
+Manifest-layout projection writes a finite root `AGENTS.md` bootloader plus
+`.software-standards/routing/catalog.md` and exact-selector bundles beneath
+`.software-standards/routing/bundles/`. The root contains lifecycle text,
+essential orientation, routing instructions, a routing-tree digest, and only
+explicit `root_core` rule bodies. The catalog contains portable selection
+semantics and binds each bundle digest. Each artifact belongs to exactly one
+bundle keyed by its normalized scopes and lenses. Bundles inline non-root rule
+bodies and exact inert recipe steps, and link complete Agent Skills and
+canonical sources. Automation remains absent.
+
+The renderer warns without blocking when the managed root exceeds 16 KiB or
+the catalog exceeds 64 KiB. It reports exact bytes and thresholds. Empty,
+orientation-only, and automation-only manifest packs remove both stale derived
+surfaces. Embedded packs preserve the published single-file projection.
 
 An ADR includes adopted rules, recipes, and skills with category, derivation,
 confidence, utility, and concise evidence sources. It excludes automation
@@ -351,7 +362,9 @@ inventory, and report paths when separate, and includes normalized manifest,
 inventory, human report, optional orientation reference and content, and all
 four artifact arrays. Verification steps include normalized
 `working_directory`, including `.` for verification/v1 input. Invalid output
-includes diagnostics and omits the normalized pack.
+includes diagnostics and omits the normalized pack. Additive `projection`
+measurements and `warnings` expose root/catalog sizes without changing schema
+version 3; incompatible response changes require a future version bump.
 
 Presence of a safe regular `.software-standards/manifest.yaml` selects the
 manifest layout. An invalid manifest never falls back to embedded parsing. When

@@ -96,13 +96,21 @@ type ApprovalOptions struct {
 }
 
 type renderedEventPayload struct {
-	Path          string `json:"path"`
-	Changed       bool   `json:"changed"`
-	DryRun        bool   `json:"dry_run"`
-	Exists        bool   `json:"exists"`
-	SourceDigest  string `json:"source_digest"`
-	ContentDigest string `json:"content_digest"`
-	OutputDigest  string `json:"output_digest"`
+	Path          string                  `json:"path"`
+	Changed       bool                    `json:"changed"`
+	DryRun        bool                    `json:"dry_run"`
+	Exists        bool                    `json:"exists"`
+	SourceDigest  string                  `json:"source_digest"`
+	ContentDigest string                  `json:"content_digest"`
+	OutputDigest  string                  `json:"output_digest"`
+	Routing       *renderedRoutingPayload `json:"routing,omitempty"`
+}
+
+type renderedRoutingPayload struct {
+	Path       string `json:"path"`
+	Changed    bool   `json:"changed"`
+	Exists     bool   `json:"exists"`
+	TreeDigest string `json:"tree_digest"`
 }
 
 type adrEventPayload struct {
@@ -391,7 +399,7 @@ func validateReviewEvents(review Review) error {
 			if err := decodeStrictJSON(event.Payload, &payload); err != nil ||
 				payload.Path != "AGENTS.md" || payload.DryRun ||
 				!validDigest(payload.SourceDigest) || !validDigest(payload.ContentDigest) ||
-				!validDigest(payload.OutputDigest) {
+				!validDigest(payload.OutputDigest) || !validRenderedRoutingPayload(payload.Routing) {
 				return fmt.Errorf("rerender payload is invalid")
 			}
 			rendered = true
@@ -436,6 +444,11 @@ func validateReviewEvents(review Review) error {
 		seen[event.Kind] = true
 	}
 	return nil
+}
+
+func validRenderedRoutingPayload(payload *renderedRoutingPayload) bool {
+	return payload == nil ||
+		payload.Path == ".software-standards/routing" && validDigest(payload.TreeDigest)
 }
 
 func requiredRecordedChecks(proposal Proposal, approval ApprovalPayload) map[string]struct{} {

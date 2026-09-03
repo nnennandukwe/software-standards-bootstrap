@@ -1,8 +1,10 @@
 package render_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,6 +105,279 @@ func TestApplyProjectsActionFirstRulesInertCommandsAndScannableSkills(t *testing
 	}
 }
 
+func TestApplyProjectsManifestRootAndPortableRoutingWriteSet(t *testing.T) {
+	repo := committedRepository(t)
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack := actionableProjectionPack(ws.Baseline())
+	pack.Layout = rulepack.LayoutManifest
+	pack.ManifestPath = ".software-standards/manifest.yaml"
+	pack.InventoryPath = ".software-standards/inventory.json"
+	pack.ReportPath = ".software-standards/report.md"
+	pack.Manifest = rulepack.Manifest{
+		Schema: rulepack.ManifestSchema, BaselineCommit: ws.Baseline(),
+		RootCore: []string{"keep-public-apis-compatible"}, Artifacts: pack.Report.Artifacts,
+	}
+	pack.Rules[0].Scopes = []string{"**/*"}
+	pack.Orientation = projectionOrientation()
+	pack.Orientation.Guidance = append(pack.Orientation.Guidance,
+		rulepack.OrientationGuidance{Kind: "planning", Text: "Plan the change.", Evidence: pack.Orientation.Guidance[0].Evidence},
+		rulepack.OrientationGuidance{Kind: "implementation", Text: "Implement the change.", Evidence: pack.Orientation.Guidance[0].Evidence},
+		rulepack.OrientationGuidance{Kind: "verification", Text: "Verify the change.", Evidence: pack.Orientation.Guidance[0].Evidence},
+	)
+	pack.Routing = &rulepack.RoutingCatalog{
+		CatalogPath: rulepack.RoutingCatalogPath,
+		Bundles: []rulepack.RoutingBundle{
+			{ID: "route-base", Path: rulepack.RoutingBundleDirectory + "/route-base.md", Lenses: []rulepack.Lens{{Kind: "base"}}, Scopes: []string{"**/*"}, ArtifactIDs: []string{"keep-public-apis-compatible"}},
+			{ID: "route-command", Path: rulepack.RoutingBundleDirectory + "/route-command.md", Lenses: []rulepack.Lens{{Kind: "task", Value: "verification"}}, Scopes: []string{"cmd/**"}, ArtifactIDs: []string{"review-command-changes"}},
+			{ID: "route-verification", Path: rulepack.RoutingBundleDirectory + "/route-verification.md", Lenses: []rulepack.Lens{{Kind: "task", Value: "verification"}}, Scopes: []string{"**/*.go"}, ArtifactIDs: []string{"review-change", "verify-change"}},
+		},
+	}
+
+	result, err := render.Apply(ws, pack, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := string(result.Content)
+	for _, required := range []string{
+		"Keep public APIs compatible.",
+		"[routing catalog](.software-standards/routing/catalog.md)",
+		"Verify the change.",
+		"Report the result.",
+	} {
+		if !strings.Contains(root, required) {
+			t.Errorf("finite root missing %q:\n%s", required, root)
+		}
+	}
+	for _, forbidden := range []string{
+		"### Contextual semantic rules",
+		"### Verification commands",
+		"### Agent Skills",
+		"Plan the change.",
+		"Implement the change.",
+		"#### Related standards",
+	} {
+		if strings.Contains(root, forbidden) {
+			t.Errorf("finite root contains routed content %q:\n%s", forbidden, root)
+		}
+	}
+	if result.Routing == nil || result.Routing.Path != ".software-standards/routing" || len(result.Routing.Files) != 4 {
+		t.Fatalf("routing result = %#v, want catalog plus three bundles", result.Routing)
+	}
+	catalog := routingFileContent(t, result.Routing.Files, rulepack.RoutingCatalogPath)
+	for _, required := range []string{"route-base", "route-command", "route-verification", "keep-public-apis-compatible", "review-change", "verify-change"} {
+		if !strings.Contains(catalog, required) {
+			t.Errorf("catalog missing %q:\n%s", required, catalog)
+		}
+	}
+	commandBundle := routingFileContent(t, result.Routing.Files, rulepack.RoutingBundleDirectory+"/route-command.md")
+	if !strings.Contains(commandBundle, "Contextual body must stay canonical.") {
+		t.Fatalf("rule bundle lacks operational body:\n%s", commandBundle)
+	}
+	verificationBundle := routingFileContent(t, result.Routing.Files, rulepack.RoutingBundleDirectory+"/route-verification.md")
+	for _, required := range []string{"go test ./...", "Expected result:", "[Review change](../../../.agents/skills/review-change/SKILL.md)"} {
+		if !strings.Contains(verificationBundle, required) {
+			t.Errorf("verification bundle missing %q:\n%s", required, verificationBundle)
+		}
+	}
+	if baseBundle := routingFileContent(t, result.Routing.Files, rulepack.RoutingBundleDirectory+"/route-base.md"); strings.Contains(baseBundle, "Keep public APIs compatible.\n") || !strings.Contains(baseBundle, "projected in root") {
+		t.Fatalf("root-core body was duplicated in its bundle:\n%s", baseBundle)
+	}
+	if _, err := os.Lstat(filepath.Join(repo, ".software-standards", "routing")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("dry run wrote routing files: %v", err)
+	}
+}
+
+func TestApplyPublishesRoutingTreeAndBlocksDriftWithoutPartialOutput(t *testing.T) {
+	repo := committedRepository(t)
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack := actionableProjectionPack(ws.Baseline())
+	pack.Layout = rulepack.LayoutManifest
+	pack.ManifestPath = ".software-standards/manifest.yaml"
+	pack.InventoryPath = ".software-standards/inventory.json"
+	pack.ReportPath = ".software-standards/report.md"
+	pack.Manifest = rulepack.Manifest{Schema: rulepack.ManifestSchema, Artifacts: pack.Report.Artifacts}
+	attachManifestRouting(&pack)
+	if err := os.MkdirAll(filepath.Join(repo, ".software-standards"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := render.Apply(ws, pack, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.Changed || first.Routing == nil || !first.Routing.Changed {
+		t.Fatalf("first render did not publish the complete write set: %#v", first)
+	}
+	for _, file := range first.Routing.Files {
+		content, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(file.Path)))
+		if err != nil {
+			t.Fatalf("read generated %s: %v", file.Path, err)
+		}
+		if string(content) != string(file.Content) {
+			t.Fatalf("generated %s differs from planned bytes", file.Path)
+		}
+	}
+
+	second, err := render.Apply(ws, pack, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Changed || second.Routing == nil || second.Routing.Changed {
+		t.Fatalf("byte-stable rerender changed output: %#v", second)
+	}
+
+	bundlePath := filepath.Join(repo, filepath.FromSlash(first.Routing.Files[1].Path))
+	bundle, err := os.ReadFile(bundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drifted := bytes.Replace(bundle, []byte("Commands shown below"), []byte("Direct bundle edit"), 1)
+	writeFile(t, bundlePath, string(drifted))
+	agentsBefore, err := os.ReadFile(filepath.Join(repo, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalogBefore, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(rulepack.RoutingCatalogPath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = render.Apply(ws, pack, false)
+	if !errors.Is(err, render.ErrDrift) {
+		t.Fatalf("expected routing drift error, got %v", err)
+	}
+	agentsAfter, _ := os.ReadFile(filepath.Join(repo, "AGENTS.md"))
+	catalogAfter, _ := os.ReadFile(filepath.Join(repo, filepath.FromSlash(rulepack.RoutingCatalogPath)))
+	bundleAfter, _ := os.ReadFile(bundlePath)
+	if !bytes.Equal(agentsAfter, agentsBefore) || !bytes.Equal(catalogAfter, catalogBefore) || !bytes.Equal(bundleAfter, drifted) {
+		t.Fatal("failed routing render modified part of the write set")
+	}
+}
+
+func TestBuildReportsNonblockingRootAndCatalogSizeWarnings(t *testing.T) {
+	rootPack := testPack(strings.Repeat("a", 40), "large-rule", strings.Repeat("x", render.RootWarningThresholdBytes))
+	rootPlan, err := render.Build(rootPack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rootPlan.Metrics.Root.Bytes <= render.RootWarningThresholdBytes || !rootPlan.Metrics.Root.Exceeded || len(rootPlan.Warnings) != 1 {
+		t.Fatalf("root metrics = %#v warnings = %#v", rootPlan.Metrics, rootPlan.Warnings)
+	}
+
+	catalogPack := actionableProjectionPack(strings.Repeat("b", 40))
+	catalogPack.Layout = rulepack.LayoutManifest
+	catalogPack.Manifest = rulepack.Manifest{Schema: rulepack.ManifestSchema}
+	artifactIDs := make([]string, 0, 1_200)
+	for index := 0; index < 1_200; index++ {
+		id := fmt.Sprintf("route-skill-%04d", index)
+		path := fmt.Sprintf(".agents/skills/%s/SKILL.md", id)
+		artifactIDs = append(artifactIDs, id)
+		catalogPack.Manifest.Artifacts = append(catalogPack.Manifest.Artifacts, rulepack.AcceptedArtifact{
+			ID: id, Kind: "skill", Path: path, Lenses: []rulepack.Lens{{Kind: "task", Value: "implementation"}}, Scopes: []string{"**/*"},
+		})
+		catalogPack.Skills = append(catalogPack.Skills, rulepack.Skill{ID: id, Description: "Apply the routed implementation workflow.", SourcePath: path})
+	}
+	catalogPack.Routing = &rulepack.RoutingCatalog{
+		CatalogPath: rulepack.RoutingCatalogPath,
+		Bundles: []rulepack.RoutingBundle{{
+			ID: "route-large", Path: rulepack.RoutingBundleDirectory + "/route-large.md",
+			Lenses: []rulepack.Lens{{Kind: "task", Value: "implementation"}}, Scopes: []string{"**/*"}, ArtifactIDs: artifactIDs,
+		}},
+	}
+	catalogPlan, err := render.Build(catalogPack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if catalogPlan.Metrics.Catalog == nil || catalogPlan.Metrics.Catalog.Bytes <= render.CatalogWarningThresholdBytes ||
+		!catalogPlan.Metrics.Catalog.Exceeded || len(catalogPlan.Warnings) != 1 {
+		t.Fatalf("catalog metrics = %#v warnings = %#v", catalogPlan.Metrics, catalogPlan.Warnings)
+	}
+}
+
+func TestBuildKeepsThreeHundredContextualRulesOutOfFiniteRoot(t *testing.T) {
+	const contextualCount = 300
+	rootRule := rulepack.Rule{
+		ID: "preserve-offline-boundary", Title: "Preserve offline boundary", Directive: "never",
+		Category: "architecture", Lenses: []rulepack.Lens{{Kind: "base"}}, Scopes: []string{"**/*"},
+		SourcePath: ".software-standards/rules/preserve-offline-boundary.md", Body: "Do not add runtime network behavior.\n",
+	}
+	pack := rulepack.Pack{
+		Layout: rulepack.LayoutManifest, BaselineCommit: strings.Repeat("a", 40),
+		ManifestPath: ".software-standards/manifest.yaml",
+		Manifest:     rulepack.Manifest{RootCore: []string{rootRule.ID}},
+		Rules:        []rulepack.Rule{rootRule},
+	}
+	pack.Manifest.Artifacts = append(pack.Manifest.Artifacts, rulepack.AcceptedArtifact{
+		ID: rootRule.ID, Kind: "rule", Path: rootRule.SourcePath,
+		Lenses: rootRule.Lenses, Scopes: rootRule.Scopes,
+	})
+	contextualIDs := make([]string, 0, contextualCount)
+	for index := 0; index < contextualCount; index++ {
+		id := fmt.Sprintf("contextual-rule-%03d", index)
+		sourcePath := ".software-standards/rules/" + id + ".md"
+		contextualIDs = append(contextualIDs, id)
+		pack.Rules = append(pack.Rules, rulepack.Rule{
+			ID: id, Title: fmt.Sprintf("Contextual rule %03d", index), Directive: "always",
+			Category: "correctness", Lenses: []rulepack.Lens{{Kind: "language", Value: "go"}},
+			Scopes: []string{"internal/**/*.go"}, SourcePath: sourcePath,
+			Body: fmt.Sprintf("Apply contextual contract %03d.\n", index),
+		})
+		pack.Manifest.Artifacts = append(pack.Manifest.Artifacts, rulepack.AcceptedArtifact{
+			ID: id, Kind: "rule", Path: sourcePath,
+			Lenses: []rulepack.Lens{{Kind: "language", Value: "go"}}, Scopes: []string{"internal/**/*.go"},
+		})
+	}
+	pack.Routing = &rulepack.RoutingCatalog{
+		CatalogPath: rulepack.RoutingCatalogPath,
+		Bundles: []rulepack.RoutingBundle{
+			{ID: "route-root", Path: rulepack.RoutingBundleDirectory + "/route-root.md", Lenses: rootRule.Lenses, Scopes: rootRule.Scopes, ArtifactIDs: []string{rootRule.ID}},
+			{ID: "route-contextual", Path: rulepack.RoutingBundleDirectory + "/route-contextual.md", Lenses: []rulepack.Lens{{Kind: "language", Value: "go"}}, Scopes: []string{"internal/**/*.go"}, ArtifactIDs: contextualIDs},
+		},
+	}
+
+	first, err := render.Build(pack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := render.Build(pack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Metrics.Root.Bytes >= render.RootWarningThresholdBytes || first.Metrics.Root.Exceeded {
+		t.Fatalf("finite root = %#v, want below warning threshold", first.Metrics.Root)
+	}
+	root := string(first.ManagedSection)
+	if !strings.Contains(root, rootRule.Body) || strings.Contains(root, "contextual-rule-000") {
+		t.Fatalf("root core/contextual split is wrong:\n%s", root)
+	}
+	bundle := routingFileContent(t, first.Routing.Files, rulepack.RoutingBundleDirectory+"/route-contextual.md")
+	for _, id := range contextualIDs {
+		if !strings.Contains(bundle, id) {
+			t.Fatalf("contextual rule %s is not discoverable in its route bundle", id)
+		}
+	}
+	if !bytes.Equal(first.ManagedSection, second.ManagedSection) || first.Routing.TreeDigest != second.Routing.TreeDigest {
+		t.Fatal("identical inputs did not produce an identical root and routing tree")
+	}
+}
+
+func routingFileContent(t *testing.T, files []render.FileResult, target string) string {
+	t.Helper()
+	for _, file := range files {
+		if file.Path == target {
+			return string(file.Content)
+		}
+	}
+	t.Fatalf("routing output %s is missing", target)
+	return ""
+}
+
 func TestApplyKeepsOrientationDocumentLinksRepositoryRelative(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -122,6 +397,7 @@ func TestApplyKeepsOrientationDocumentLinksRepositoryRelative(t *testing.T) {
 			pack.Layout = rulepack.LayoutManifest
 			pack.Orientation = projectionOrientation()
 			pack.Orientation.Documents[0].Path = test.path
+			attachManifestRouting(&pack)
 
 			result, err := render.Apply(ws, pack, true)
 			if err != nil {
@@ -267,6 +543,7 @@ func TestApplyBindsManifestSources(t *testing.T) {
 		},
 		Artifacts: manifestLayout.Report.Artifacts,
 	}
+	attachManifestRouting(&manifestLayout)
 	manifestResult, err := render.Apply(ws, manifestLayout, true)
 	if err != nil {
 		t.Fatal(err)
@@ -341,6 +618,7 @@ func TestApplyProjectsOrientationAndBindsItToSourceIdentity(t *testing.T) {
 		Artifacts:   pack.Report.Artifacts,
 	}
 	pack.Orientation = projectionOrientation()
+	attachManifestRouting(&pack)
 
 	first, err := render.Apply(ws, pack, true)
 	if err != nil {
@@ -355,10 +633,7 @@ func TestApplyProjectsOrientationAndBindsItToSourceIdentity(t *testing.T) {
 		"#### Prerequisites",
 		"#### Canonical documents",
 		"[Contributor guide](CONTRIBUTING.md)",
-		"#### Related standards",
-		"#### Related standards\n\n- Related recipe:",
-		"Related recipe: [Verify change](.software-standards/verification/verify-change.yaml)",
-		"#### Task guidance",
+		"#### Universal guidance",
 		"**Handoff:** Report the result.",
 	} {
 		if !strings.Contains(content, required) {
@@ -433,12 +708,16 @@ func TestApplyEscapesTildeFencesAndTrimsProjectedProse(t *testing.T) {
 	pack.Orientation.Summary.Text = "~~~ Repository overview"
 	pack.Recipes[0].When = "  Before handoff.\n"
 	pack.Skills[0].Description = "  ~~~ Review a change.\n"
+	attachManifestRouting(&pack)
 
 	result, err := render.Apply(ws, pack, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	content := string(result.Content)
+	for _, file := range result.Routing.Files {
+		content += string(file.Content)
+	}
 	for _, forbidden := range []string{"\n~~~ Repository overview\n", "\n  ~~~ Review a change.\\n\n"} {
 		if strings.Contains(content, forbidden) {
 			t.Fatalf("projected prose opened a tilde fence or retained padding %q:\n%s", forbidden, content)
@@ -446,7 +725,7 @@ func TestApplyEscapesTildeFencesAndTrimsProjectedProse(t *testing.T) {
 	}
 	for _, required := range []string{
 		`\~\~\~ Repository overview`,
-		`- When: Before handoff.`,
+		`When: Before handoff.`,
 		`\~\~\~ Review a change.`,
 	} {
 		if !strings.Contains(content, required) {
@@ -469,6 +748,7 @@ func TestApplyOmitsEmptyOrientationAndRejectsMarkerInjection(t *testing.T) {
 	pack.OrientationPath = ".software-standards/orientation.yaml"
 	pack.Manifest.Orientation = rulepack.FileReference{Path: pack.OrientationPath, SHA256: "sha256:" + strings.Repeat("3", 64)}
 	pack.Orientation = &rulepack.Orientation{Schema: rulepack.OrientationSchema}
+	attachManifestRouting(&pack)
 	result, err := render.Apply(ws, pack, true)
 	if err != nil {
 		t.Fatal(err)
@@ -625,6 +905,39 @@ func TestApplyRemovesStaleSectionForNonActionablePacks(t *testing.T) {
 	}
 }
 
+func TestApplyRemovesGeneratedRoutingTreeWithEmptyManifestPack(t *testing.T) {
+	repo := committedRepository(t)
+	if err := os.MkdirAll(filepath.Join(repo, ".software-standards"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := actionableProjectionPack(ws.Baseline())
+	active.Layout = rulepack.LayoutManifest
+	attachManifestRouting(&active)
+	if _, err := render.Apply(ws, active, false); err != nil {
+		t.Fatal(err)
+	}
+	routingPath := filepath.Join(repo, filepath.FromSlash(render.RoutingDirectory))
+	if _, err := os.Stat(routingPath); err != nil {
+		t.Fatalf("initial render did not publish routing tree: %v", err)
+	}
+
+	empty := rulepack.Pack{Layout: rulepack.LayoutManifest, BaselineCommit: ws.Baseline()}
+	result, err := render.Apply(ws, empty, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Changed || result.Routing == nil || result.Routing.Exists || !result.Routing.Changed {
+		t.Fatalf("empty manifest result = %#v, want removed routing tree", result)
+	}
+	if _, err := os.Lstat(routingPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("empty manifest left routing tree behind: %v", err)
+	}
+}
+
 func actionableProjectionPack(baseline string) rulepack.Pack {
 	return rulepack.Pack{
 		BaselineCommit: baseline,
@@ -732,6 +1045,25 @@ func actionableProjectionPack(baseline string) rulepack.Pack {
 		Automations: []rulepack.AutomationProposal{{
 			ID: "automate-check", Title: "Add a checker",
 			SourcePath: ".software-standards/automation/automate-check.yaml",
+		}},
+	}
+}
+
+func attachManifestRouting(pack *rulepack.Pack) {
+	if len(pack.Manifest.Artifacts) == 0 {
+		pack.Manifest.Artifacts = append([]rulepack.AcceptedArtifact(nil), pack.Report.Artifacts...)
+	}
+	artifactIDs := make([]string, 0, len(pack.Manifest.Artifacts))
+	for _, artifact := range pack.Manifest.Artifacts {
+		if artifact.Kind != "automation" {
+			artifactIDs = append(artifactIDs, artifact.ID)
+		}
+	}
+	pack.Routing = &rulepack.RoutingCatalog{
+		CatalogPath: rulepack.RoutingCatalogPath,
+		Bundles: []rulepack.RoutingBundle{{
+			ID: "route-test", Path: rulepack.RoutingBundleDirectory + "/route-test.md",
+			Lenses: []rulepack.Lens{{Kind: "base"}}, Scopes: []string{"**/*"}, ArtifactIDs: artifactIDs,
 		}},
 	}
 }

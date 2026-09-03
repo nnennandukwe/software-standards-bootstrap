@@ -47,18 +47,22 @@ Tests cover:
 - recipe step references to exact `enforces` evidence;
 - rejection of prior rule contracts and rule-owned command/check metadata;
 - normalized response-schema-3 JSON containing orientation and all four
-  artifact kinds, with `working_directory: .` for verification/v1 steps;
-- lifecycle-first orientation, action-first base rules, contextual links,
-  exact inert verification commands, working directories, expected results,
-  relationship labels, Agent Skill indexing, and automation omission in
-  `AGENTS.md`;
+  artifact kinds, additive root/catalog measurements and warnings, normalized
+  routing groups, and `working_directory: .` for verification/v1 steps;
+- optional `root_core` limits and exact global-base eligibility;
+- a 300-contextual-rule fixture whose unchanged root core stays below 16 KiB
+  while every rule remains discoverable through exact-selector bundles;
+- deterministic finite-root, catalog, and bundle bytes; root-to-tree and
+  catalog-to-bundle digests; operational non-root rules and inert recipes;
+  Agent Skill links; and automation omission;
 - ADR inclusion of rules, recipes, and skills and exclusion of automation
   proposals;
 - zero-artifact, orientation-only, and automation-only no-write behavior;
 - orientation exclusion from artifact denominators and ADR eligibility;
-- drift, reserved or malformed markers, dynamically safe Markdown fences,
-  unsafe targets, collision-safe ADR creation, dry runs, and atomic write
-  failures; and
+- root or routing drift, reserved or malformed markers, dynamically safe
+  Markdown fences, unsafe targets, collision-safe ADR creation, complete
+  write-set dry runs, transactional write failures, and old rerender-event
+  replay; and
 - no mutation from inspection, validation, dry runs, or failed operations.
 
 ## Benchmark evidence
@@ -77,6 +81,13 @@ Orientation is repository context, not an actionable artifact. It does not
 enter the benchmark denominator or ADR eligibility. Contract snapshots for a
 generated root file use `proposal/AGENTS.proposed.md`; that inert filename
 prevents a retained benchmark fixture from becoming host instructions.
+
+For portable routing acceptance, run the implementation, verification,
+renderer, rulepack, and release scenarios in
+[agent-smoke-tests.md](agent-smoke-tests.md). Retain compact evidence with the
+exact Codex version and source commit, selected and excluded bundle/artifact
+IDs, file hashes, and command-execution state. A generated fixture or green
+unit test is not agent-host conformance evidence.
 
 The current [v0.2.0 actionable-artifact record](benchmarks/results/2026-08-17-v0.2.0-actionable/README.md)
 retains exactly one run record, final inert projection, and `Proposed` ADR per

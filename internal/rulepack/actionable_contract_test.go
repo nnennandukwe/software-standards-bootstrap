@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -156,6 +157,162 @@ func TestValidateAcceptsManifestRule(t *testing.T) {
 		rule.Directive != "always" ||
 		rule.Body != "Keep public API changes backward compatible.\n" {
 		t.Fatalf("unexpected normalized manifest-layout rule: %#v", rule)
+	}
+}
+
+func TestValidateNormalizesExplicitRootCoreAndRouting(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	fixture := writeValidManifestLayoutPack(t, repo, baseline, true)
+	manifest := strings.Replace(fixture.manifest, "artifacts:\n", "root_core:\n  - keep-public-api-compatible\nartifacts:\n", 1)
+	manifest = strings.Replace(manifest, "      - kind: language\n        value: go", "      - kind: base", 1)
+	manifest = strings.Replace(manifest, "      - \"**/*.go\"", "      - \"**/*\"", 1)
+	writeFile(t, fixture.manifestPath, manifest)
+
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+	}
+	if got := pack.Manifest.RootCore; len(got) != 1 || got[0] != "keep-public-api-compatible" {
+		t.Fatalf("root core = %#v, want explicit rule id", got)
+	}
+	if pack.Routing.CatalogPath != ".software-standards/routing/catalog.md" || len(pack.Routing.Bundles) != 1 {
+		t.Fatalf("routing = %#v, want one canonical bundle", pack.Routing)
+	}
+	bundle := pack.Routing.Bundles[0]
+	if bundle.Path == "" || len(bundle.ArtifactIDs) != 1 || bundle.ArtifactIDs[0] != "keep-public-api-compatible" ||
+		len(bundle.Lenses) != 1 || bundle.Lenses[0] != (rulepack.Lens{Kind: "base"}) ||
+		len(bundle.Scopes) != 1 || bundle.Scopes[0] != "**/*" {
+		t.Fatalf("bundle = %#v, want normalized exact selector", bundle)
+	}
+}
+
+func TestValidateRejectsInvalidRootCore(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(string) string
+		want   string
+	}{
+		{
+			name: "missing rule",
+			mutate: func(manifest string) string {
+				return strings.Replace(manifest, "artifacts:\n", "root_core: [missing-rule]\nartifacts:\n", 1)
+			},
+			want: "must resolve to a retained semantic rule",
+		},
+		{
+			name: "contextual rule",
+			mutate: func(manifest string) string {
+				return strings.Replace(manifest, "artifacts:\n", "root_core: [keep-public-api-compatible]\nartifacts:\n", 1)
+			},
+			want: "must use the sole base lens",
+		},
+		{
+			name: "path scoped base rule",
+			mutate: func(manifest string) string {
+				manifest = strings.Replace(manifest, "artifacts:\n", "root_core: [keep-public-api-compatible]\nartifacts:\n", 1)
+				return strings.Replace(manifest, "      - kind: language\n        value: go", "      - kind: base", 1)
+			},
+			want: "must use the sole repository-wide scope **/*",
+		},
+		{
+			name: "duplicate rule",
+			mutate: func(manifest string) string {
+				manifest = strings.Replace(manifest, "artifacts:\n", "root_core: [keep-public-api-compatible, keep-public-api-compatible]\nartifacts:\n", 1)
+				manifest = strings.Replace(manifest, "      - kind: language\n        value: go", "      - kind: base", 1)
+				return strings.Replace(manifest, "      - \"**/*.go\"", "      - \"**/*\"", 1)
+			},
+			want: "duplicate root core rule",
+		},
+		{
+			name: "more than sixteen rules",
+			mutate: func(manifest string) string {
+				ids := strings.TrimSuffix(strings.Repeat("keep-public-api-compatible, ", 17), ", ")
+				manifest = strings.Replace(manifest, "artifacts:\n", "root_core: ["+ids+"]\nartifacts:\n", 1)
+				manifest = strings.Replace(manifest, "      - kind: language\n        value: go", "      - kind: base", 1)
+				return strings.Replace(manifest, "      - \"**/*.go\"", "      - \"**/*\"", 1)
+			},
+			want: "maximum is 16",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			fixture := writeValidManifestLayoutPack(t, repo, baseline, true)
+			writeFile(t, fixture.manifestPath, test.mutate(fixture.manifest))
+			ws, err := workspace.Open(context.Background(), repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !diagnosticsContain(diagnostics, test.want) {
+				t.Fatalf("diagnostics = %#v, want %q", diagnostics, test.want)
+			}
+		})
+	}
+}
+
+func TestValidateGroupsArtifactsByExactSelector(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	fixture := writeValidManifestLayoutPack(t, repo, baseline, true)
+	secondRule := []byte("# Keep Go errors contextual\n\nWrap returned Go errors with operation context.\n")
+	secondEntry := fmt.Sprintf(`  - id: keep-go-errors-contextual
+    kind: rule
+    path: .software-standards/rules/keep-go-errors-contextual.md
+    sha256: %s
+    category: correctness
+    lenses:
+      - kind: language
+        value: go
+    directive: always
+    scopes:
+      - "**/*.go"
+    derivation: extracted
+    evidence:
+      - role: declares
+        path: main.go
+        lines: 1-1
+        excerpt_sha256: %s
+    confidence: high
+    utility:
+      method: ssb-utility-v1
+      total: 80
+      factors:
+        marginal_value: 25
+        risk_reduction: 20
+        actionability: 15
+        applicability: 10
+        earlier_feedback: 10
+`, digestBytes(secondRule), excerptHash("package main\n"))
+	writeFile(t, fixture.manifestPath, fixture.manifest+secondEntry)
+	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "keep-go-errors-contextual.md"), string(secondRule))
+
+	ws, err := workspace.Open(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+	}
+	if pack.Routing == nil || len(pack.Routing.Bundles) != 1 {
+		t.Fatalf("routing = %#v, want one exact-selector bundle", pack.Routing)
+	}
+	want := []string{"keep-go-errors-contextual", "keep-public-api-compatible"}
+	if !reflect.DeepEqual(pack.Routing.Bundles[0].ArtifactIDs, want) {
+		t.Fatalf("artifact ids = %#v, want %#v", pack.Routing.Bundles[0].ArtifactIDs, want)
 	}
 }
 
@@ -409,6 +566,7 @@ inventory:
 report:
   path: .software-standards/report.md
   sha256: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+root_core: [keep-rule]
 artifacts:
   - id: keep-rule
     kind: rule
@@ -464,12 +622,24 @@ artifacts:
 	}
 	if len(manifest.Artifacts) != 1 || manifest.Artifacts[0].ID != "keep-rule" ||
 		manifest.Artifacts[0].SHA256 != updatedDigest ||
+		len(manifest.RootCore) != 1 || manifest.RootCore[0] != "keep-rule" ||
 		len(manifest.Artifacts[0].RelatedArtifactIDs) != 0 ||
 		manifest.Artifacts[0].Category != "maintainability" ||
 		manifest.Artifacts[0].Directive != "prefer" ||
 		manifest.Inventory.SHA256 != "sha256:"+strings.Repeat("a", 64) ||
 		manifest.Report.SHA256 != "sha256:"+strings.Repeat("b", 64) {
 		t.Fatalf("unexpected manifest mutation: %#v", manifest)
+	}
+	withoutRootRule, err := rulepack.UpdateManifestArtifacts(result, map[string]struct{}{"keep-rule": {}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest = rulepack.Manifest{}
+	if err := yaml.Load(withoutRootRule, &manifest, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.RootCore) != 0 || len(manifest.Artifacts) != 0 {
+		t.Fatalf("removed root rule remains selected: %#v", manifest)
 	}
 }
 

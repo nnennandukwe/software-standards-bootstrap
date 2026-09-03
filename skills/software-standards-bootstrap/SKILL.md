@@ -48,29 +48,38 @@ If neither `.software-standards/manifest.yaml` nor
 Do not run `ssb inspect`, `ssb validate`, or `ssb render`, and do not rewrite
 the pack.
 
-1. Read `.software-standards/manifest.yaml` and the linked human report and
-   optional orientation for a manifest-layout pack. Inspect the inventory's
-   top-level baseline, completeness, limits, and counts plus only the file rows
-   needed to confirm active evidence. Do not load the complete raw inventory
-   into context. For an embedded-layout pack, read
-   `.software-standards/report.md` and its accepted artifact index.
-2. If the pack contains no rule, verification recipe, or Agent Skill, report
-   that it has no active guidance. Automation proposals are not active policy.
-3. Otherwise read the managed Software Standards Bootstrap section in root
-   `AGENTS.md`. Stop as stale if it is missing, malformed, or disagrees with
-   the detected manifest, human report, or canonical sources.
-4. Identify affected repository-relative paths and classify the request as
-   `planning`, `implementation`, or `verification`.
-5. Identify languages and frameworks only from the request and repository
-   evidence already available.
-6. Select base rules whose scopes match. Select contextual rules, recipes, and
-   skills only when scopes match and every represented lens dimension matches;
-   values within one dimension are alternatives.
-7. When a dimension or affected path is uncertain, load the potentially
-   relevant artifact instead of excluding it.
-8. Read the complete canonical source for every active semantic rule and Agent
-   Skill. Recipes remain links to existing commands with explicit use
-   conditions and expected results.
+1. Read the managed Software Standards Bootstrap section in root `AGENTS.md`.
+   Stop as stale if it is missing or malformed.
+2. For a manifest-layout pack, read
+   `.software-standards/routing/catalog.md`. Verify its generated markers and
+   self-digest, verify every catalog-recorded bundle SHA-256, and recompute the
+   catalog-plus-bundle tree digest as SHA-256 over compact JSON for the
+   path-sorted list of `{"path":<repository-relative path>,"sha256":<file
+   SHA-256>}` identities, including the catalog and every bundle. Use
+   repository-local file hashing that does not execute repository code. Stop
+   if it disagrees with the root digest.
+   Do not load every bundle body into context merely to hash its bytes.
+3. Identify every affected repository-relative path and classify the request
+   as `planning`, `implementation`, or `verification`. Identify languages and
+   frameworks only from the request and repository evidence already available.
+4. From catalog metadata, select a bundle when at least one scope matches and
+   every represented lens dimension matches; values within one dimension are
+   alternatives and `base` matches every task. When a dimension or affected
+   path is uncertain, include potentially relevant bundles.
+5. Read each selected bundle completely. Apply inline rule bodies and use
+   inline recipes only as inert command declarations. Read every linked Agent
+   Skill completely before following it. Canonical-source links remain the
+   editable authority; generated bundle content is derived.
+6. For an embedded-layout pack, instead read `.software-standards/report.md`,
+   its accepted index, and the complete canonical sources selected by the
+   legacy root routing instructions.
+7. If the selected projection contains no rule, verification recipe, or Agent
+   Skill, report that it has no active guidance. Automation proposals are not
+   active policy.
+
+When exact evidence confirmation is necessary, inspect only the relevant
+manifest and inventory rows at the recorded baseline. Do not load the complete
+raw inventory into context.
 
 Treat projected repository orientation as reviewed context, not active policy.
 Use it to understand the repository, important areas, prerequisites, canonical
@@ -242,6 +251,12 @@ evidence, `medium` or `high` confidence, utility of at least 45,
 relationships, and each primary file's SHA-256 digest. Hash exact raw file
 bytes, including line endings. IDs are globally unique stable kebab-case.
 
+Optionally add `root_core` with at most 16 retained semantic-rule IDs. Include
+only rules whose normalized selector is exactly the sole `base` lens and sole
+`**/*` scope, and only when the rule must be read before task routing. Omit the
+field for an empty root core. Never infer contextual, language-, framework-,
+task-, or path-specific rules into it.
+
 When orientation was retained, write `.software-standards/orientation.yaml`
 with `ssb.dev/orientation/v1`, then bind its exact raw bytes through the
 manifest `orientation` reference. Orientation is optional reviewed context.
@@ -312,13 +327,16 @@ Stop on diagnostics before projection. Do not edit the managed `AGENTS.md`
 section. When a digest-bound source changes, update its exact manifest digest,
 then rerun.
 
-The projection identifies its derived lifecycle boundary, presents populated
-orientation first, explains routing, inlines action-first base semantic rules,
-links contextual rules, displays recipe commands and expected results without
-executing them, indexes primary Agent Skills, and omits automation proposals.
-An empty, orientation-only, or automation-only pack does not create or rewrite
-an unprojected `AGENTS.md`, but removes a stale generated managed section when
-one exists.
+For manifest packs, the projection writes a finite root bootloader plus
+`.software-standards/routing/catalog.md` and digest-named bundles. The root
+contains essential orientation and only explicit `root_core` rule bodies. The
+catalog contains portable selector guidance; bundles inline non-root rules and
+inert recipes and link complete skills. Confirm `--dry-run` discloses the full
+ordered root, catalog, and bundle write set. Treat root-over-16-KiB and
+catalog-over-64-KiB messages as non-blocking size warnings, but report exact
+actual and threshold bytes. An empty, orientation-only, or automation-only
+manifest pack removes both stale derived surfaces. Embedded packs retain their
+single-file projection.
 
 ### 6. Disclose the complete uncommitted result
 
@@ -333,7 +351,7 @@ List every changed and untracked path. State explicitly:
 - no repository code or recipe command was executed;
 - no automation proposal was implemented;
 - no Git mutation was performed;
-- `AGENTS.md` is derived; and
+- `AGENTS.md` and `.software-standards/routing/` are derived; and
 - the manifest, inventory, optional orientation, report, and canonical
   artifact files are the editable sources.
 

@@ -71,6 +71,68 @@ func TestValidateReviewEventsRejectsEmptyRerenderPayload(t *testing.T) {
 	}
 }
 
+func TestVerifyRenderedPoststateBindsOptionalRoutingTreeDigest(t *testing.T) {
+	root := t.TempDir()
+	agentsPath := filepath.Join(root, "AGENTS.md")
+	catalogPath := filepath.Join(root, ".software-standards", "routing", "catalog.md")
+	bundlePath := filepath.Join(root, ".software-standards", "routing", "bundles", "route-one.md")
+	writeInternalTestFile(t, agentsPath, "generated root\n")
+	writeInternalTestFile(t, catalogPath, "generated catalog\n")
+	writeInternalTestFile(t, bundlePath, "generated bundle\n")
+	bundleDigest, err := fileDigest(bundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalogDigest, err := fileDigest(catalogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	treeDigest, err := canonicalDigest([]struct {
+		Path   string `json:"path"`
+		SHA256 string `json:"sha256"`
+	}{
+		{Path: ".software-standards/routing/bundles/route-one.md", SHA256: bundleDigest},
+		{Path: ".software-standards/routing/catalog.md", SHA256: catalogDigest},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentsDigest, err := fileDigest(agentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(renderedEventPayload{
+		Path: "AGENTS.md", Exists: true,
+		SourceDigest:  "sha256:" + strings.Repeat("a", 64),
+		ContentDigest: "sha256:" + strings.Repeat("b", 64),
+		OutputDigest:  agentsDigest,
+		Routing: &renderedRoutingPayload{
+			Path: ".software-standards/routing", Exists: true, TreeDigest: treeDigest,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := Event{Payload: payload}
+	if err := verifyRenderedPoststate(root, event); err != nil {
+		t.Fatalf("verify bound routing tree: %v", err)
+	}
+	writeInternalTestFile(t, bundlePath, "drifted bundle\n")
+	if err := verifyRenderedPoststate(root, event); err == nil || !strings.Contains(err.Error(), "routing tree") {
+		t.Fatalf("routing drift error = %v, want routing tree mismatch", err)
+	}
+}
+
+func writeInternalTestFile(t *testing.T, target, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAppendEventFailurePreservesCompletePriorLog(t *testing.T) {
 	repoRoot := t.TempDir()
 	root := filepath.Join(repoRoot, ".software-standards", "reviews", "review-one")

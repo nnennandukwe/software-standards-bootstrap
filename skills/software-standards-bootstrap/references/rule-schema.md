@@ -19,6 +19,8 @@ report:
 orientation:
   path: .software-standards/orientation.yaml
   sha256: sha256:<exact raw file digest>
+root_core:
+  - keep-public-apis-compatible
 artifacts:
   - id: keep-public-apis-compatible
     kind: rule
@@ -26,11 +28,10 @@ artifacts:
     sha256: sha256:<exact raw file digest>
     category: compatibility
     lenses:
-      - kind: language
-        value: go
+      - kind: base
     directive: always
     scopes:
-      - "**/*.go"
+      - "**/*"
     derivation: extracted
     evidence:
       - role: declares
@@ -60,6 +61,10 @@ inspection response. `report.md` starts at byte zero with
 files. It has no frontmatter or inventory rows.
 
 Accepted confidence is `medium` or `high`.
+
+`root_core` is optional, defaults to empty, and accepts at most 16 retained
+rule IDs. Each selected rule must have exactly the sole `base` lens and sole
+`**/*` scope. All contextual selectors remain routed on demand.
 
 `ssb-utility-v1` factor maxima are 30 marginal value, 25 risk reduction, 20
 actionability, 15 applicability, and 10 earlier feedback. The total must equal
@@ -233,3 +238,12 @@ Derivation is `extracted` or `inferred`. Evidence roles are `declares`,
 `demonstrates`, and `enforces`. Extracted artifacts need at least one
 `declares` or `enforces` citation. Inferred artifacts need three distinct
 `demonstrates` citations across at least two files.
+
+## Derived routing projection
+
+Manifest packs project a finite root `AGENTS.md`, one
+`.software-standards/routing/catalog.md`, and digest-named Markdown bundles.
+Artifacts with exactly equal normalized scopes and lenses share one bundle;
+each non-automation artifact appears in exactly one bundle. The catalog binds
+bundle SHA-256 values, and the root binds the path-sorted catalog-plus-bundle
+tree digest. These files are derived and are never manifest inputs.

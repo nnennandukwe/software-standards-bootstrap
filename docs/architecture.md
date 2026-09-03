@@ -136,9 +136,11 @@ evidence pinned to current `HEAD`. After an approved prune application,
 review-aware `render --review` and `adr --review` instead validate resulting
 artifacts against the pack's recorded historical baseline. A baseline that
 is not a reachable ancestor of current `HEAD` is a hard evidence
-failure, even if its Git object remains locally resolvable. The rerender event binds
-both the managed-section digest and the complete `AGENTS.md` output digest;
-verification rechecks the complete regular, non-symlink output. Rerendering is
+failure, even if its Git object remains locally resolvable. The rerender event
+binds the managed-section digest, complete `AGENTS.md` output digest, and an
+optional manifest-layout routing-tree digest; verification rechecks the root
+and every safe regular routing output. Older events without routing evidence
+remain replayable. Rerendering is
 optional for skill-only reviews, but an explicitly recorded render event is
 still bound into their verification receipts and event and therefore must
 precede verification.
@@ -223,28 +225,29 @@ Valid `ssb validate --format json` output includes the normalized pack in
 response schema 3. It reports `pack.layout` as `manifest` or `embedded` and
 exposes separate manifest, inventory, and report paths for the manifest layout.
 When referenced, it also exposes the orientation path, manifest reference, and
-normalized `ssb.dev/orientation/v1` content. Verification steps expose their
-normalized `working_directory`. Invalid output omits the pack. This is a local
-interchange boundary, not a catalog import or synchronization mechanism.
+normalized `ssb.dev/orientation/v1` content. Manifest packs also expose the
+normalized exact-selector routing catalog. Additive projection measurements
+and non-blocking size warnings remain within response schema 3. Verification
+steps expose their normalized `working_directory`. Invalid output omits the
+pack. This is a local interchange boundary, not a catalog import or
+synchronization mechanism.
 
 ### Renderer
 
-The renderer consumes an already validated `rulepack.Pack`; it never reads
-orientation files, parses YAML, resolves repository paths, or runs commands.
-It constructs one complete marked root `AGENTS.md` section before entering the
-existing atomic replacement path and preserves every pre-existing byte outside
-it.
+`rulepack.Validate` is the sole normalization seam for manifest `root_core` and
+exact scope-and-lens routing groups. The renderer consumes only the normalized
+`rulepack.Pack`; it never reads source files, parses YAML, resolves repository
+paths, or runs commands. Its pure `Build` phase returns deterministic root,
+catalog, and bundle bytes before filesystem inspection begins.
 
-The reading order is lifecycle boundary, populated repository orientation,
-routing instructions, standing orders, contextual semantic rules,
-verification commands, and Agent Skills. Base semantic rules remain ordered by
-directive, utility, and stable ID, but put the operative canonical Markdown
-body in a blockquote before metadata so body headings cannot escape the rule.
-Contextual rules remain link-only. Verification steps stay in source
-order and render exact command bytes inside dynamically safe Markdown fences;
-non-root `working_directory` and expected results are explicit. Rendering does
-not execute a command. Relationships show only explicitly declared rule,
-recipe, and skill IDs in declared order. Automation proposals remain absent.
+For manifest packs, the root is a finite bootloader: lifecycle boundary,
+essential orientation, routing instructions and tree digest, plus at most 16
+explicit repository-wide base rules. The catalog owns portable selector
+semantics and bundle digests. Each non-automation artifact belongs to exactly
+one bundle keyed by its normalized scopes and lenses. Bundles inline non-root
+rule bodies and exact inert recipe commands, working directories, and expected
+results; Agent Skills and canonical sources stay linked. Embedded packs retain
+their published single-file projection contract.
 
 The lifecycle copy distinguishes a derived unmerged proposal from review and
 merge adoption. It states that file presence is not adoption proof, and that
@@ -252,16 +255,21 @@ SSB did not stage, commit, push, open a pull request, execute any displayed
 recipe command, or activate another system. Recipe presence and expected
 results are not execution evidence.
 
-An empty, orientation-only, or automation-only pack does not create or rewrite
-an unprojected `AGENTS.md`; if a generated managed section remains from an
-earlier pack, the renderer removes that stale section and preserves all
-surrounding bytes. Embedded packs receive the common projection behavior but
-never orientation.
+Manifest publication stages the complete routing tree and replaces it with the
+root as one rollback-capable write set. Existing generated files are checked
+for markers, self-digests, unexpected paths, and symlinks before replacement.
+An empty, orientation-only, or automation-only manifest pack removes a stale
+managed section and generated routing tree while preserving human root bytes.
 
-The section stores:
+The projection stores:
 
 - a digest of the current baseline and renderable canonical sources; and
-- a self-verifying digest over the recorded source digest and generated body.
+- self-verifying content digests for root, catalog, and bundles;
+- catalog-to-bundle SHA-256 bindings; and
+- a root-to-routing-tree digest binding.
+
+Root sizes above 16 KiB and catalog sizes above 64 KiB produce non-blocking
+diagnostics with exact actual and threshold bytes.
 
 A source edit leaves the old section internally valid and allows deterministic
 replacement. A direct section edit breaks the self-digest and is reported as
@@ -294,7 +302,9 @@ status.
 | `.software-standards/verification/*.yaml` | Canonical strict verification/v1 or verification/v2 existing-command recipes | Yes | Records commands and normalized `working_directory`, never a run result |
 | `.agents/skills/*/SKILL.md` | Canonical procedural workflows | Yes | No |
 | `.software-standards/automation/*.yaml` | Reviewable proposed-check designs | Yes | Not implemented or adopted |
-| Root `AGENTS.md` managed section | Derived rule, recipe, and skill router | No | No |
+| Root `AGENTS.md` managed section | Finite derived bootloader and explicit root core | No | Source/content and routing-tree digests |
+| `.software-standards/routing/catalog.md` | Derived portable selector catalog | No | Self-digest plus bundle digests |
+| `.software-standards/routing/bundles/*.md` | Derived operational guidance grouped by exact normalized selectors | No | Self-digest and tree binding |
 | Proposed ADR | Adoption record from rules, recipes, and skills | New record only | No |
 | Review `context.json` | Complete pinned lifecycle input | No | Inventory and capability evidence |
 | Review `proposal.yaml` | Semantic dispositions, structured evidence gaps, and complete candidates | Host-authored before approval | Evidence mapping only |

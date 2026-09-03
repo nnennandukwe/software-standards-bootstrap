@@ -810,9 +810,11 @@ func TestValidateUsesExitOneForActionablePackFailuresAndNeverWrites(t *testing.T
 		t.Fatalf("valid pack failed: exit=%d stderr=%q", code, stderr.String())
 	}
 	var validResponse struct {
-		SchemaVersion int  `json:"schema_version"`
-		Valid         bool `json:"valid"`
-		RuleCount     int  `json:"rule_count"`
+		SchemaVersion int                       `json:"schema_version"`
+		Valid         bool                      `json:"valid"`
+		RuleCount     int                       `json:"rule_count"`
+		Projection    *render.ProjectionMetrics `json:"projection"`
+		Warnings      []render.SizeWarning      `json:"warnings"`
 		Pack          *struct {
 			BaselineCommit string `json:"baseline_commit"`
 			Rules          []struct {
@@ -827,6 +829,9 @@ func TestValidateUsesExitOneForActionablePackFailuresAndNeverWrites(t *testing.T
 		t.Fatal(err)
 	}
 	if validResponse.SchemaVersion != 3 || !validResponse.Valid || validResponse.RuleCount != 1 ||
+		validResponse.Projection == nil || validResponse.Projection.Root.Bytes == 0 ||
+		validResponse.Projection.Root.WarningThresholdBytes != render.RootWarningThresholdBytes ||
+		validResponse.Projection.Root.Exceeded || len(validResponse.Warnings) != 0 ||
 		validResponse.Pack == nil || validResponse.Pack.BaselineCommit != baseline ||
 		len(validResponse.Pack.Rules) != 1 ||
 		validResponse.Pack.Rules[0].Schema != rulepack.RuleSchema ||
@@ -880,8 +885,10 @@ func TestValidateJSONExportsActionableInterchangeFields(t *testing.T) {
 		t.Fatalf("valid embedded-layout pack failed: exit=%d stderr=%q", code, stderr.String())
 	}
 	var response struct {
-		SchemaVersion int  `json:"schema_version"`
-		Valid         bool `json:"valid"`
+		SchemaVersion int                       `json:"schema_version"`
+		Valid         bool                      `json:"valid"`
+		Projection    *render.ProjectionMetrics `json:"projection"`
+		Warnings      []render.SizeWarning      `json:"warnings"`
 		Pack          *struct {
 			Layout   rulepack.Layout `json:"layout"`
 			Manifest struct {
@@ -961,8 +968,10 @@ func TestValidateJSONReportsManifestLayout(t *testing.T) {
 		t.Fatalf("valid manifest-layout pack failed: exit=%d stderr=%q", code, stderr.String())
 	}
 	var response struct {
-		SchemaVersion int  `json:"schema_version"`
-		Valid         bool `json:"valid"`
+		SchemaVersion int                       `json:"schema_version"`
+		Valid         bool                      `json:"valid"`
+		Projection    *render.ProjectionMetrics `json:"projection"`
+		Warnings      []render.SizeWarning      `json:"warnings"`
 		Pack          *struct {
 			Layout        rulepack.Layout `json:"layout"`
 			ManifestPath  string          `json:"manifest_path"`
@@ -980,7 +989,8 @@ func TestValidateJSONReportsManifestLayout(t *testing.T) {
 			Report struct {
 				Body string `json:"body"`
 			} `json:"report"`
-			Rules []rulepack.Rule `json:"rules"`
+			Rules   []rulepack.Rule          `json:"rules"`
+			Routing *rulepack.RoutingCatalog `json:"routing"`
 		} `json:"pack"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
@@ -996,7 +1006,12 @@ func TestValidateJSONReportsManifestLayout(t *testing.T) {
 		len(response.Pack.Manifest.Artifacts) != 1 ||
 		response.Pack.Inventory.BaselineCommit != baseline || response.Pack.Inventory.IndexedFiles != 2 ||
 		!strings.HasPrefix(response.Pack.Report.Body, "# Software standards report") ||
-		len(response.Pack.Rules) != 1 || response.Pack.Rules[0].Title != "Verify before merge" {
+		len(response.Pack.Rules) != 1 || response.Pack.Rules[0].Title != "Verify before merge" ||
+		response.Pack.Routing == nil || len(response.Pack.Routing.Bundles) != 1 ||
+		response.Projection == nil || response.Projection.Catalog == nil ||
+		response.Projection.Root.WarningThresholdBytes != render.RootWarningThresholdBytes ||
+		response.Projection.Catalog.WarningThresholdBytes != render.CatalogWarningThresholdBytes ||
+		len(response.Warnings) != 0 {
 		t.Fatalf("unexpected schema 3 manifest-layout response: %#v\n%s", response, stdout.String())
 	}
 	if strings.Contains(stdout.String(), `"report": {\n      "schema":`) {
@@ -1157,6 +1172,61 @@ func TestRenderDryRunAndValidationFailureHaveNoFilesystemEffects(t *testing.T) {
 	}
 }
 
+func TestRenderManifestDryRunDisclosesFullDeterministicWriteSet(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := cli.Run([]string{"render", "--repo", repo, "--dry-run"}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("manifest dry run failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	output := stdout.String()
+	rootAt := strings.Index(output, "--- AGENTS.md (")
+	catalogAt := strings.Index(output, "--- .software-standards/routing/catalog.md (")
+	bundleAt := strings.Index(output, "--- .software-standards/routing/bundles/route-")
+	if !strings.Contains(output, "Dry run - proposed render write set:") ||
+		rootAt < 0 || catalogAt <= rootAt || bundleAt <= catalogAt ||
+		!strings.Contains(output, "# Software Standards Bootstrap routing catalog") {
+		t.Fatalf("dry run did not disclose the ordered root/catalog/bundle write set:\n%s", output)
+	}
+	for _, path := range []string{
+		filepath.Join(repo, "AGENTS.md"),
+		filepath.Join(repo, ".software-standards", "routing"),
+	} {
+		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("manifest dry run created %s: %v", path, err)
+		}
+	}
+}
+
+func TestRenderManifestStableDryRunDisclosesFullDeterministicWriteSet(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := cli.Run([]string{"render", "--repo", repo}, &stdout, &stderr); code != 0 {
+		t.Fatalf("initial render failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code := cli.Run([]string{"render", "--repo", repo, "--dry-run"}, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("stable manifest dry run failed: exit=%d stderr=%q", code, stderr.String())
+	}
+	output := stdout.String()
+	rootAt := strings.Index(output, "--- AGENTS.md (")
+	catalogAt := strings.Index(output, "--- .software-standards/routing/catalog.md (")
+	bundleAt := strings.Index(output, "--- .software-standards/routing/bundles/route-")
+	if !strings.Contains(output, "AGENTS.md is already current") ||
+		!strings.Contains(output, "Dry run - proposed render write set:") ||
+		rootAt < 0 || catalogAt <= rootAt || bundleAt <= catalogAt {
+		t.Fatalf("stable dry run omitted the ordered root/catalog/bundle write set:\n%s", output)
+	}
+}
+
 func TestOrientationValidationFailureStopsBeforeAgentsMutation(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
 	writeValidManifestLayoutPack(t, repo, baseline)
@@ -1298,6 +1368,8 @@ func TestRenderGuidesManifestDigestUpdate(t *testing.T) {
 		t.Fatalf("render failed: exit=%d stderr=%q", code, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "update manifest.yaml SHA-256 values") ||
+		!strings.Contains(stdout.String(), ".software-standards/routing") ||
+		!strings.Contains(stdout.String(), "2 generated routing file(s)") ||
 		strings.Contains(stdout.String(), "report manifest together") {
 		t.Fatalf("manifest-layout render guidance is stale:\n%s", stdout.String())
 	}
@@ -1307,11 +1379,11 @@ func TestRenderGuidesManifestDigestUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, agentsPath, strings.Replace(string(rendered), "Run the repository verification command", "Direct section edit", 1))
+	writeFile(t, agentsPath, strings.Replace(string(rendered), "Baseline:", "Direct section edit:", 1))
 	stdout.Reset()
 	stderr.Reset()
 	code = cli.Run([]string{"render", "--repo", repo}, &stdout, &stderr)
-	if code != 2 || !strings.Contains(stderr.String(), "update manifest.yaml SHA-256 values") ||
+	if code != 2 || !strings.Contains(stderr.String(), "restore generated AGENTS.md and .software-standards/routing") ||
 		strings.Contains(stderr.String(), "sources and report.md") {
 		t.Fatalf("manifest-layout drift recovery is stale: exit=%d stderr=%q", code, stderr.String())
 	}
