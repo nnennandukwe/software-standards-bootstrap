@@ -2,6 +2,7 @@ package render
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -121,6 +122,34 @@ func TestGeneratedRoutingTreeRejectsOutputAboveInspectionLimits(t *testing.T) {
 			t.Fatalf("validation error = %v, want generated file-count rejection", err)
 		}
 	})
+}
+
+func TestGeneratedRoutingTreeRejectsCatalogBundleDigestMismatch(t *testing.T) {
+	const bundlePath = "bundles/route-test.md"
+	bundle := testRoutingCatalog(t, "bundle")
+	validCatalog := testRoutingCatalogWithBundle(t, bundlePath, digest(bundle))
+	valid := &RoutingResult{
+		Path: RoutingDirectory, Exists: true,
+		Files: []FileResult{
+			{Path: RoutingDirectory + "/catalog.md", Content: validCatalog},
+			{Path: RoutingDirectory + "/" + bundlePath, Content: bundle},
+		},
+	}
+	if err := validateGeneratedRoutingTree(valid); err != nil {
+		t.Fatalf("valid generated routing tree failed integrity validation: %v", err)
+	}
+
+	invalidCatalog := testRoutingCatalogWithBundle(t, bundlePath, "sha256:"+strings.Repeat("0", 64))
+	invalid := &RoutingResult{
+		Path: RoutingDirectory, Exists: true,
+		Files: []FileResult{
+			{Path: RoutingDirectory + "/catalog.md", Content: invalidCatalog},
+			{Path: RoutingDirectory + "/" + bundlePath, Content: bundle},
+		},
+	}
+	if err := validateGeneratedRoutingTree(invalid); !errors.Is(err, ErrDrift) {
+		t.Fatalf("validation error = %v, want catalog bundle digest drift", err)
+	}
 }
 
 func TestMakeTempDirRemovesDirectoryWhenChmodFails(t *testing.T) {
@@ -578,6 +607,21 @@ func TestStageRoutingTargetRejectsStandardsParentSymlink(t *testing.T) {
 func testRoutingCatalog(t *testing.T, version string) []byte {
 	t.Helper()
 	catalog, err := wrapRoutingFile(struct{ Version string }{version}, []byte("# "+version+" catalog\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return catalog
+}
+
+func testRoutingCatalogWithBundle(t *testing.T, bundlePath, bundleDigest string) []byte {
+	t.Helper()
+	body := fmt.Sprintf(
+		"# Catalog\n\n## Bundles\n\n### [route-test](%s)\n\n"+
+			"- Scopes: `**/*`\n- Lenses: `base`\n- SHA-256: `%s`\n- Artifacts:\n",
+		bundlePath,
+		bundleDigest,
+	)
+	catalog, err := wrapRoutingFile(struct{ Version string }{"catalog-with-bundle"}, []byte(body))
 	if err != nil {
 		t.Fatal(err)
 	}

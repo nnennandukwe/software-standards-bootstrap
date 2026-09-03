@@ -13,7 +13,13 @@ import (
 	"strings"
 )
 
-var catalogBundleLinkPattern = regexp.MustCompile(`\]\((bundles/[^)]+\.md)\)`)
+var (
+	catalogBundleLinkPattern   = regexp.MustCompile(`\]\((bundles/[^)]+\.md)\)`)
+	catalogBundleDigestPattern = regexp.MustCompile(
+		"(?m)^### [^\\n]*\\]\\((bundles/[^)\\n]+\\.md)\\)\\n\\n" +
+			"- Scopes: [^\\n]*\\n- Lenses: [^\\n]*\\n- SHA-256: `(sha256:[0-9a-f]{64})`$",
+	)
+)
 
 const (
 	maxRoutingFileBytes = int64(8 << 20)
@@ -216,6 +222,14 @@ func validateRoutingCatalogReferences(files map[string][]byte) error {
 	for _, match := range catalogBundleLinkPattern.FindAllSubmatch(catalog, -1) {
 		referenced[string(match[1])] = struct{}{}
 	}
+	recordedDigests := make(map[string]string, len(referenced))
+	for _, match := range catalogBundleDigestPattern.FindAllSubmatch(catalog, -1) {
+		relative := string(match[1])
+		if _, exists := recordedDigests[relative]; exists {
+			return fmt.Errorf("%w: routing catalog repeats bundle digest for %s", ErrDrift, relative)
+		}
+		recordedDigests[relative] = string(match[2])
+	}
 	for relative := range files {
 		if relative == "catalog.md" {
 			continue
@@ -225,8 +239,22 @@ func validateRoutingCatalogReferences(files map[string][]byte) error {
 		}
 	}
 	for relative := range referenced {
-		if _, exists := files[relative]; !exists {
+		content, exists := files[relative]
+		if !exists {
 			return fmt.Errorf("%w: routing catalog references missing bundle %s", ErrDrift, relative)
+		}
+		recorded, exists := recordedDigests[relative]
+		if !exists {
+			return fmt.Errorf("%w: routing catalog has no SHA-256 for bundle %s", ErrDrift, relative)
+		}
+		if actual := digest(content); recorded != actual {
+			return fmt.Errorf(
+				"%w: routing catalog SHA-256 for bundle %s is %s, want %s",
+				ErrDrift,
+				relative,
+				recorded,
+				actual,
+			)
 		}
 	}
 	return nil
