@@ -71,6 +71,49 @@ func TestInspectGuidesManifestGeneration(t *testing.T) {
 	}
 }
 
+func TestValidateMissingPackGuidesManifestGeneration(t *testing.T) {
+	repo := committedRepository(t)
+	for _, format := range []string{"text", "json"} {
+		t.Run(format, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := cli.Run([]string{"validate", "--repo", repo, "--format", format}, &stdout, &stderr)
+			if code != 1 {
+				t.Fatalf("exit = %d, want 1; stderr = %q", code, stderr.String())
+			}
+			guidance := stderr.String()
+			if format == "json" {
+				var response struct {
+					Valid       bool `json:"valid"`
+					Diagnostics []struct {
+						Recovery string `json:"recovery"`
+					} `json:"diagnostics"`
+				}
+				if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+					t.Fatal(err)
+				}
+				invalidResponse := response.Valid || len(response.Diagnostics) != 1
+				if invalidResponse || stderr.Len() != 0 {
+					t.Fatalf("unexpected result: stdout=%q stderr=%q", stdout.String(), stderr.String())
+				}
+				guidance = response.Diagnostics[0].Recovery
+			} else if stdout.Len() != 0 {
+				t.Fatalf("unexpected stdout: %q", stdout.String())
+			}
+			for _, required := range []string{
+				"ssb inspect", "software-standards-bootstrap skill",
+				"manifest.yaml", "inventory.json", "report.md",
+			} {
+				if !strings.Contains(guidance, required) {
+					t.Errorf("missing %q in recovery: %s", required, guidance)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(repo, ".software-standards")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("validation created a pack: %v", err)
+			}
+		})
+	}
+}
+
 func TestInspectFailsClosedOnPartialCoverageUnlessExplicitlyAllowed(t *testing.T) {
 	repo := committedRepository(t)
 	writeFile(t, filepath.Join(repo, "SECOND.md"), "second\n")

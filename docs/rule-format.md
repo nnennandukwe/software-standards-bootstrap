@@ -132,7 +132,7 @@ areas:
         lines: 160-210
         excerpt_sha256: sha256:<64-lowercase-hex>
 prerequisites:
-  - requirement: Go 1.26.5
+  - requirement: Go 1.26.9
     evidence:
       - role: declares
         path: go.mod

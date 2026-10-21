@@ -1425,7 +1425,9 @@ func validateEmbeddedLayoutPack(
 				".software-standards",
 				"file",
 				".software-standards does not exist",
-				"create .software-standards/report.md and rerun ssb validate",
+				"run ssb inspect --repo PATH --format json, then use the software-standards-bootstrap skill "+
+					"to generate the manifest-layout pack (manifest.yaml, inventory.json, and report.md); "+
+					"rerun ssb validate --repo PATH",
 			))
 			return pack, diagnostics, nil
 		}
