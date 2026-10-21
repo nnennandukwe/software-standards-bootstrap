@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Every change listed for the release is reviewed and merged to `main`.
-- `go test ./...`, `go test -race ./...`, `go vet ./...`, `go build ./cmd/ssb`, and `go tool govulncheck ./...` pass on Go 1.26.5.
+- `go test ./...`, `go test -race ./...`, `go vet ./...`, `go build ./cmd/ssb`, and `go tool govulncheck ./...` pass on Go 1.26.9.
 - The pinned release-configuration preflight below passes.
 - CI has built and tested macOS, Linux, and Windows.
 - Pinned public benchmark results meet the evidence and retention thresholds.
@@ -37,7 +37,7 @@ The release workflow:
 
 1. reruns tests, race tests, vet, and vulnerability scanning;
 2. extracts the tagged version's section from `CHANGELOG.md` as curated release notes;
-3. builds CGO-free macOS, Linux, and Windows archives with Go 1.26.5;
+3. builds CGO-free macOS, Linux, and Windows archives with Go 1.26.9;
 4. generates `checksums.txt` with SHA-256;
 5. generates one SPDX JSON SBOM per archive with pinned Syft;
 6. uploads all assets and the curated notes to a draft GitHub release;

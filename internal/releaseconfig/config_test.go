@@ -54,7 +54,7 @@ func TestReleaseConfigurationKeepsToolchainTargetsAndAttestationGates(t *testing
 	goVersion := strings.TrimSpace(readText(t, filepath.Join(root, ".go-version")))
 
 	for _, required := range []string{
-		"go-version: 1.26.5",
+		"go-version: 1.26.9",
 		"id-token: write",
 		"attestations: write",
 		"subject-checksums: dist/checksums.txt",
@@ -71,11 +71,11 @@ func TestReleaseConfigurationKeepsToolchainTargetsAndAttestationGates(t *testing
 			t.Errorf("release workflow missing %q", required)
 		}
 	}
-	if goVersion != "1.26.5" {
-		t.Errorf(".go-version = %q, want 1.26.5", goVersion)
+	if goVersion != "1.26.9" {
+		t.Errorf(".go-version = %q, want 1.26.9", goVersion)
 	}
 	for _, required := range []string{
-		"go 1.26.5",
+		"go 1.26.9",
 		"tool golang.org/x/vuln/cmd/govulncheck",
 	} {
 		if !strings.Contains(goMod, required) {

@@ -4,7 +4,7 @@ Thank you for helping improve Software Standards Bootstrap.
 
 ## Development setup
 
-Install Go 1.26.5 and Git 2.39 or newer, then run:
+Install Go 1.26.9 and Git 2.39 or newer, then run:
 
 ```bash
 go mod download

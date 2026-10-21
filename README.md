@@ -87,7 +87,7 @@ The matching `.zip` is also available from the
 [published releases](https://github.com/nnennandukwe/software-standards-bootstrap/releases)
 for a manual install.
 
-With Go 1.26.5 installed, the CLI alone can also be installed from source:
+With Go 1.26.9 installed, the CLI alone can also be installed from source:
 
 ```bash
 go install github.com/nnennandukwe/software-standards-bootstrap/cmd/ssb@v0.2.0
@@ -294,7 +294,7 @@ It does not provide a generic rules catalog, invent standards without repository
 - No tracked or staged working-tree changes
 - A compatible coding agent that can use the bundled Agent Skill
 
-Go 1.26.5 is required only when building `ssb` from source.
+Go 1.26.9 is required only when building `ssb` from source.
 
 Untracked files are allowed during inspection.
 
