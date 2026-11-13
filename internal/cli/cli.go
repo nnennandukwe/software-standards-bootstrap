@@ -269,7 +269,7 @@ func runADR(ctx context.Context, args []string, stdout, stderr io.Writer) (exitC
 		return 0
 	}
 	if *reviewID != "" {
-		event, err := transition.Complete(ctx, result)
+		event, err := transition.Complete(context.WithoutCancel(ctx), result)
 		transitionErr := reconcileTransitionCompletion(
 			event,
 			err,
@@ -439,7 +439,15 @@ func runRender(ctx context.Context, args []string, stdout, stderr io.Writer) (ex
 		if pack.Layout == rulepack.LayoutManifest {
 			afterRouting = projectedRoutingSnapshot(beforeRouting, result.Routing)
 		}
-		event, err := transition.Complete(ctx, result)
+		completionContext := ctx
+		if result.Changed {
+			completionContext = context.WithoutCancel(ctx)
+		}
+		event, err := transition.Complete(completionContext, result)
+		isCompletionCanceled := errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+		if !result.Changed && isCompletionCanceled {
+			return writePruneError(stderr, err)
+		}
 		transitionErr := reconcileTransitionCompletion(
 			event,
 			err,

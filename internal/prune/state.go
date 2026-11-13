@@ -207,6 +207,9 @@ func BeginTransition(ctx context.Context, repoPath string, options TransitionOpt
 }
 
 // Complete appends the transition result and releases the review lock.
+// After publishing files, a caller passes context.WithoutCancel(ctx) so event
+// recording finishes in the same bounded sequence. A no-op keeps its caller
+// context so cancellation can still stop the event write.
 func (transition *Transition) Complete(ctx context.Context, payload any) (Event, error) {
 	if transition.done {
 		return Event{}, fmt.Errorf("transition is already complete")
@@ -219,7 +222,7 @@ func (transition *Transition) Complete(ctx context.Context, payload any) (Event,
 		transition.now = time.Now
 	}
 	event := newEvent(transition.review, transition.kind, data, transition.now().UTC())
-	if err := appendEvent(context.WithoutCancel(ctx), transition.review, event); err != nil {
+	if err := appendEvent(ctx, transition.review, event); err != nil {
 		return Event{}, err
 	}
 	transition.done = true

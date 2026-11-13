@@ -12,7 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/adr"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/prune"
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/render"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/rulepack"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/workspace"
 	"go.yaml.in/yaml/v4"
@@ -293,5 +295,142 @@ func TestCancellationDuringCandidateAndResultingRuleEvidence(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestCanceledNoOpRenderDoesNotConsumeTransition(t *testing.T) {
+	root := cancellationRemovalReview(t)
+	approveCancellationReview(t, root)
+	if _, err := prune.Apply(t.Context(), root, prune.ApplyOptions{ReviewID: "review-one", Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := workspace.Open(t.Context(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack, diagnostics, err := rulepack.ValidateRetainedPack(t.Context(), repo)
+	if err != nil || len(diagnostics) != 0 {
+		t.Fatalf("retained pack = %v, %v", diagnostics, err)
+	}
+	if _, err := render.Apply(t.Context(), repo, pack, false); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	transition, err := prune.BeginTransition(ctx, root, prune.TransitionOptions{
+		ReviewID: "review-one", Kind: prune.EventRendered,
+		Now: func() time.Time { cancel(); return time.Now() },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = transition.Cancel() })
+	result, err := render.Apply(ctx, repo, pack, false)
+	if err != nil || result.Changed {
+		t.Fatalf("expected no-op render: %+v, %v", result, err)
+	}
+	_, completionErr := transition.Complete(ctx, result)
+	if err := transition.Cancel(); err != nil {
+		t.Fatal(err)
+	}
+	status, _, err := prune.ReviewStatus(t.Context(), root, "review-one")
+	if !errors.Is(completionErr, context.Canceled) || err != nil || status.Rendered {
+		t.Fatalf("canceled no-op advanced review: completion=%v status=%+v read=%v", completionErr, status, err)
+	}
+	retry, err := prune.BeginTransition(t.Context(), root, prune.TransitionOptions{ReviewID: "review-one", Kind: prune.EventRendered})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = retry.Cancel() })
+	if _, err := retry.Complete(t.Context(), result); err != nil {
+		t.Fatal(err)
+	}
+	status, _, err = prune.ReviewStatus(t.Context(), root, "review-one")
+	if err != nil || !status.Rendered {
+		t.Fatalf("no-op retry didn't complete: %+v, %v", status, err)
+	}
+}
+
+func TestPublishedRenderCompletesEventAfterCancellation(t *testing.T) {
+	root := cancellationRemovalReview(t)
+	approveCancellationReview(t, root)
+	if _, err := prune.Apply(t.Context(), root, prune.ApplyOptions{ReviewID: "review-one", Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := workspace.Open(t.Context(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack, diagnostics, err := rulepack.ValidateRetainedPack(t.Context(), repo)
+	if err != nil || len(diagnostics) != 0 {
+		t.Fatalf("retained pack = %v, %v", diagnostics, err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	transition, err := prune.BeginTransition(ctx, root, prune.TransitionOptions{
+		ReviewID: "review-one", Kind: prune.EventRendered,
+		Now: func() time.Time { cancel(); return time.Now() },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = transition.Cancel() })
+	result, err := render.Apply(ctx, repo, pack, false)
+	if err != nil || !result.Changed {
+		t.Fatalf("expected publication: %+v, %v", result, err)
+	}
+	event, err := transition.Complete(context.WithoutCancel(ctx), result)
+	if err != nil || event.EventDigest == "" || ctx.Err() != context.Canceled {
+		t.Fatalf("bounded completion: event=%+v error=%v caller=%v", event, err, ctx.Err())
+	}
+	status, _, err := prune.ReviewStatus(t.Context(), root, "review-one")
+	if err != nil || !status.Rendered {
+		t.Fatalf("published render event missing: %+v, %v", status, err)
+	}
+	content, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil || string(content) != string(result.Content) {
+		t.Fatalf("published render changed: %v", err)
+	}
+}
+
+func TestPublishedADRCompletesEventAfterCancellation(t *testing.T) {
+	root := cancellationRemovalReview(t)
+	approveCancellationReview(t, root)
+	if _, err := prune.Apply(t.Context(), root, prune.ApplyOptions{ReviewID: "review-one", Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := workspace.Open(t.Context(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack, diagnostics, err := rulepack.ValidateRetainedPack(t.Context(), repo)
+	if err != nil || len(diagnostics) != 0 {
+		t.Fatalf("retained pack = %v, %v", diagnostics, err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	transition, err := prune.BeginTransition(ctx, root, prune.TransitionOptions{
+		ReviewID: "review-one", Kind: prune.EventADR,
+		Now: func() time.Time { cancel(); return time.Now() },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = transition.Cancel() })
+	result, err := adr.Create(ctx, repo, pack, adr.Options{})
+	if err != nil || !result.Created {
+		t.Fatalf("expected ADR publication: %+v, %v", result, err)
+	}
+	event, err := transition.Complete(context.WithoutCancel(ctx), result)
+	if err != nil || event.EventDigest == "" || ctx.Err() != context.Canceled {
+		t.Fatalf("bounded completion: event=%+v error=%v caller=%v", event, err, ctx.Err())
+	}
+	status, _, err := prune.ReviewStatus(t.Context(), root, "review-one")
+	if err != nil || !status.ADRRecorded {
+		t.Fatalf("published ADR event missing: %+v, %v", status, err)
+	}
+	content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(result.Path)))
+	if err != nil || string(content) != string(result.Content) {
+		t.Fatalf("published ADR changed: %v", err)
 	}
 }
