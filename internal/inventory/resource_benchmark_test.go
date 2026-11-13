@@ -1,7 +1,6 @@
 package inventory
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -28,12 +27,12 @@ func TestScanRejectsAFileBoundaryLargerThanTheBatchByteCeiling(t *testing.T) {
 	runFixtureGit(t, repo, "add", "README.md")
 	runFixtureGit(t, repo, "commit", "-m", "fixture")
 
-	ws, err := workspace.OpenForInspect(context.Background(), repo)
+	ws, err := workspace.OpenForInspect(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = scan(
-		context.Background(),
+		t.Context(),
 		ws,
 		Limits{
 			MaxCandidateFiles: 10,
@@ -78,10 +77,10 @@ func BenchmarkBatchPolicies(b *testing.B) {
 			name := fmt.Sprintf("%d_entries_%d_mib", maxEntries, maxBytes>>20)
 			b.Run(name, func(b *testing.B) {
 				b.ReportAllocs()
-				for range b.N {
+				for b.Loop() {
 					for _, repo := range repositories {
 						report, err := scan(
-							context.Background(),
+							b.Context(),
 							repo,
 							DefaultLimits(),
 							policy,

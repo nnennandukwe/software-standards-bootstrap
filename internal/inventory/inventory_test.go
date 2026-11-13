@@ -1,7 +1,6 @@
 package inventory_test
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -23,11 +22,11 @@ func TestScanBudgetsEveryCandidateBeforeContentExclusion(t *testing.T) {
 	git(t, repo, "add", ".")
 	git(t, repo, "commit", "-m", "fixture")
 
-	ws, err := workspace.OpenForInspect(context.Background(), repo)
+	ws, err := workspace.OpenForInspect(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := inventory.Scan(context.Background(), ws, inventory.Limits{
+	report, err := inventory.Scan(t.Context(), ws, inventory.Limits{
 		MaxCandidateFiles: 2,
 		MaxCandidateBytes: 1 << 20,
 		MaxFileBytes:      1 << 10,
@@ -74,11 +73,11 @@ func TestScanForPruneAllowsExistingCommittedPack(t *testing.T) {
 	git(t, repo, "add", ".")
 	git(t, repo, "commit", "-m", "adopt standards")
 
-	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	ws, err := workspace.OpenForPrune(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := inventory.ScanForPrune(context.Background(), ws, inventory.DefaultLimits())
+	report, err := inventory.ScanForPrune(t.Context(), ws, inventory.DefaultLimits())
 	if err != nil {
 		t.Fatalf("prune scan rejected an adopted pack: %v", err)
 	}
@@ -94,11 +93,11 @@ func TestScanIncludesExactCandidateByteBoundaryAndStopsBeforeNextBlob(t *testing
 	git(t, repo, "add", ".")
 	git(t, repo, "commit", "-m", "fixture")
 
-	ws, err := workspace.OpenForInspect(context.Background(), repo)
+	ws, err := workspace.OpenForInspect(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := inventory.Scan(context.Background(), ws, inventory.Limits{
+	report, err := inventory.Scan(t.Context(), ws, inventory.Limits{
 		MaxCandidateFiles: 10,
 		MaxCandidateBytes: 2,
 		MaxFileBytes:      1 << 10,
@@ -134,11 +133,11 @@ func TestScanReportsFileLimitWhenFileAndByteBudgetsBothBlockNextCandidate(t *tes
 	git(t, repo, "add", ".")
 	git(t, repo, "commit", "-m", "fixture")
 
-	ws, err := workspace.OpenForInspect(context.Background(), repo)
+	ws, err := workspace.OpenForInspect(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := inventory.Scan(context.Background(), ws, inventory.Limits{
+	report, err := inventory.Scan(t.Context(), ws, inventory.Limits{
 		MaxCandidateFiles: 1,
 		MaxCandidateBytes: 2,
 		MaxFileBytes:      1 << 10,
@@ -185,11 +184,11 @@ func TestScanIndexesOnlySafeTrackedRegularFilesAtTheBaseline(t *testing.T) {
 	git(t, repo, "add", ".")
 	git(t, repo, "commit", "-m", "fixture")
 
-	ws, err := workspace.OpenForInspect(context.Background(), repo)
+	ws, err := workspace.OpenForInspect(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := inventory.Scan(context.Background(), ws, inventory.Limits{
+	report, err := inventory.Scan(t.Context(), ws, inventory.Limits{
 		MaxCandidateFiles: 100,
 		MaxCandidateBytes: 1 << 20,
 		MaxFileBytes:      64,
@@ -231,11 +230,11 @@ func TestScanCountsSubmodulesWithoutDescendingIntoThem(t *testing.T) {
 	git(t, repo, "add", ".")
 	git(t, repo, "commit", "-m", "parent with submodule")
 
-	ws, err := workspace.OpenForInspect(context.Background(), repo)
+	ws, err := workspace.OpenForInspect(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := inventory.Scan(context.Background(), ws, inventory.DefaultLimits())
+	report, err := inventory.Scan(t.Context(), ws, inventory.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,16 +255,16 @@ func TestScanIsStableAndDisclosesResourceTruncation(t *testing.T) {
 	git(t, repo, "add", ".")
 	git(t, repo, "commit", "-m", "fixture")
 
-	ws, err := workspace.OpenForInspect(context.Background(), repo)
+	ws, err := workspace.OpenForInspect(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	limits := inventory.Limits{MaxCandidateFiles: 1, MaxCandidateBytes: 1 << 20, MaxFileBytes: 1 << 10}
-	first, err := inventory.Scan(context.Background(), ws, limits)
+	first, err := inventory.Scan(t.Context(), ws, limits)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := inventory.Scan(context.Background(), ws, limits)
+	second, err := inventory.Scan(t.Context(), ws, limits)
 	if err != nil {
 		t.Fatal(err)
 	}

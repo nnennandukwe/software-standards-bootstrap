@@ -16,7 +16,7 @@ func TestWriteNewExclusiveMaterializesExactModeDespiteUmask(t *testing.T) {
 	t.Cleanup(func() { syscall.Umask(previous) })
 
 	target := filepath.Join(t.TempDir(), "candidate")
-	if err := writeNewExclusive(target, []byte("candidate\n"), 0o644); err != nil {
+	if err := defaultApplicationPublicationOps().writeNewExclusive(target, []byte("candidate\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(target)
@@ -29,14 +29,15 @@ func TestWriteNewExclusiveMaterializesExactModeDespiteUmask(t *testing.T) {
 }
 
 func TestWriteNewExclusiveRequiresDurableDirectoryPublication(t *testing.T) {
-	original := syncApplicationDirectory
-	syncApplicationDirectory = func(string) error {
+	durability := directorySyncOps{sync: func(string) error {
 		return errors.New("injected directory sync failure")
+	},
 	}
-	t.Cleanup(func() { syncApplicationDirectory = original })
+	publication := defaultApplicationPublicationOps()
+	publication.publish = durability.publish
 
 	target := filepath.Join(t.TempDir(), "candidate")
-	err := writeNewExclusive(target, []byte("candidate\n"), 0o644)
+	err := publication.writeNewExclusive(target, []byte("candidate\n"), 0o644)
 	if err == nil || !strings.Contains(err.Error(), "injected directory sync failure") {
 		t.Fatalf("error = %v, want directory durability failure", err)
 	}

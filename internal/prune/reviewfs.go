@@ -11,15 +11,12 @@ import (
 	"strings"
 )
 
-var (
-	renameAtomicReviewFile = (*os.Root).Rename
-	removeAtomicReviewFile = (*os.Root).Remove
-)
-
 // reviewStore keeps lifecycle operations anchored to an already-open
 // repository root. A concurrent rename or symlink replacement of the review
 // path therefore cannot redirect an operation outside the repository.
 type reviewStore struct {
+	files    reviewFileOps
+	events   reviewEventOps
 	root     *os.Root
 	repoRoot string
 	reviewID string
@@ -82,6 +79,8 @@ func createReviewStagingStore(repoRoot, reviewID string) (*reviewStore, string, 
 		}
 		return &reviewStore{
 			root:           root,
+			files:          defaultReviewFileOps(),
+			events:         defaultReviewEventOps(),
 			repoRoot:       repoRoot,
 			reviewID:       reviewID,
 			relative:       staging,
@@ -106,6 +105,8 @@ func openReviewStore(repoRoot, reviewID string) (*reviewStore, error) {
 	}
 	store := &reviewStore{
 		root:     root,
+		files:    defaultReviewFileOps(),
+		events:   defaultReviewEventOps(),
 		repoRoot: repoRoot,
 		reviewID: reviewID,
 		relative: filepath.Join(".software-standards", "reviews", reviewID),
@@ -370,7 +371,7 @@ func (s *reviewStore) Remove(name string) error {
 		return err
 	}
 	defer pinned.Close()
-	return pinned.Remove(clean)
+	return s.files.remove(pinned, clean)
 }
 
 func (s *reviewStore) MkdirAll(name string, mode os.FileMode) error {
@@ -402,7 +403,12 @@ func (s *reviewStore) WriteExclusive(name string, data []byte, mode os.FileMode)
 	if err := rejectPinnedSymlinkComponents(pinned, filepath.Dir(clean)); err != nil {
 		return err
 	}
-	file, err := pinned.OpenFile(clean, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	file, err := s.files.open(
+		pinned,
+		clean,
+		os.O_WRONLY|os.O_CREATE|os.O_EXCL,
+		mode,
+	)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", s.display(name), err)
 	}
@@ -411,7 +417,7 @@ func (s *reviewStore) WriteExclusive(name string, data []byte, mode os.FileMode)
 		file,
 		data,
 		mode,
-		func() error { return pinned.Remove(clean) },
+		func() error { return s.files.remove(pinned, clean) },
 	)
 }
 
@@ -439,7 +445,12 @@ func (s *reviewStore) AtomicWrite(
 			return err
 		}
 		temp := filepath.Join(parent, ".ssb-prune-"+suffix)
-		file, err := pinned.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+		file, err := s.files.open(
+			pinned,
+			temp,
+			os.O_WRONLY|os.O_CREATE|os.O_EXCL,
+			mode,
+		)
 		if errors.Is(err, os.ErrExist) {
 			continue
 		}
@@ -451,7 +462,7 @@ func (s *reviewStore) AtomicWrite(
 			file,
 			data,
 			mode,
-			func() error { return removeAtomicReviewFile(pinned, temp) },
+			func() error { return s.files.remove(pinned, temp) },
 		); err != nil {
 			return err
 		}
@@ -460,7 +471,7 @@ func (s *reviewStore) AtomicWrite(
 			if !cleanupTemp {
 				return
 			}
-			if cleanupErr := removeAtomicReviewFile(pinned, temp); cleanupErr != nil &&
+			if cleanupErr := s.files.remove(pinned, temp); cleanupErr != nil &&
 				!errors.Is(cleanupErr, os.ErrNotExist) {
 				returnErr = errors.Join(
 					returnErr,
@@ -472,7 +483,7 @@ func (s *reviewStore) AtomicWrite(
 				)
 			}
 		}()
-		if err := renameAtomicReviewFile(pinned, temp, clean); err != nil {
+		if err := s.files.rename(pinned, temp, clean); err != nil {
 			return fmt.Errorf("replace review file %s: %w", s.display(name), err)
 		}
 		cleanupTemp = false
@@ -579,4 +590,21 @@ func writeDurableExclusiveWithCleanup(
 	closed = true
 	complete = true
 	return nil
+}
+
+// reviewFileOps applies only to one identity-pinned review store.
+type reviewFileOps struct {
+	open   func(*os.Root, string, int, os.FileMode) (durableExclusiveFile, error)
+	rename func(*os.Root, string, string) error
+	remove func(*os.Root, string) error
+}
+
+func defaultReviewFileOps() reviewFileOps {
+	return reviewFileOps{
+		open: func(root *os.Root, name string, flags int, mode os.FileMode) (durableExclusiveFile, error) {
+			return root.OpenFile(name, flags, mode)
+		},
+		rename: (*os.Root).Rename,
+		remove: (*os.Root).Remove,
+	}
 }

@@ -30,7 +30,7 @@ var (
 var gitVersionPattern = regexp.MustCompile(`^git version ([0-9]+)\.([0-9]+)(?:\.|$)`)
 var objectIDPattern = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
 
-var runRepositoryGit = runGitInput
+type gitRunner func(context.Context, string, string, []byte, ...string) ([]byte, error)
 
 // PreconditionError describes an expected, actionable repository-state error.
 type PreconditionError struct {
@@ -52,6 +52,7 @@ type Repository struct {
 	root     string
 	baseline string
 	gitPath  string
+	runGit   gitRunner
 }
 
 // BaselineEntry describes one exact path in the baseline tree.
@@ -99,7 +100,13 @@ func (r *Repository) AtCommit(ctx context.Context, commit string) (*Repository, 
 		)
 	}
 	resolved := fields[0]
-	if _, err := r.Git(ctx, "merge-base", "--is-ancestor", resolved, r.baseline); err != nil {
+	if _, err := r.Git(
+		ctx,
+		"merge-base",
+		"--is-ancestor",
+		resolved,
+		r.baseline,
+	); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, fmt.Errorf("verify historical commit ancestry: %w", err)
 		}
@@ -114,12 +121,17 @@ func (r *Repository) AtCommit(ctx context.Context, commit string) (*Repository, 
 		}
 		return nil, fmt.Errorf("verify historical commit ancestry: %w", err)
 	}
-	return &Repository{root: r.root, baseline: resolved, gitPath: r.gitPath}, nil
+	return &Repository{root: r.root, baseline: resolved, gitPath: r.gitPath, runGit: r.runGit}, nil
 }
 
 // OpenForInspect applies the strict, clean-start inspection preconditions.
 func OpenForInspect(ctx context.Context, path string) (*Repository, error) {
-	repo, err := open(ctx, path, true, "ssb inspect")
+	repo, err := open(
+		ctx,
+		path,
+		true,
+		"ssb inspect",
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +146,12 @@ func OpenForInspect(ctx context.Context, path string) (*Repository, error) {
 // standards pack. Unlike OpenForInspect, it never treats the existing pack as
 // an overwrite collision.
 func OpenForPrune(ctx context.Context, path string) (*Repository, error) {
-	repo, err := open(ctx, path, true, "ssb prune inspect")
+	repo, err := open(
+		ctx,
+		path,
+		true,
+		"ssb prune inspect",
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +201,12 @@ func requireExistingPack(root string) error {
 // Open resolves a commit-backed repository without requiring a clean worktree.
 // Commands that write must validate their own bounded targets after calling it.
 func Open(ctx context.Context, path string) (*Repository, error) {
-	return open(ctx, path, false, "")
+	return open(
+		ctx,
+		path,
+		false,
+		"",
+	)
 }
 
 func open(ctx context.Context, path string, requireClean bool, recoveryCommand string) (*Repository, error) {
@@ -218,7 +240,13 @@ func open(ctx context.Context, path string, requireClean bool, recoveryCommand s
 		}
 	}
 
-	rootOut, err := runGit(ctx, gitPath, absolute, "rev-parse", "--show-toplevel")
+	rootOut, err := runGit(
+		ctx,
+		gitPath,
+		absolute,
+		"rev-parse",
+		"--show-toplevel",
+	)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, err
@@ -234,7 +262,14 @@ func open(ctx context.Context, path string, requireClean bool, recoveryCommand s
 		return nil, fmt.Errorf("resolve repository root: %w", err)
 	}
 
-	if _, err := runGit(ctx, gitPath, root, "symbolic-ref", "-q", "HEAD"); err != nil {
+	if _, err := runGit(
+		ctx,
+		gitPath,
+		root,
+		"symbolic-ref",
+		"-q",
+		"HEAD",
+	); err != nil {
 		if ctx.Err() != nil {
 			return nil, err
 		}
@@ -243,7 +278,15 @@ func open(ctx context.Context, path string, requireClean bool, recoveryCommand s
 			Recovery: "switch to a branch before running ssb",
 		}
 	}
-	baselineOut, err := runGit(ctx, gitPath, root, "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}")
+	baselineOut, err := runGit(
+		ctx,
+		gitPath,
+		root,
+		"rev-parse",
+		"--verify",
+		"--end-of-options",
+		"HEAD^{commit}",
+	)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, err
@@ -255,7 +298,16 @@ func open(ctx context.Context, path string, requireClean bool, recoveryCommand s
 	}
 
 	if requireClean {
-		status, statusErr := runGit(ctx, gitPath, root, "status", "--porcelain=v1", "-z", "--untracked-files=no", "--ignore-submodules=untracked")
+		status, statusErr := runGit(
+			ctx,
+			gitPath,
+			root,
+			"status",
+			"--porcelain=v1",
+			"-z",
+			"--untracked-files=no",
+			"--ignore-submodules=untracked",
+		)
 		if statusErr != nil {
 			return nil, fmt.Errorf("read Git status: %w", statusErr)
 		}
@@ -271,6 +323,7 @@ func open(ctx context.Context, path string, requireClean bool, recoveryCommand s
 		root:     root,
 		baseline: trimGitLine(baselineOut),
 		gitPath:  gitPath,
+		runGit:   runGitInput,
 	}, nil
 }
 
@@ -301,8 +354,12 @@ func (r *Repository) VerifyPruneSnapshot(ctx context.Context) error {
 func (r *Repository) RejectUntrackedConfigurations(ctx context.Context) error {
 	output, err := r.Git(
 		ctx,
-		"ls-files", "--others", "-z", "--",
-		".software-standards/rules", ".agents/skills",
+		"ls-files",
+		"--others",
+		"-z",
+		"--",
+		".software-standards/rules",
+		".agents/skills",
 	)
 	if err != nil {
 		return fmt.Errorf("list untracked configurations: %w", err)
@@ -330,7 +387,12 @@ func (r *Repository) verifyStableSnapshot(
 	ctx context.Context,
 	operation, recoveryCommand string,
 ) error {
-	if _, err := r.Git(ctx, "symbolic-ref", "-q", "HEAD"); err != nil {
+	if _, err := r.Git(
+		ctx,
+		"symbolic-ref",
+		"-q",
+		"HEAD",
+	); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
 		}
@@ -339,7 +401,13 @@ func (r *Repository) verifyStableSnapshot(
 			Recovery: "switch to a branch and rerun " + recoveryCommand,
 		}
 	}
-	current, err := r.Git(ctx, "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}")
+	current, err := r.Git(
+		ctx,
+		"rev-parse",
+		"--verify",
+		"--end-of-options",
+		"HEAD^{commit}",
+	)
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
@@ -349,7 +417,14 @@ func (r *Repository) verifyStableSnapshot(
 			Recovery: "rerun the command against the new stable baseline",
 		}
 	}
-	status, err := r.Git(ctx, "status", "--porcelain=v1", "-z", "--untracked-files=no", "--ignore-submodules=untracked")
+	status, err := r.Git(
+		ctx,
+		"status",
+		"--porcelain=v1",
+		"-z",
+		"--untracked-files=no",
+		"--ignore-submodules=untracked",
+	)
 	if err != nil {
 		return fmt.Errorf("recheck Git status: %w", err)
 	}
@@ -365,12 +440,24 @@ func (r *Repository) verifyStableSnapshot(
 // Git runs Git with the repository fixed by -C and returns stdout. Arguments
 // are passed directly to exec.Command; repository paths never enter a shell.
 func (r *Repository) Git(ctx context.Context, args ...string) ([]byte, error) {
-	return runRepositoryGit(ctx, r.gitPath, r.root, nil, args...)
+	return r.runGit(
+		ctx,
+		r.gitPath,
+		r.root,
+		nil,
+		args...,
+	)
 }
 
 // GitWithInput runs a read-only Git plumbing command with explicit stdin.
 func (r *Repository) GitWithInput(ctx context.Context, input []byte, args ...string) ([]byte, error) {
-	return runRepositoryGit(ctx, r.gitPath, r.root, input, args...)
+	return r.runGit(
+		ctx,
+		r.gitPath,
+		r.root,
+		input,
+		args...,
+	)
 }
 
 // ReadBaselineFile returns a tracked regular file from the pinned commit.
@@ -386,7 +473,12 @@ func (r *Repository) ReadBaselineFile(ctx context.Context, filePath string) ([]b
 	if (entry.Mode != "100644" && entry.Mode != "100755") || entry.Kind != "blob" {
 		return nil, fmt.Errorf("evidence path %q is not a tracked regular file", filePath)
 	}
-	content, err := r.Git(ctx, "cat-file", "blob", entry.OID)
+	content, err := r.Git(
+		ctx,
+		"cat-file",
+		"blob",
+		entry.OID,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("read evidence path %q: %w", filePath, err)
 	}
@@ -399,7 +491,15 @@ func (r *Repository) EntryAtBaseline(ctx context.Context, filePath string) (Base
 		filePath == "." || filePath == ".." || strings.HasPrefix(filePath, "../") {
 		return BaselineEntry{}, false, fmt.Errorf("unsafe baseline path %q", filePath)
 	}
-	tree, err := r.Git(ctx, "ls-tree", "-z", "-l", r.baseline, "--", filePath)
+	tree, err := r.Git(
+		ctx,
+		"ls-tree",
+		"-z",
+		"-l",
+		r.baseline,
+		"--",
+		filePath,
+	)
 	if err != nil {
 		return BaselineEntry{}, false, err
 	}
@@ -463,13 +563,24 @@ func (r *Repository) HasSubmodulePrefix(ctx context.Context, relative string) (b
 }
 
 func runGit(ctx context.Context, gitPath, dir string, args ...string) ([]byte, error) {
-	return runGitInput(ctx, gitPath, dir, nil, args...)
+	return runGitInput(
+		ctx,
+		gitPath,
+		dir,
+		nil,
+		args...,
+	)
 }
 
 func runGitInput(ctx context.Context, gitPath, dir string, input []byte, args ...string) ([]byte, error) {
 	commandArgs := append([]string{"-C", dir}, args...)
 	cmd := exec.CommandContext(ctx, gitPath, commandArgs...)
-	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0", "GIT_LITERAL_PATHSPECS=1", "LC_ALL=C")
+	cmd.Env = append(
+		os.Environ(),
+		"GIT_OPTIONAL_LOCKS=0",
+		"GIT_LITERAL_PATHSPECS=1",
+		"LC_ALL=C",
+	)
 	if input != nil {
 		cmd.Stdin = bytes.NewReader(input)
 	}

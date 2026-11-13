@@ -27,50 +27,55 @@ var stableIDPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 // fully observed and no semantic proposal may be produced.
 var ErrIncompleteInventory = errors.New("inventory coverage incomplete")
 
-// ContextOptions identifies the exact local evidence inputs for one review.
-type ContextOptions struct {
+// CreateReviewOptions identifies the exact local evidence inputs for one review.
+type CreateReviewOptions struct {
 	ReviewID        string
 	Capabilities    string
 	Provenance      string
 	InventoryLimits inventory.Limits
 }
 
-// BuildContext captures current repository evidence and exact local
+// BuildReviewContext captures current repository evidence and exact local
 // capability/provenance inputs without writing lifecycle artifacts.
-func BuildContext(
+func BuildReviewContext(
 	ctx context.Context,
 	repo *workspace.Repository,
-	options ContextOptions,
-) (Context, error) {
+	options CreateReviewOptions,
+) (ReviewContext, error) {
 	if err := ctx.Err(); err != nil {
-		return Context{}, err
+		return ReviewContext{}, err
 	}
 	if !stableIDPattern.MatchString(options.ReviewID) {
-		return Context{}, fmt.Errorf("review id must be lower-case kebab-case")
+		return ReviewContext{}, fmt.Errorf("review id must be lower-case kebab-case")
 	}
 	if options.Capabilities == "" {
-		return Context{}, fmt.Errorf("capability profile path is required")
+		return ReviewContext{}, fmt.Errorf("capability profile path is required")
 	}
 	profile, profileDigest, err := loadCapabilityProfile(options.Capabilities)
 	if err != nil {
-		return Context{}, err
+		return ReviewContext{}, err
 	}
 	provenance, provenanceDigest, err := loadProvenance(options.Provenance)
 	if err != nil {
-		return Context{}, err
+		return ReviewContext{}, err
 	}
 	report, err := inventory.ScanForPrune(ctx, repo, options.InventoryLimits)
 	if err != nil {
-		return Context{}, err
+		return ReviewContext{}, err
 	}
 	if report.Truncated {
-		return Context{}, fmt.Errorf("%w: %s", ErrIncompleteInventory, report.TruncationReason)
+		return ReviewContext{}, fmt.Errorf("%w: %s", ErrIncompleteInventory, report.TruncationReason)
 	}
-	artifacts, err := loadArtifacts(ctx, repo, provenance, report)
+	artifacts, err := loadArtifacts(
+		ctx,
+		repo,
+		provenance,
+		report,
+	)
 	if err != nil {
-		return Context{}, err
+		return ReviewContext{}, err
 	}
-	result := Context{
+	result := ReviewContext{
 		Schema:                   ContextSchema,
 		ReviewID:                 options.ReviewID,
 		BaselineCommit:           repo.Baseline(),
@@ -86,7 +91,7 @@ func BuildContext(
 	}
 	digest, err := canonicalDigest(result)
 	if err != nil {
-		return Context{}, fmt.Errorf("digest prune context: %w", err)
+		return ReviewContext{}, fmt.Errorf("digest prune context: %w", err)
 	}
 	result.ContextDigest = digest
 	return result, nil
@@ -98,7 +103,12 @@ func loadCapabilityProfile(filePath string) (CapabilityProfile, string, error) {
 		return CapabilityProfile{}, "", fmt.Errorf("read capability profile: %w", err)
 	}
 	var profile CapabilityProfile
-	if err := yaml.Load(data, &profile, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+	if err := yaml.Load(
+		data,
+		&profile,
+		yaml.WithKnownFields(),
+		yaml.WithUniqueKeys(),
+	); err != nil {
 		return CapabilityProfile{}, "", fmt.Errorf("parse capability profile: %w", err)
 	}
 	if profile.Schema != CapabilitySchema {
@@ -207,7 +217,12 @@ func loadProvenance(filePath string) (ProvenanceManifest, string, error) {
 		return ProvenanceManifest{}, "", fmt.Errorf("read provenance manifest: %w", err)
 	}
 	var manifest ProvenanceManifest
-	if err := yaml.Load(data, &manifest, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+	if err := yaml.Load(
+		data,
+		&manifest,
+		yaml.WithKnownFields(),
+		yaml.WithUniqueKeys(),
+	); err != nil {
 		return ProvenanceManifest{}, "", fmt.Errorf("parse provenance manifest: %w", err)
 	}
 	if manifest.Schema != ProvenanceSchema {
@@ -248,8 +263,14 @@ func loadArtifacts(
 ) ([]Artifact, error) {
 	raw, err := repo.Git(
 		ctx,
-		"ls-tree", "-r", "-z", "--name-only", repo.Baseline(), "--",
-		".software-standards/rules", ".agents/skills",
+		"ls-tree",
+		"-r",
+		"-z",
+		"--name-only",
+		repo.Baseline(),
+		"--",
+		".software-standards/rules",
+		".agents/skills",
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list prune artifacts: %w", err)

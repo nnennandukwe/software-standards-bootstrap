@@ -27,3 +27,11 @@ func publishApplicationFileDurably(source, target string) error {
 func removeApplicationPublicationFileDurably(filePath string) error {
 	return os.Remove(filePath)
 }
+
+func defaultApplicationPublicationOps() applicationPublicationOps {
+	return applicationPublicationOps{
+		exclusive:         defaultExclusiveFileOps(),
+		publish:           publishApplicationFileDurably,
+		removePublication: removeApplicationPublicationFileDurably,
+	}
+}

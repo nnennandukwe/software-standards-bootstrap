@@ -152,7 +152,12 @@ func Build(pack rulepack.Pack) (Plan, error) {
 func sizeWarning(measurement SizeMeasurement) SizeWarning {
 	return SizeWarning{
 		Path: measurement.Path, ActualBytes: measurement.Bytes, ThresholdBytes: measurement.WarningThresholdBytes,
-		Message: fmt.Sprintf("%s is %d bytes; warning threshold is %d bytes", measurement.Path, measurement.Bytes, measurement.WarningThresholdBytes),
+		Message: fmt.Sprintf(
+			"%s is %d bytes; warning threshold is %d bytes",
+			measurement.Path,
+			measurement.Bytes,
+			measurement.WarningThresholdBytes,
+		),
 	}
 }
 
@@ -208,7 +213,17 @@ func Apply(ctx context.Context, repo *workspace.Repository, pack rulepack.Pack, 
 		if err := ctx.Err(); err != nil {
 			return Result{}, err
 		}
-		warning, err := publishProjection(repo.Root(), routing, target, existing, next, mode, exists, agentsChanged, writeAtomic)
+		warning, err := publishProjection(
+			repo.Root(),
+			routing,
+			target,
+			existing,
+			next,
+			mode,
+			exists,
+			agentsChanged,
+			writeAtomic,
+		)
 		if err != nil {
 			return Result{}, err
 		}
@@ -251,7 +266,17 @@ func Apply(ctx context.Context, repo *workspace.Repository, pack rulepack.Pack, 
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
-	warning, err := publishProjection(repo.Root(), routing, target, existing, next, mode, exists, agentsChanged, writeAtomic)
+	warning, err := publishProjection(
+		repo.Root(),
+		routing,
+		target,
+		existing,
+		next,
+		mode,
+		exists,
+		agentsChanged,
+		writeAtomic,
+	)
 	if err != nil {
 		return Result{}, err
 	}
@@ -278,7 +303,15 @@ func publishProjection(
 	}
 	defer store.close()
 	return publishProjectionWithFS(
-		store, routing, target, existing, next, mode, exists, agentsChanged, writeTarget,
+		store,
+		routing,
+		target,
+		existing,
+		next,
+		mode,
+		exists,
+		agentsChanged,
+		writeTarget,
 	)
 }
 
@@ -305,7 +338,13 @@ func publishProjectionWithFS(
 		return "", err
 	}
 	if agentsChanged {
-		if err := writeTarget(target, existing, next, mode, exists); err != nil {
+		if err := writeTarget(
+			target,
+			existing,
+			next,
+			mode,
+			exists,
+		); err != nil {
 			if rollbackErr := rollbackRoutingTargetWithFS(store, routing, backupRouting); rollbackErr != nil {
 				return "", errors.Join(
 					fmt.Errorf("write AGENTS.md: %w", err),
@@ -435,13 +474,38 @@ func buildSection(pack rulepack.Pack, routing *RoutingResult) ([]byte, string, s
 				rootRules = append(rootRules, rule)
 			}
 		}
-		writeStandingOrders(&body, rootRules, manifest, titles)
+		writeStandingOrders(
+			&body,
+			rootRules,
+			manifest,
+			titles,
+		)
 	} else {
 		writeEmbeddedRouting(&body)
-		writeStandingOrders(&body, orderedRules, manifest, titles)
-		writeContextualRules(&body, orderedRules, manifest, titles)
-		writeVerificationRecipes(&body, recipes, manifest, titles)
-		writeSkills(&body, skills, manifest, titles)
+		writeStandingOrders(
+			&body,
+			orderedRules,
+			manifest,
+			titles,
+		)
+		writeContextualRules(
+			&body,
+			orderedRules,
+			manifest,
+			titles,
+		)
+		writeVerificationRecipes(
+			&body,
+			recipes,
+			manifest,
+			titles,
+		)
+		writeSkills(
+			&body,
+			skills,
+			manifest,
+			titles,
+		)
 	}
 
 	bodyBytes := []byte(body.String())
@@ -500,12 +564,22 @@ func hasOrientationContent(orientation *rulepack.Orientation) bool {
 func writeRootOrientation(body *strings.Builder, orientation *rulepack.Orientation) {
 	body.WriteString("\n### Repository orientation\n")
 	if orientation.Summary != nil {
-		fmt.Fprintf(body, "\n%s\n\n- Evidence: %s\n", markdownText(orientation.Summary.Text), evidenceSourceList(orientation.Summary.Evidence, true))
+		fmt.Fprintf(
+			body,
+			"\n%s\n\n- Evidence: %s\n",
+			markdownText(orientation.Summary.Text),
+			evidenceSourceList(orientation.Summary.Evidence, true),
+		)
 	}
 	if len(orientation.Areas) != 0 {
 		body.WriteString("\n#### Important areas\n")
 		for _, area := range orientation.Areas {
-			fmt.Fprintf(body, "\n- %s - %s\n", inlineCode(area.Path), markdownText(area.Purpose))
+			fmt.Fprintf(
+				body,
+				"\n- %s - %s\n",
+				inlineCode(area.Path),
+				markdownText(area.Purpose),
+			)
 			fmt.Fprintf(body, "  - Evidence: %s\n", evidenceSourceList(area.Evidence, true))
 		}
 	}
@@ -532,7 +606,12 @@ func writeRootOrientation(body *strings.Builder, orientation *rulepack.Orientati
 			body.WriteString("\n#### Universal guidance\n")
 			wroteGuidance = true
 		}
-		fmt.Fprintf(body, "\n- **%s:** %s\n", titleFromID(guidance.Kind), markdownText(guidance.Text))
+		fmt.Fprintf(
+			body,
+			"\n- **%s:** %s\n",
+			titleFromID(guidance.Kind),
+			markdownText(guidance.Text),
+		)
 		fmt.Fprintf(body, "  - Evidence: %s\n", evidenceSourceList(guidance.Evidence, true))
 	}
 }
@@ -595,7 +674,12 @@ func writeStandingOrders(
 		wroteAny = true
 		fmt.Fprintf(body, "\n#### %s\n", directiveHeading(directive))
 		for _, rule := range group {
-			writeStandingOrder(body, rule, manifest, titles)
+			writeStandingOrder(
+				body,
+				rule,
+				manifest,
+				titles,
+			)
 		}
 	}
 	if !wroteAny {
@@ -609,14 +693,25 @@ func writeStandingOrder(
 	manifest map[string]rulepack.AcceptedArtifact,
 	titles map[string]string,
 ) {
-	fmt.Fprintf(body, "\n##### %s (%s)\n\n", markdownText(rule.Title), inlineCode(rule.ID))
+	fmt.Fprintf(
+		body,
+		"\n##### %s (%s)\n\n",
+		markdownText(rule.Title),
+		inlineCode(rule.ID),
+	)
 	writeQuotedMarkdown(body, rule.Body)
 	if !strings.HasSuffix(rule.Body, "\n") {
 		body.WriteString("\n")
 	}
 	body.WriteString("\n")
 	fmt.Fprintf(body, "- Applies to: %s\n", codeList(rule.Scopes))
-	writeRelationships(body, manifest[rule.ID], manifest, titles, "")
+	writeRelationships(
+		body,
+		manifest[rule.ID],
+		manifest,
+		titles,
+		"",
+	)
 	fmt.Fprintf(body, "- Category: %s\n", inlineCode(rule.Category))
 	fmt.Fprintf(body, "- Canonical rule: %s\n", markdownLink(rule.SourcePath, rule.SourcePath))
 	fmt.Fprintf(body, "- Evidence: %s\n", evidenceSourceList(rule.Evidence, false))
@@ -639,10 +734,22 @@ func writeContextualRules(
 	}
 	body.WriteString("\n### Contextual semantic rules\n")
 	for _, rule := range contextual {
-		fmt.Fprintf(body, "\n#### %s (%s) - %s\n\n", markdownLink(rule.Title, rule.SourcePath), inlineCode(rule.ID), inlineCode(rule.Directive))
+		fmt.Fprintf(
+			body,
+			"\n#### %s (%s) - %s\n\n",
+			markdownLink(rule.Title, rule.SourcePath),
+			inlineCode(rule.ID),
+			inlineCode(rule.Directive),
+		)
 		fmt.Fprintf(body, "- Load when: %s\n", lensCodeList(rule.Lenses))
 		fmt.Fprintf(body, "- Applies to: %s\n", codeList(rule.Scopes))
-		writeRelationships(body, manifest[rule.ID], manifest, titles, "")
+		writeRelationships(
+			body,
+			manifest[rule.ID],
+			manifest,
+			titles,
+			"",
+		)
 		fmt.Fprintf(body, "- Category: %s\n", inlineCode(rule.Category))
 		fmt.Fprintf(body, "- Canonical rule: %s\n", markdownLink(rule.SourcePath, rule.SourcePath))
 		fmt.Fprintf(body, "- Evidence: %s\n", evidenceSourceList(rule.Evidence, false))
@@ -660,11 +767,22 @@ func writeVerificationRecipes(
 	}
 	body.WriteString("\n### Verification commands\n")
 	for _, recipe := range recipes {
-		fmt.Fprintf(body, "\n#### %s (%s)\n\n", markdownLink(recipe.Title, recipe.SourcePath), inlineCode(recipe.ID))
+		fmt.Fprintf(
+			body,
+			"\n#### %s (%s)\n\n",
+			markdownLink(recipe.Title, recipe.SourcePath),
+			inlineCode(recipe.ID),
+		)
 		fmt.Fprintf(body, "- When: %s\n", markdownText(strings.TrimSpace(recipe.When)))
 		fmt.Fprintf(body, "- Route when: %s\n", lensCodeList(recipe.Lenses))
 		fmt.Fprintf(body, "- Applies to: %s\n", codeList(recipe.Scopes))
-		writeRelationships(body, manifest[recipe.ID], manifest, titles, "")
+		writeRelationships(
+			body,
+			manifest[recipe.ID],
+			manifest,
+			titles,
+			"",
+		)
 		fmt.Fprintf(body, "- Category: %s\n", inlineCode(recipe.Category))
 		fmt.Fprintf(body, "- Canonical recipe: %s\n", markdownLink(recipe.SourcePath, recipe.SourcePath))
 		fmt.Fprintf(body, "- Evidence: %s\n", evidenceSourceList(recipe.Evidence, false))
@@ -694,11 +812,22 @@ func writeSkills(
 		if !exists {
 			continue
 		}
-		fmt.Fprintf(body, "\n#### %s (%s)\n\n", markdownLink(titleFromID(skill.ID), skill.SourcePath), inlineCode(skill.ID))
+		fmt.Fprintf(
+			body,
+			"\n#### %s (%s)\n\n",
+			markdownLink(titleFromID(skill.ID), skill.SourcePath),
+			inlineCode(skill.ID),
+		)
 		fmt.Fprintf(body, "%s\n\n", markdownText(strings.TrimSpace(skill.Description)))
 		fmt.Fprintf(body, "- Use when: %s\n", lensCodeList(metadata.Lenses))
 		fmt.Fprintf(body, "- Applies to: %s\n", codeList(metadata.Scopes))
-		writeRelationships(body, metadata, manifest, titles, "")
+		writeRelationships(
+			body,
+			metadata,
+			manifest,
+			titles,
+			"",
+		)
 		fmt.Fprintf(body, "- Category: %s\n", inlineCode(skill.Category))
 		fmt.Fprintf(body, "- Evidence: %s\n", evidenceSourceList(metadata.Evidence, false))
 	}
@@ -712,7 +841,13 @@ func writeRelationships(
 	indent string,
 ) {
 	for _, relatedID := range artifact.RelatedArtifactIDs {
-		writeRelatedArtifact(body, relatedID, manifest, titles, indent)
+		writeRelatedArtifact(
+			body,
+			relatedID,
+			manifest,
+			titles,
+			indent,
+		)
 	}
 }
 
@@ -742,7 +877,13 @@ func writeRelatedArtifact(
 	if title == "" {
 		title = titleFromID(related.ID)
 	}
-	fmt.Fprintf(body, "%s- Related %s: %s\n", indent, label, markdownLink(title, related.Path))
+	fmt.Fprintf(
+		body,
+		"%s- Related %s: %s\n",
+		indent,
+		label,
+		markdownLink(title, related.Path),
+	)
 }
 
 func titleFromID(id string) string {
@@ -772,21 +913,36 @@ func evidenceSourceList(evidence []rulepack.Evidence, includeRole bool) string {
 
 func markdownText(value string) string {
 	replacer := strings.NewReplacer(
-		`\`, `\\`,
-		"&", "&amp;",
-		"`", "\\`",
-		"*", "\\*",
-		"_", "\\_",
-		"{", "\\{",
-		"}", "\\}",
-		"[", "\\[",
-		"]", "\\]",
-		"<", "\\<",
-		">", "\\>",
-		"#", "\\#",
-		"!", "\\!",
-		"|", "\\|",
-		"~", "\\~",
+		`\`,
+		`\\`,
+		"&",
+		"&amp;",
+		"`",
+		"\\`",
+		"*",
+		"\\*",
+		"_",
+		"\\_",
+		"{",
+		"\\{",
+		"}",
+		"\\}",
+		"[",
+		"\\[",
+		"]",
+		"\\]",
+		"<",
+		"\\<",
+		">",
+		"\\>",
+		"#",
+		"\\#",
+		"!",
+		"\\!",
+		"|",
+		"\\|",
+		"~",
+		"\\~",
 	)
 	return visibleControlCharacters(replacer.Replace(value))
 }
@@ -824,7 +980,12 @@ func visibleControlCharacters(value string) string {
 		case '\t':
 			result.WriteString(`\t`)
 		default:
-			if unicode.IsControl(character) || unicode.In(character, unicode.Cf, unicode.Zl, unicode.Zp) {
+			if unicode.IsControl(character) || unicode.In(
+				character,
+				unicode.Cf,
+				unicode.Zl,
+				unicode.Zp,
+			) {
 				fmt.Fprintf(&result, `\u{%04X}`, character)
 				continue
 			}

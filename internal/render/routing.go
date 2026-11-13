@@ -44,7 +44,14 @@ func buildRoutingResult(pack rulepack.Pack) (*RoutingResult, error) {
 
 	bundleFiles := make([]FileResult, 0, len(pack.Routing.Bundles))
 	for _, bundle := range pack.Routing.Bundles {
-		body, err := buildBundleBody(bundle, artifacts, rules, recipes, skills, rootCore)
+		body, err := buildBundleBody(
+			bundle,
+			artifacts,
+			rules,
+			recipes,
+			skills,
+			rootCore,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -80,7 +87,14 @@ func buildRoutingResult(pack rulepack.Pack) (*RoutingResult, error) {
 	}
 	sort.Slice(bundleFiles, func(i, j int) bool { return bundleFiles[i].Path < bundleFiles[j].Path })
 
-	catalogBody := buildCatalogBody(pack, bundleFiles, artifacts, rules, recipes, skills)
+	catalogBody := buildCatalogBody(
+		pack,
+		bundleFiles,
+		artifacts,
+		rules,
+		recipes,
+		skills,
+	)
 	catalogSource := struct {
 		Routing     rulepack.RoutingCatalog        `json:"routing"`
 		BundleFiles []fileIdentity                 `json:"bundle_files"`
@@ -188,7 +202,12 @@ func buildCatalogBody(
 				body.WriteString("\n## Task guidance\n")
 				wrote = true
 			}
-			fmt.Fprintf(&body, "\n- **%s:** %s\n", titleFromID(guidance.Kind), markdownText(guidance.Text))
+			fmt.Fprintf(
+				&body,
+				"\n- **%s:** %s\n",
+				titleFromID(guidance.Kind),
+				markdownText(guidance.Text),
+			)
 		}
 	}
 	body.WriteString("\n## Bundles\n")
@@ -209,7 +228,13 @@ func buildCatalogBody(
 			} else if _, exists := skills[artifactID]; exists {
 				title = titleFromID(artifactID)
 			}
-			fmt.Fprintf(&body, "  - %s %s (%s)\n", titleFromID(artifact.Kind), linkFrom(rulepack.RoutingCatalogPath, title, artifact.Path), inlineCode(artifactID))
+			fmt.Fprintf(
+				&body,
+				"  - %s %s (%s)\n",
+				titleFromID(artifact.Kind),
+				linkFrom(rulepack.RoutingCatalogPath, title, artifact.Path),
+				inlineCode(artifactID),
+			)
 		}
 	}
 	return body.String()
@@ -239,7 +264,13 @@ func buildBundleBody(
 			body.WriteString("\n## Semantic rules\n")
 			wroteRules = true
 		}
-		fmt.Fprintf(&body, "\n### %s (%s) - %s\n\n", linkFrom(bundle.Path, rule.Title, rule.SourcePath), inlineCode(rule.ID), inlineCode(rule.Directive))
+		fmt.Fprintf(
+			&body,
+			"\n### %s (%s) - %s\n\n",
+			linkFrom(bundle.Path, rule.Title, rule.SourcePath),
+			inlineCode(rule.ID),
+			inlineCode(rule.Directive),
+		)
 		if _, projected := rootCore[rule.ID]; projected {
 			body.WriteString("This rule is projected in root `AGENTS.md`; use the canonical link above for its reviewed source.\n")
 			continue
@@ -260,7 +291,12 @@ func buildBundleBody(
 			body.WriteString("\n## Verification commands\n")
 			wroteRecipes = true
 		}
-		fmt.Fprintf(&body, "\n### %s (%s)\n\n", linkFrom(bundle.Path, recipe.Title, recipe.SourcePath), inlineCode(recipe.ID))
+		fmt.Fprintf(
+			&body,
+			"\n### %s (%s)\n\n",
+			linkFrom(bundle.Path, recipe.Title, recipe.SourcePath),
+			inlineCode(recipe.ID),
+		)
 		fmt.Fprintf(&body, "When: %s\n", markdownText(strings.TrimSpace(recipe.When)))
 		for index, step := range recipe.Steps {
 			fmt.Fprintf(&body, "\n#### Step %d\n\n", index+1)
@@ -282,7 +318,13 @@ func buildBundleBody(
 			body.WriteString("\n## Agent Skills\n")
 			wroteSkills = true
 		}
-		fmt.Fprintf(&body, "\n- %s (%s) - %s Read the complete skill before using it.\n", linkFrom(bundle.Path, titleFromID(skill.ID), skill.SourcePath), inlineCode(skill.ID), markdownText(strings.TrimSpace(skill.Description)))
+		fmt.Fprintf(
+			&body,
+			"\n- %s (%s) - %s Read the complete skill before using it.\n",
+			linkFrom(bundle.Path, titleFromID(skill.ID), skill.SourcePath),
+			inlineCode(skill.ID),
+			markdownText(strings.TrimSpace(skill.Description)),
+		)
 	}
 	for _, artifactID := range bundle.ArtifactIDs {
 		if _, exists := artifacts[artifactID]; !exists {

@@ -2,7 +2,6 @@ package render_test
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -17,7 +16,7 @@ import (
 
 func TestApplyProjectsActionFirstRulesInertCommandsAndScannableSkills(t *testing.T) {
 	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +106,7 @@ func TestApplyProjectsActionFirstRulesInertCommandsAndScannableSkills(t *testing
 
 func TestApplyProjectsManifestRootAndPortableRoutingWriteSet(t *testing.T) {
 	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +191,7 @@ func TestApplyProjectsManifestRootAndPortableRoutingWriteSet(t *testing.T) {
 
 func TestApplyPublishesRoutingTreeAndBlocksDriftWithoutPartialOutput(t *testing.T) {
 	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +388,7 @@ func TestApplyKeepsOrientationDocumentLinksRepositoryRelative(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			repo := committedRepository(t)
-			ws, err := workspace.Open(context.Background(), repo)
+			ws, err := workspace.Open(t.Context(), repo)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -422,7 +421,7 @@ func TestApplyContainsRawRuleHeadingsInsideTheRuleBody(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			repo := committedRepository(t)
-			ws, err := workspace.Open(context.Background(), repo)
+			ws, err := workspace.Open(t.Context(), repo)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -450,7 +449,7 @@ func TestApplyContainsRawRuleHeadingsInsideTheRuleBody(t *testing.T) {
 
 func TestApplyOrdersEveryDirectiveAndUtilityDeterministically(t *testing.T) {
 	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -485,7 +484,7 @@ func TestApplyOrdersEveryDirectiveAndUtilityDeterministically(t *testing.T) {
 
 func TestApplyEscapesSchemaScalarsWithoutChangingCanonicalRuleBodies(t *testing.T) {
 	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -517,7 +516,7 @@ func TestApplyEscapesSchemaScalarsWithoutChangingCanonicalRuleBodies(t *testing.
 
 func TestApplyBindsManifestSources(t *testing.T) {
 	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -566,7 +565,7 @@ func TestApplyBindsManifestSources(t *testing.T) {
 
 func TestApplyPreservesEmbeddedLayoutBehavior(t *testing.T) {
 	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -600,7 +599,7 @@ func TestApplyPreservesEmbeddedLayoutBehavior(t *testing.T) {
 
 func TestApplyProjectsOrientationAndBindsItToSourceIdentity(t *testing.T) {
 	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -654,7 +653,7 @@ func TestApplyProjectsOrientationAndBindsItToSourceIdentity(t *testing.T) {
 
 func TestApplyRendersNonCommandControlCharactersAsVisibleText(t *testing.T) {
 	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -698,7 +697,7 @@ func TestApplyRendersNonCommandControlCharactersAsVisibleText(t *testing.T) {
 
 func TestApplyEscapesTildeFencesAndTrimsProjectedProse(t *testing.T) {
 	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -739,7 +738,7 @@ func TestApplyEscapesTildeFencesAndTrimsProjectedProse(t *testing.T) {
 
 func TestApplyOmitsEmptyOrientationAndRejectsMarkerInjection(t *testing.T) {
 	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -790,7 +789,7 @@ func TestApplyRejectsReservedMarkersFromCanonicalInputs(t *testing.T) {
 			target := filepath.Join(repo, "AGENTS.md")
 			before := "# Human guidance\n"
 			writeFile(t, target, before)
-			ws, err := workspace.Open(context.Background(), repo)
+			ws, err := workspace.Open(t.Context(), repo)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -845,7 +844,7 @@ func TestApplyDoesNotWriteEmptyOrAutomationOnlyProjection(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			repo := committedRepository(t)
-			ws, err := workspace.Open(context.Background(), repo)
+			ws, err := workspace.Open(t.Context(), repo)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -880,7 +879,7 @@ func TestApplyRemovesStaleSectionForNonActionablePacks(t *testing.T) {
 			repo := committedRepository(t)
 			prefix := "# Human guidance\n\n"
 			writeFile(t, filepath.Join(repo, "AGENTS.md"), prefix)
-			ws, err := workspace.Open(context.Background(), repo)
+			ws, err := workspace.Open(t.Context(), repo)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -910,7 +909,7 @@ func TestApplyRemovesGeneratedRoutingTreeWithEmptyManifestPack(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(repo, ".software-standards"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}

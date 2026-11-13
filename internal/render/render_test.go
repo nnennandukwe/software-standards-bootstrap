@@ -20,7 +20,7 @@ func TestApplyPreservesExistingBytesAndProjectsOnlySurvivingRules(t *testing.T) 
 	agentsPath := filepath.Join(repo, "AGENTS.md")
 	prefix := "# Existing guidance\n\nKeep this byte-for-byte.\n"
 	writeFile(t, agentsPath, prefix)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestApplyPreservesExistingBytesAndProjectsOnlySurvivingRules(t *testing.T) 
 
 func TestApplyDryRunDoesNotCreateAgentsFile(t *testing.T) {
 	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestApplyDryRunDoesNotCreateAgentsFile(t *testing.T) {
 func TestApplyBlocksDriftMalformedMarkersAndSymlinkTargets(t *testing.T) {
 	t.Run("drift", func(t *testing.T) {
 		repo := committedRepository(t)
-		ws, err := workspace.Open(context.Background(), repo)
+		ws, err := workspace.Open(t.Context(), repo)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -129,7 +129,7 @@ func TestApplyBlocksDriftMalformedMarkersAndSymlinkTargets(t *testing.T) {
 		target := filepath.Join(repo, "AGENTS.md")
 		before := render.StartMarker + "\n" + render.StartMarker + "\n" + render.EndMarker + "\n"
 		writeFile(t, target, before)
-		ws, err := workspace.Open(context.Background(), repo)
+		ws, err := workspace.Open(t.Context(), repo)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -154,7 +154,7 @@ func TestApplyBlocksDriftMalformedMarkersAndSymlinkTargets(t *testing.T) {
 		if err := os.Symlink(outside, filepath.Join(repo, "AGENTS.md")); err != nil {
 			t.Fatal(err)
 		}
-		ws, err := workspace.Open(context.Background(), repo)
+		ws, err := workspace.Open(t.Context(), repo)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -181,7 +181,7 @@ func TestApplyWriteFailureLeavesExistingAgentsUntouched(t *testing.T) {
 	target := filepath.Join(repo, "AGENTS.md")
 	before := "# Existing\n"
 	writeFile(t, target, before)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}

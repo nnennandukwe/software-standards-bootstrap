@@ -490,7 +490,7 @@ artifacts:
 	if err != nil {
 		t.Fatal(err)
 	}
-	var reviewContext prune.Context
+	var reviewContext prune.ReviewContext
 	if err := json.Unmarshal(contextData, &reviewContext); err != nil {
 		t.Fatal(err)
 	}

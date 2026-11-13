@@ -1,7 +1,6 @@
 package evaluation_test
 
 import (
-	"context"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -23,11 +22,11 @@ func TestPublicGoServiceFixtureProducesThePinnedSafeInventory(t *testing.T) {
 	git(t, repo, "add", ".")
 	git(t, repo, "commit", "-m", "pinned public fixture")
 
-	ws, err := workspace.OpenForInspect(context.Background(), repo)
+	ws, err := workspace.OpenForInspect(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := inventory.Scan(context.Background(), ws, inventory.DefaultLimits())
+	report, err := inventory.Scan(t.Context(), ws, inventory.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}

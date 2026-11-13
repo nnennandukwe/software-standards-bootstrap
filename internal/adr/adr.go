@@ -284,12 +284,23 @@ func render(pack rulepack.Pack, number int) []byte {
 	}
 	for _, rule := range rules {
 		metadata := manifest[rule.ID]
-		fmt.Fprintf(&output, "\n### %s (`%s`)\n\n", rule.Title, rule.ID)
+		fmt.Fprintf(
+			&output,
+			"\n### %s (`%s`)\n\n",
+			rule.Title,
+			rule.ID,
+		)
 		fmt.Fprintf(&output, "- Source: `%s`\n", rule.SourcePath)
 		fmt.Fprintf(&output, "- Scope: %s\n", markdownCodeList(rule.Scopes))
 		fmt.Fprintf(&output, "- Lenses: %s\n", markdownLensList(rule.Lenses))
 		fmt.Fprintf(&output, "- Directive: `%s`\n", rule.Directive)
-		writeAdoptionMetadata(&output, rule.Category, rule.Derivation, rule.Evidence, metadata)
+		writeAdoptionMetadata(
+			&output,
+			rule.Category,
+			rule.Derivation,
+			rule.Evidence,
+			metadata,
+		)
 		output.WriteString("\n")
 		output.WriteString(rule.Body)
 		if !strings.HasSuffix(rule.Body, "\n") {
@@ -300,24 +311,46 @@ func render(pack rulepack.Pack, number int) []byte {
 		output.WriteString("\n## Verification recipes\n")
 		for _, recipe := range recipes {
 			metadata := manifest[recipe.ID]
-			fmt.Fprintf(&output, "\n### %s (`%s`)\n\n", recipe.Title, recipe.ID)
+			fmt.Fprintf(
+				&output,
+				"\n### %s (`%s`)\n\n",
+				recipe.Title,
+				recipe.ID,
+			)
 			fmt.Fprintf(&output, "- Source: `%s`\n", recipe.SourcePath)
 			fmt.Fprintf(&output, "- Scope: %s\n", markdownCodeList(recipe.Scopes))
 			fmt.Fprintf(&output, "- Lenses: %s\n", markdownLensList(recipe.Lenses))
 			fmt.Fprintf(&output, "- When: %s\n", strings.TrimSpace(recipe.When))
-			writeAdoptionMetadata(&output, recipe.Category, recipe.Derivation, recipe.Evidence, metadata)
+			writeAdoptionMetadata(
+				&output,
+				recipe.Category,
+				recipe.Derivation,
+				recipe.Evidence,
+				metadata,
+			)
 		}
 	}
 	if len(skills) != 0 {
 		output.WriteString("\n## Agent Skills\n")
 		for _, skill := range skills {
 			metadata := manifest[skill.ID]
-			fmt.Fprintf(&output, "\n### %s (`%s`)\n\n", titleFromID(skill.ID), skill.ID)
+			fmt.Fprintf(
+				&output,
+				"\n### %s (`%s`)\n\n",
+				titleFromID(skill.ID),
+				skill.ID,
+			)
 			fmt.Fprintf(&output, "- Source: `%s`\n", skill.SourcePath)
 			fmt.Fprintf(&output, "- Description: %s\n", strings.TrimSpace(skill.Description))
 			fmt.Fprintf(&output, "- Scope: %s\n", markdownCodeList(metadata.Scopes))
 			fmt.Fprintf(&output, "- Lenses: %s\n", markdownLensList(metadata.Lenses))
-			writeAdoptionMetadata(&output, skill.Category, metadata.Derivation, metadata.Evidence, metadata)
+			writeAdoptionMetadata(
+				&output,
+				skill.Category,
+				metadata.Derivation,
+				metadata.Evidence,
+				metadata,
+			)
 		}
 	}
 	output.WriteString("\n## Consequences\n\n")
@@ -356,7 +389,12 @@ func markdownEvidenceList(evidence []rulepack.Evidence) string {
 	for _, item := range evidence {
 		values = append(
 			values,
-			fmt.Sprintf("`%s:%s` (`%s`)", item.Path, item.Lines, item.Role),
+			fmt.Sprintf(
+				"`%s:%s` (`%s`)",
+				item.Path,
+				item.Lines,
+				item.Role,
+			),
 		)
 	}
 	return strings.Join(values, ", ")

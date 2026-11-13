@@ -48,7 +48,12 @@ func Load(tb testing.TB) []Repository {
 	if !ok {
 		tb.Fatal("resolve benchmark helper path")
 	}
-	repositoryRoot := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", ".."))
+	repositoryRoot := filepath.Clean(filepath.Join(
+		filepath.Dir(filename),
+		"..",
+		"..",
+		"..",
+	))
 	data, err := os.ReadFile(filepath.Join(repositoryRoot, "testdata", "benchmarks.yaml"))
 	if err != nil {
 		tb.Fatal(err)
@@ -68,13 +73,30 @@ func Load(tb testing.TB) []Repository {
 func Open(tb testing.TB, root string, target Repository) *workspace.Repository {
 	tb.Helper()
 	repoPath := filepath.Join(root, target.Name)
-	command := exec.CommandContext(tb.Context(), "git", "-C", repoPath, "rev-parse", "HEAD")
+	command := exec.CommandContext(
+		tb.Context(),
+		"git",
+		"-C",
+		repoPath,
+		"rev-parse",
+		"HEAD",
+	)
 	output, err := command.CombinedOutput()
 	if err != nil {
-		tb.Fatalf("resolve %s HEAD: %v\n%s", target.Name, err, output)
+		tb.Fatalf(
+			"resolve %s HEAD: %v\n%s",
+			target.Name,
+			err,
+			output,
+		)
 	}
 	if got := strings.TrimSpace(string(output)); got != target.Commit {
-		tb.Fatalf("%s HEAD = %s, want %s", target.Name, got, target.Commit)
+		tb.Fatalf(
+			"%s HEAD = %s, want %s",
+			target.Name,
+			got,
+			target.Commit,
+		)
 	}
 	repo, err := workspace.OpenForInspect(tb.Context(), repoPath)
 	if err != nil {

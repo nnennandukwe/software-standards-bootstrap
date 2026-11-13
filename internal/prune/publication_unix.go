@@ -9,23 +9,28 @@ import (
 	"path/filepath"
 )
 
-var syncApplicationDirectory = syncDirectory
+type directorySyncOps struct{ sync func(string) error }
 
-func publishApplicationFileDurably(source, target string) error {
+func defaultApplicationPublicationOps() applicationPublicationOps {
+	durability := directorySyncOps{sync: syncDirectory}
+	return applicationPublicationOps{exclusive: defaultExclusiveFileOps(), publish: durability.publish, removePublication: durability.remove}
+}
+
+func (durability directorySyncOps) publish(source, target string) error {
 	if err := os.Link(source, target); err != nil {
 		return err
 	}
-	if err := syncApplicationDirectory(filepath.Dir(target)); err != nil {
+	if err := durability.sync(filepath.Dir(target)); err != nil {
 		return fmt.Errorf("sync application directory after publication: %w", err)
 	}
 	return nil
 }
 
-func removeApplicationPublicationFileDurably(filePath string) error {
+func (durability directorySyncOps) remove(filePath string) error {
 	if err := os.Remove(filePath); err != nil {
 		return err
 	}
-	if err := syncApplicationDirectory(filepath.Dir(filePath)); err != nil {
+	if err := durability.sync(filepath.Dir(filePath)); err != nil {
 		return fmt.Errorf("sync application directory after claim cleanup: %w", err)
 	}
 	return nil

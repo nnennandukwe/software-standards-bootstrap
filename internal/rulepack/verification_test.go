@@ -1,7 +1,6 @@
 package rulepack_test
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -273,11 +272,11 @@ steps:
 
 func validatePack(t *testing.T, repo string) (rulepack.Pack, []rulepack.Diagnostic) {
 	t.Helper()
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	pack, diagnostics, err := rulepack.Validate(t.Context(), ws)
 	if err != nil {
 		t.Fatal(err)
 	}

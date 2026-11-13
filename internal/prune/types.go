@@ -160,8 +160,8 @@ type ArtifactFile struct {
 	Mode   string `json:"mode"`
 }
 
-// Context is the immutable deterministic input to semantic proposal work.
-type Context struct {
+// ReviewContext is the immutable deterministic input to semantic proposal work.
+type ReviewContext struct {
 	Schema                   string            `json:"schema"`
 	ReviewID                 string            `json:"review_id"`
 	BaselineCommit           string            `json:"baseline_commit"`
