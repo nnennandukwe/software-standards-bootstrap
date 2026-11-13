@@ -3,6 +3,8 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/cli"
@@ -77,4 +79,47 @@ func commandName(args []string) string {
 		name += " " + args[1]
 	}
 	return name
+}
+
+func TestRunContextCancellationAfterPublicationKeepsInterruptionContract(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		target string
+	}{
+		{name: "render", target: "AGENTS.md"},
+		{name: "adr", target: "docs/adr/0001-actionable-standards.md"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root, baseline := evidenceRepository(t)
+			writeValidPack(t, root, baseline)
+			parent, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			ctx := cancelAfterPublicationContext{
+				Context: parent, cancel: cancel, target: filepath.Join(root, filepath.FromSlash(test.target)),
+			}
+			var stdout, stderr bytes.Buffer
+			code := cli.RunContext(&ctx, []string{test.name, "--repo", root}, &stdout, &stderr)
+			if code != 130 || stdout.Len() != 0 || stderr.String() != "error: interrupted\n" {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, &stdout, &stderr)
+			}
+			if data, err := os.ReadFile(ctx.target); err != nil || len(data) == 0 {
+				t.Fatalf("bounded publication didn't finish: bytes=%d, %v", len(data), err)
+			}
+		})
+	}
+}
+
+// Observing the published target triggers cancellation at the CLI's final check.
+// Preparation still uses a live caller context through the real write path.
+type cancelAfterPublicationContext struct {
+	context.Context
+	cancel context.CancelFunc
+	target string
+}
+
+func (ctx *cancelAfterPublicationContext) Err() error {
+	if _, err := os.Stat(ctx.target); err == nil {
+		ctx.cancel()
+	}
+	return ctx.Context.Err()
 }
