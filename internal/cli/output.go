@@ -111,7 +111,7 @@ func writeTextInventory(out io.Writer, report inventory.Report) {
 		report.Excluded.NonRegular,
 	)
 	if report.Truncated {
-		fmt.Fprintf(out, "Coverage: TRUNCATED — %s\n", report.TruncationReason)
+		fmt.Fprintf(out, "Coverage: TRUNCATED \u2014 %s\n", report.TruncationReason)
 	} else {
 		fmt.Fprintln(out, "Coverage: complete within configured limits")
 	}

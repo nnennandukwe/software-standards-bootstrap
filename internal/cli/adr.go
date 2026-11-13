@@ -95,7 +95,7 @@ func runADR(ctx context.Context, args []string, stdout, stderr io.Writer) (exitC
 		return writeADRError(stderr, err)
 	}
 	if *dryRun {
-		fmt.Fprintf(stdout, "Dry run — proposed %s:\n\n", result.Path)
+		fmt.Fprintf(stdout, "Dry run \u2014 proposed %s:\n\n", result.Path)
 		_, _ = stdout.Write(result.Content)
 		if len(result.Content) == 0 || result.Content[len(result.Content)-1] != '\n' {
 			fmt.Fprintln(stdout)

@@ -101,7 +101,7 @@ func runValidate(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	} else if response.Valid {
 		fmt.Fprintf(
 			stdout,
-			"Actionable pack valid: %d artifact(s) — %d semantic rule(s), %d verification recipe(s), %d Agent Skill(s), %d automation proposal(s); baseline %s\n",
+			"Actionable pack valid: %d artifact(s) \u2014 %d semantic rule(s), %d verification recipe(s), %d Agent Skill(s), %d automation proposal(s); baseline %s\n",
 			response.ArtifactCount,
 			response.RuleCount,
 			response.RecipeCount,
