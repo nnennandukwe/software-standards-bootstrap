@@ -11,7 +11,8 @@ func FuzzPortableGovernedPath(f *testing.F) {
 	for _, seed := range []string{
 		".software-standards/rules/keep-rule.md", ".agents/skills/example/SKILL.md",
 		".agents/skills/example/references/guide.md", "", "../escape", "/absolute",
-		`C:\escape`, `\\server\share`, "a/../b", "a//b", "a/NUL.txt", "a/COM¹", "a/trailing.", "a/space ", "a/\x00b",
+		`C:\escape`, `\\server\share`, "a/../b", "a//b", "a/NUL.txt", "a/COM\u00b9", // Windows also reserves COM followed by the superscript digit U+00B9.
+		"a/trailing.", "a/space ", "a/\x00b",
 	} {
 		f.Add(seed)
 	}
