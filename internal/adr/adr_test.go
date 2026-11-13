@@ -232,3 +232,20 @@ func writeFile(t *testing.T, path, contents string) {
 		t.Fatal(err)
 	}
 }
+
+func TestCreatePreCanceledLeavesDirectoryAbsent(t *testing.T) {
+	root := committedRepository(t)
+	ws, err := workspace.Open(t.Context(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = adr.Create(ctx, ws, testPack(ws.Baseline()), adr.Options{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cancellation, got %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "docs/adr")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("canceled operation created output: %v", err)
+	}
+}

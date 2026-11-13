@@ -26,6 +26,11 @@ make verify-release-archives
 
 ## Tag and workflow
 
+The release linker flags inject `.Tag` and `.FullCommit` into the binary.
+Run `ssb version` or `ssb --version` to read that identity as
+`ssb <version> (commit <full-commit>)`. Local builds use `dev` and `unknown`.
+Version output doesn't include a wall-clock build date.
+
 Create and push a signed semantic-version tag after every gate passes:
 
 ```bash

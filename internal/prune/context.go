@@ -42,6 +42,9 @@ func BuildContext(
 	repo *workspace.Repository,
 	options ContextOptions,
 ) (Context, error) {
+	if err := ctx.Err(); err != nil {
+		return Context{}, err
+	}
 	if !stableIDPattern.MatchString(options.ReviewID) {
 		return Context{}, fmt.Errorf("review id must be lower-case kebab-case")
 	}

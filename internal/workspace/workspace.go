@@ -188,6 +188,9 @@ func Open(ctx context.Context, path string) (*Repository, error) {
 }
 
 func open(ctx context.Context, path string, requireClean bool, recoveryCommand string) (*Repository, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if path == "" {
 		path = "."
 	}
@@ -205,6 +208,9 @@ func open(ctx context.Context, path string, requireClean bool, recoveryCommand s
 	versionCommand := exec.CommandContext(ctx, gitPath, "--version")
 	versionCommand.Env = append(os.Environ(), "LC_ALL=C")
 	versionOutput, err := versionCommand.Output()
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("read Git version: %w", ctxErr)
+	}
 	if err != nil || !supportedGitVersion(strings.TrimSpace(string(versionOutput))) {
 		return nil, &PreconditionError{
 			Problem:  "Git 2.39 or newer is required",
@@ -214,6 +220,9 @@ func open(ctx context.Context, path string, requireClean bool, recoveryCommand s
 
 	rootOut, err := runGit(ctx, gitPath, absolute, "rev-parse", "--show-toplevel")
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, err
+		}
 		return nil, &PreconditionError{
 			Problem:  fmt.Sprintf("%q is not a Git worktree", path),
 			Recovery: "run ssb from a non-bare Git repository or pass --repo PATH",
@@ -226,6 +235,9 @@ func open(ctx context.Context, path string, requireClean bool, recoveryCommand s
 	}
 
 	if _, err := runGit(ctx, gitPath, root, "symbolic-ref", "-q", "HEAD"); err != nil {
+		if ctx.Err() != nil {
+			return nil, err
+		}
 		return nil, &PreconditionError{
 			Problem:  "detached HEAD is not supported",
 			Recovery: "switch to a branch before running ssb",
@@ -233,6 +245,9 @@ func open(ctx context.Context, path string, requireClean bool, recoveryCommand s
 	}
 	baselineOut, err := runGit(ctx, gitPath, root, "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}")
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, err
+		}
 		return nil, &PreconditionError{
 			Problem:  "the repository has no commit-backed HEAD",
 			Recovery: "create an initial commit before running ssb",
@@ -316,12 +331,18 @@ func (r *Repository) verifyStableSnapshot(
 	operation, recoveryCommand string,
 ) error {
 	if _, err := r.Git(ctx, "symbolic-ref", "-q", "HEAD"); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
 		return &PreconditionError{
 			Problem:  "HEAD became detached during " + operation,
 			Recovery: "switch to a branch and rerun " + recoveryCommand,
 		}
 	}
 	current, err := r.Git(ctx, "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}")
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
 	if err != nil || trimGitLine(current) != r.baseline {
 		return &PreconditionError{
 			Problem:  "HEAD changed during " + operation,

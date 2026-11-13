@@ -4,6 +4,7 @@ package render
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -157,7 +158,10 @@ func sizeWarning(measurement SizeMeasurement) SizeWarning {
 
 // Apply renders a valid pack. It never repairs malformed markers or overwrites
 // a symlink. Dry runs return the complete proposed file without writing it.
-func Apply(repo *workspace.Repository, pack rulepack.Pack, dryRun bool) (Result, error) {
+func Apply(ctx context.Context, repo *workspace.Repository, pack rulepack.Pack, dryRun bool) (Result, error) {
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
 	plan, err := Build(pack)
 	if err != nil {
 		return Result{}, err
@@ -201,6 +205,9 @@ func Apply(repo *workspace.Repository, pack rulepack.Pack, dryRun bool) (Result,
 		if dryRun || !result.Changed {
 			return result, nil
 		}
+		if err := ctx.Err(); err != nil {
+			return Result{}, err
+		}
 		warning, err := publishProjection(repo.Root(), routing, target, existing, next, mode, exists, agentsChanged, writeAtomic)
 		if err != nil {
 			return Result{}, err
@@ -240,6 +247,9 @@ func Apply(repo *workspace.Repository, pack rulepack.Pack, dryRun bool) (Result,
 	}
 	if dryRun || !result.Changed {
 		return result, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
 	}
 	warning, err := publishProjection(repo.Root(), routing, target, existing, next, mode, exists, agentsChanged, writeAtomic)
 	if err != nil {

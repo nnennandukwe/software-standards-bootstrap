@@ -287,6 +287,8 @@ func TestHelpDocumentsOnlyTheCanonicalCommandForms(t *testing.T) {
 		"ssb render   [--repo PATH] [--review ID] [--dry-run]",
 		"ssb adr      [--repo PATH] [--review ID] [--adr-dir PATH] [--dry-run]",
 		"ssb prune    <inspect|validate|approve|apply|recover|status|verify> [options]",
+		"ssb version",
+		"ssb --version",
 	} {
 		if !strings.Contains(stdout.String(), form) {
 			t.Fatalf("help missing %q:\n%s", form, stdout.String())
@@ -595,7 +597,7 @@ artifacts:
 
 	runCLI("render", "--repo", repo, "--review", "retained-rule-review")
 	runCLI("adr", "--repo", repo, "--review", "retained-rule-review")
-	review, diagnostics, err := prune.LoadReview(repo, "retained-rule-review")
+	review, diagnostics, err := prune.LoadReview(t.Context(), repo, "retained-rule-review")
 	if err != nil {
 		t.Fatal(err)
 	}

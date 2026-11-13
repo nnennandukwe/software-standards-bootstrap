@@ -62,7 +62,10 @@ type VerificationResult struct {
 }
 
 // ReviewStatus reads the bundle and derives every independent state.
-func ReviewStatus(repoRoot, reviewID string) (Status, []Diagnostic, error) {
+func ReviewStatus(ctx context.Context, repoRoot, reviewID string) (Status, []Diagnostic, error) {
+	if err := ctx.Err(); err != nil {
+		return Status{}, nil, err
+	}
 	store, err := openReviewStore(repoRoot, reviewID)
 	if err != nil {
 		return Status{}, nil, err
@@ -80,14 +83,15 @@ func ReviewStatus(repoRoot, reviewID string) (Status, []Diagnostic, error) {
 		return Status{}, nil, err
 	}
 	status.Proposed = true
-	review, diagnostics, err := loadReviewFromStore(store)
+	review, diagnostics, err := loadReviewFromStore(ctx, store)
 	if err != nil {
 		return Status{}, nil, err
 	}
-	return deriveReviewStatus(review, diagnostics)
+	return deriveReviewStatus(ctx, review, diagnostics)
 }
 
 func deriveReviewStatus(
+	ctx context.Context,
 	review Review,
 	diagnostics []Diagnostic,
 ) (Status, []Diagnostic, error) {
@@ -116,8 +120,11 @@ func deriveReviewStatus(
 		if approvalErr != nil {
 			return Status{}, nil, approvalErr
 		}
-		plan, planErr := canonicalApplicationPlan(review, approval)
+		plan, planErr := canonicalApplicationPlan(ctx, review, approval)
 		if planErr != nil {
+			if errors.Is(planErr, context.Canceled) || errors.Is(planErr, context.DeadlineExceeded) {
+				return Status{}, nil, planErr
+			}
 			diagnostics = append(diagnostics, Diagnostic{
 				Path:     "events.jsonl",
 				Field:    "application_plan",
@@ -141,14 +148,21 @@ type Transition struct {
 	done   bool
 }
 
-// BeginTransition validates and locks a separate rerender or ADR state before
-// its corresponding file write begins.
-func BeginTransition(repoPath, reviewID, kind string, now func() time.Time) (*Transition, error) {
-	store, unlock, err := acquireReviewLock(repoPath, reviewID)
+// TransitionOptions identifies the review, event kind, and optional clock.
+type TransitionOptions struct {
+	ReviewID string
+	Kind     string
+	Now      func() time.Time
+}
+
+// BeginTransition validates and locks a rerender or ADR before its file write.
+func BeginTransition(ctx context.Context, repoPath string, options TransitionOptions) (*Transition, error) {
+	reviewID, kind, now := options.ReviewID, options.Kind, options.Now
+	store, unlock, err := acquireReviewLock(ctx, repoPath, reviewID)
 	if err != nil {
 		return nil, err
 	}
-	review, diagnostics, err := loadReviewFromStore(store)
+	review, diagnostics, err := loadReviewFromStore(ctx, store)
 	if err != nil {
 		return nil, errors.Join(err, unlock())
 	}
@@ -193,7 +207,10 @@ func BeginTransition(repoPath, reviewID, kind string, now func() time.Time) (*Tr
 }
 
 // Complete appends the transition result and releases the review lock.
-func (transition *Transition) Complete(payload any) (Event, error) {
+// After publishing files, a caller passes context.WithoutCancel(ctx) so event
+// recording finishes in the same bounded sequence. A no-op keeps its caller
+// context so cancellation can still stop the event write.
+func (transition *Transition) Complete(ctx context.Context, payload any) (Event, error) {
 	if transition.done {
 		return Event{}, fmt.Errorf("transition is already complete")
 	}
@@ -205,7 +222,7 @@ func (transition *Transition) Complete(payload any) (Event, error) {
 		transition.now = time.Now
 	}
 	event := newEvent(transition.review, transition.kind, data, transition.now().UTC())
-	if err := appendEvent(transition.review, event); err != nil {
+	if err := appendEvent(ctx, transition.review, event); err != nil {
 		return Event{}, err
 	}
 	transition.done = true
@@ -230,32 +247,39 @@ func (transition *Transition) Cancel() error {
 	return transition.unlock()
 }
 
-// Verify accepts only exact, passing, content-addressed receipts for every
-// required external check and records verification as a separate event.
+// VerificationOptions identifies the review, receipt directory, and optional clock.
+type VerificationOptions struct {
+	ReviewID    string
+	ReceiptsDir string
+	Now         func() time.Time
+}
+
+// Verify accepts exact passing receipts and records a separate verification event.
 func Verify(
 	ctx context.Context,
-	repoPath, reviewID, receiptsDir string,
-	now func() time.Time,
+	repoPath string,
+	options VerificationOptions,
 ) (result VerificationResult, returnErr error) {
+	reviewID, receiptsDir, now := options.ReviewID, options.ReceiptsDir, options.Now
 	repo, err := workspace.Open(ctx, repoPath)
 	if err != nil {
 		return VerificationResult{}, err
 	}
-	store, unlock, err := acquireReviewLock(repo.Root(), reviewID)
+	store, unlock, err := acquireReviewLock(ctx, repo.Root(), reviewID)
 	if err != nil {
 		return VerificationResult{}, err
 	}
 	defer func() {
 		returnErr = errors.Join(returnErr, unlock())
 	}()
-	review, diagnostics, err := loadReviewFromStore(store)
+	review, diagnostics, err := loadReviewFromStore(ctx, store)
 	if err != nil {
 		return VerificationResult{}, err
 	}
 	if len(diagnostics) != 0 {
 		return VerificationResult{}, validationError("proposal has %d error(s)", len(diagnostics))
 	}
-	status, _, err := deriveReviewStatus(review, diagnostics)
+	status, _, err := deriveReviewStatus(ctx, review, diagnostics)
 	if err != nil {
 		return VerificationResult{}, err
 	}
@@ -275,8 +299,11 @@ func Verify(
 	if err != nil {
 		return VerificationResult{}, err
 	}
-	plan, err := canonicalApplicationPlan(review, approval)
+	plan, err := canonicalApplicationPlan(ctx, review, approval)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return VerificationResult{}, err
+		}
 		return VerificationResult{}, validationError("derive application plan: %v", err)
 	}
 	applicationEvent, applied, err := appliedEventFor(review)
@@ -391,7 +418,7 @@ func Verify(
 		now = time.Now
 	}
 	event := newEvent(review, EventVerified, data, now().UTC())
-	if err := appendEvent(review, event); err != nil {
+	if err := appendEvent(ctx, review, event); err != nil {
 		return VerificationResult{}, err
 	}
 	return result, nil

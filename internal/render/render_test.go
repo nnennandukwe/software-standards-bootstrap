@@ -26,7 +26,7 @@ func TestApplyPreservesExistingBytesAndProjectsOnlySurvivingRules(t *testing.T) 
 	}
 
 	pack := testPack(ws.Baseline(), "first-rule", "First rule body.", "second-rule", "Second rule body.")
-	first, err := render.Apply(ws, pack, false)
+	first, err := render.Apply(t.Context(), ws, pack, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestApplyPreservesExistingBytesAndProjectsOnlySurvivingRules(t *testing.T) 
 	}
 
 	pack = testPack(ws.Baseline(), "second-rule", "Edited second rule body.")
-	second, err := render.Apply(ws, pack, false)
+	second, err := render.Apply(t.Context(), ws, pack, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestApplyPreservesExistingBytesAndProjectsOnlySurvivingRules(t *testing.T) 
 		t.Fatalf("surviving projection is wrong:\n%s", rendered)
 	}
 
-	third, err := render.Apply(ws, pack, false)
+	third, err := render.Apply(t.Context(), ws, pack, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestApplyDryRunDoesNotCreateAgentsFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := render.Apply(ws, testPack(ws.Baseline(), "one-rule", "Body."), true)
+	result, err := render.Apply(t.Context(), ws, testPack(ws.Baseline(), "one-rule", "Body."), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestApplyBlocksDriftMalformedMarkersAndSymlinkTargets(t *testing.T) {
 			t.Fatal(err)
 		}
 		pack := testPack(ws.Baseline(), "one-rule", "Original body.")
-		if _, err := render.Apply(ws, pack, false); err != nil {
+		if _, err := render.Apply(t.Context(), ws, pack, false); err != nil {
 			t.Fatal(err)
 		}
 		target := filepath.Join(repo, "AGENTS.md")
@@ -111,7 +111,7 @@ func TestApplyBlocksDriftMalformedMarkersAndSymlinkTargets(t *testing.T) {
 		drifted := strings.Replace(string(before), "Original body.", "Direct edit.", 1)
 		writeFile(t, target, drifted)
 
-		_, err = render.Apply(ws, pack, false)
+		_, err = render.Apply(t.Context(), ws, pack, false)
 		if !errors.Is(err, render.ErrDrift) {
 			t.Fatalf("expected drift error, got %v", err)
 		}
@@ -134,7 +134,7 @@ func TestApplyBlocksDriftMalformedMarkersAndSymlinkTargets(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		_, err = render.Apply(ws, testPack(ws.Baseline(), "one-rule", "Body."), false)
+		_, err = render.Apply(t.Context(), ws, testPack(ws.Baseline(), "one-rule", "Body."), false)
 		if !errors.Is(err, render.ErrMarkers) {
 			t.Fatalf("expected marker error, got %v", err)
 		}
@@ -159,7 +159,7 @@ func TestApplyBlocksDriftMalformedMarkersAndSymlinkTargets(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		_, err = render.Apply(ws, testPack(ws.Baseline(), "one-rule", "Body."), false)
+		_, err = render.Apply(t.Context(), ws, testPack(ws.Baseline(), "one-rule", "Body."), false)
 		if !errors.Is(err, render.ErrUnsafeTarget) {
 			t.Fatalf("expected unsafe target error, got %v", err)
 		}
@@ -194,7 +194,7 @@ func TestApplyWriteFailureLeavesExistingAgentsUntouched(t *testing.T) {
 		}
 	}()
 
-	_, err = render.Apply(ws, testPack(ws.Baseline(), "one-rule", "Body."), false)
+	_, err = render.Apply(t.Context(), ws, testPack(ws.Baseline(), "one-rule", "Body."), false)
 	if err == nil {
 		t.Fatal("expected staged write failure")
 	}
@@ -286,5 +286,22 @@ func writeFile(t *testing.T, path, contents string) {
 	}
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestApplyPreCanceledLeavesProjectionUntouched(t *testing.T) {
+	root := committedRepository(t)
+	ws, err := workspace.Open(t.Context(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = render.Apply(ctx, ws, testPack(ws.Baseline(), "first-rule", "Rule body."), false)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cancellation, got %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "AGENTS.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("canceled operation created output: %v", err)
 	}
 }

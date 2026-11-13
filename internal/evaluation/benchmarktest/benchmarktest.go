@@ -3,7 +3,6 @@
 package benchmarktest
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -69,7 +68,7 @@ func Load(tb testing.TB) []Repository {
 func Open(tb testing.TB, root string, target Repository) *workspace.Repository {
 	tb.Helper()
 	repoPath := filepath.Join(root, target.Name)
-	command := exec.Command("git", "-C", repoPath, "rev-parse", "HEAD")
+	command := exec.CommandContext(tb.Context(), "git", "-C", repoPath, "rev-parse", "HEAD")
 	output, err := command.CombinedOutput()
 	if err != nil {
 		tb.Fatalf("resolve %s HEAD: %v\n%s", target.Name, err, output)
@@ -77,7 +76,7 @@ func Open(tb testing.TB, root string, target Repository) *workspace.Repository {
 	if got := strings.TrimSpace(string(output)); got != target.Commit {
 		tb.Fatalf("%s HEAD = %s, want %s", target.Name, got, target.Commit)
 	}
-	repo, err := workspace.OpenForInspect(context.Background(), repoPath)
+	repo, err := workspace.OpenForInspect(tb.Context(), repoPath)
 	if err != nil {
 		tb.Fatal(err)
 	}

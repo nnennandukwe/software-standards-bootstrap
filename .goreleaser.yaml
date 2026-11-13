@@ -19,7 +19,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -buildid=
+      - -s -w -buildid= -X github.com/nnennandukwe/software-standards-bootstrap/internal/buildinfo.Version={{ .Tag }} -X github.com/nnennandukwe/software-standards-bootstrap/internal/buildinfo.Commit={{ .FullCommit }}
 
 archives:
   - id: release

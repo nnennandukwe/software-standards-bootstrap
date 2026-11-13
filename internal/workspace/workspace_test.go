@@ -13,6 +13,15 @@ import (
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/workspace"
 )
 
+func TestOpenPreservesPreCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := workspace.Open(ctx, t.TempDir())
+	if !errors.Is(err, context.Canceled) || errors.Is(err, workspace.ErrPrecondition) {
+		t.Fatalf("expected cancellation without repository classification, got %v", err)
+	}
+}
+
 func TestOpenForInspectAcceptsUntrackedFilesButRejectsTrackedChanges(t *testing.T) {
 	repo := newRepository(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "committed\n")

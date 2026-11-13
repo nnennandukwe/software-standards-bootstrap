@@ -192,6 +192,9 @@ func scan(
 
 	candidates := make([]treeEntry, 0, len(entries))
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return Report{}, err
+		}
 		switch entry.mode {
 		case "120000":
 			report.Excluded.Symlink++

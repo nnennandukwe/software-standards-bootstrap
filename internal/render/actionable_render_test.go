@@ -23,7 +23,7 @@ func TestApplyProjectsActionFirstRulesInertCommandsAndScannableSkills(t *testing
 	}
 	pack := actionableProjectionPack(ws.Baseline())
 
-	result, err := render.Apply(ws, pack, true)
+	result, err := render.Apply(t.Context(), ws, pack, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestApplyProjectsManifestRootAndPortableRoutingWriteSet(t *testing.T) {
 		},
 	}
 
-	result, err := render.Apply(ws, pack, true)
+	result, err := render.Apply(t.Context(), ws, pack, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestApplyPublishesRoutingTreeAndBlocksDriftWithoutPartialOutput(t *testing.
 		t.Fatal(err)
 	}
 
-	first, err := render.Apply(ws, pack, false)
+	first, err := render.Apply(t.Context(), ws, pack, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestApplyPublishesRoutingTreeAndBlocksDriftWithoutPartialOutput(t *testing.
 		}
 	}
 
-	second, err := render.Apply(ws, pack, false)
+	second, err := render.Apply(t.Context(), ws, pack, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestApplyPublishesRoutingTreeAndBlocksDriftWithoutPartialOutput(t *testing.
 		t.Fatal(err)
 	}
 
-	_, err = render.Apply(ws, pack, false)
+	_, err = render.Apply(t.Context(), ws, pack, false)
 	if !errors.Is(err, render.ErrDrift) {
 		t.Fatalf("expected routing drift error, got %v", err)
 	}
@@ -399,7 +399,7 @@ func TestApplyKeepsOrientationDocumentLinksRepositoryRelative(t *testing.T) {
 			pack.Orientation.Documents[0].Path = test.path
 			attachManifestRouting(&pack)
 
-			result, err := render.Apply(ws, pack, true)
+			result, err := render.Apply(t.Context(), ws, pack, true)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -429,7 +429,7 @@ func TestApplyContainsRawRuleHeadingsInsideTheRuleBody(t *testing.T) {
 			pack := actionableProjectionPack(ws.Baseline())
 			pack.Rules[0].Body = test.body
 
-			result, err := render.Apply(ws, pack, true)
+			result, err := render.Apply(t.Context(), ws, pack, true)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -474,7 +474,7 @@ func TestApplyOrdersEveryDirectiveAndUtilityDeterministically(t *testing.T) {
 			pack.Report.Artifacts[index].Utility.Total = total
 		}
 	}
-	result, err := render.Apply(ws, pack, true)
+	result, err := render.Apply(t.Context(), ws, pack, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +495,7 @@ func TestApplyEscapesSchemaScalarsWithoutChangingCanonicalRuleBodies(t *testing.
 	pack.Recipes[0].When = "Before *handoff* [now]."
 	pack.Recipes[0].Steps[0].ExpectedResult = "A [literal] *result*."
 	pack.Skills[0].Description = "Use *literal* [routing] text."
-	result, err := render.Apply(ws, pack, true)
+	result, err := render.Apply(t.Context(), ws, pack, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -523,7 +523,7 @@ func TestApplyBindsManifestSources(t *testing.T) {
 	}
 	embedded := actionableProjectionPack(ws.Baseline())
 	embedded.Layout = rulepack.LayoutEmbedded
-	embeddedResult, err := render.Apply(ws, embedded, true)
+	embeddedResult, err := render.Apply(t.Context(), ws, embedded, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -544,7 +544,7 @@ func TestApplyBindsManifestSources(t *testing.T) {
 		Artifacts: manifestLayout.Report.Artifacts,
 	}
 	attachManifestRouting(&manifestLayout)
-	manifestResult, err := render.Apply(ws, manifestLayout, true)
+	manifestResult, err := render.Apply(t.Context(), ws, manifestLayout, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -572,7 +572,7 @@ func TestApplyPreservesEmbeddedLayoutBehavior(t *testing.T) {
 	}
 	pack := actionableProjectionPack(strings.Repeat("a", 40))
 	pack.Layout = rulepack.LayoutEmbedded
-	result, err := render.Apply(ws, pack, true)
+	result, err := render.Apply(t.Context(), ws, pack, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -620,7 +620,7 @@ func TestApplyProjectsOrientationAndBindsItToSourceIdentity(t *testing.T) {
 	pack.Orientation = projectionOrientation()
 	attachManifestRouting(&pack)
 
-	first, err := render.Apply(ws, pack, true)
+	first, err := render.Apply(t.Context(), ws, pack, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -643,7 +643,7 @@ func TestApplyProjectsOrientationAndBindsItToSourceIdentity(t *testing.T) {
 	assertOrdered(t, content, "This managed section is derived", "### Repository orientation", "### How routing works")
 
 	pack.Orientation.Summary.Text = "A changed reviewed summary."
-	second, err := render.Apply(ws, pack, true)
+	second, err := render.Apply(t.Context(), ws, pack, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -665,7 +665,7 @@ func TestApplyRendersNonCommandControlCharactersAsVisibleText(t *testing.T) {
 	pack.Recipes[0].Steps[0].ExpectedResult = "Success\n### injected result"
 	pack.Skills[0].Description = "Review\n### injected skill heading \u202e\u2029tail"
 
-	result, err := render.Apply(ws, pack, true)
+	result, err := render.Apply(t.Context(), ws, pack, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -710,7 +710,7 @@ func TestApplyEscapesTildeFencesAndTrimsProjectedProse(t *testing.T) {
 	pack.Skills[0].Description = "  ~~~ Review a change.\n"
 	attachManifestRouting(&pack)
 
-	result, err := render.Apply(ws, pack, true)
+	result, err := render.Apply(t.Context(), ws, pack, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -749,7 +749,7 @@ func TestApplyOmitsEmptyOrientationAndRejectsMarkerInjection(t *testing.T) {
 	pack.Manifest.Orientation = rulepack.FileReference{Path: pack.OrientationPath, SHA256: "sha256:" + strings.Repeat("3", 64)}
 	pack.Orientation = &rulepack.Orientation{Schema: rulepack.OrientationSchema}
 	attachManifestRouting(&pack)
-	result, err := render.Apply(ws, pack, true)
+	result, err := render.Apply(t.Context(), ws, pack, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -762,7 +762,7 @@ func TestApplyOmitsEmptyOrientationAndRejectsMarkerInjection(t *testing.T) {
 	writeFile(t, target, before)
 	pack.Orientation = projectionOrientation()
 	pack.Orientation.Summary.Text = "unsafe " + render.StartMarker
-	_, err = render.Apply(ws, pack, false)
+	_, err = render.Apply(t.Context(), ws, pack, false)
 	if !errors.Is(err, render.ErrMarkers) {
 		t.Fatalf("expected marker error, got %v", err)
 	}
@@ -796,7 +796,7 @@ func TestApplyRejectsReservedMarkersFromCanonicalInputs(t *testing.T) {
 			}
 			pack := actionableProjectionPack(ws.Baseline())
 			test.mutate(&pack)
-			_, err = render.Apply(ws, pack, false)
+			_, err = render.Apply(t.Context(), ws, pack, false)
 			if !errors.Is(err, render.ErrMarkers) {
 				t.Fatalf("expected marker error, got %v", err)
 			}
@@ -849,7 +849,7 @@ func TestApplyDoesNotWriteEmptyOrAutomationOnlyProjection(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := render.Apply(ws, test.pack(ws.Baseline()), false)
+			result, err := render.Apply(t.Context(), ws, test.pack(ws.Baseline()), false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -884,10 +884,10 @@ func TestApplyRemovesStaleSectionForNonActionablePacks(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := render.Apply(ws, actionableProjectionPack(ws.Baseline()), false); err != nil {
+			if _, err := render.Apply(t.Context(), ws, actionableProjectionPack(ws.Baseline()), false); err != nil {
 				t.Fatal(err)
 			}
-			result, err := render.Apply(ws, test.pack(ws.Baseline()), false)
+			result, err := render.Apply(t.Context(), ws, test.pack(ws.Baseline()), false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -917,7 +917,7 @@ func TestApplyRemovesGeneratedRoutingTreeWithEmptyManifestPack(t *testing.T) {
 	active := actionableProjectionPack(ws.Baseline())
 	active.Layout = rulepack.LayoutManifest
 	attachManifestRouting(&active)
-	if _, err := render.Apply(ws, active, false); err != nil {
+	if _, err := render.Apply(t.Context(), ws, active, false); err != nil {
 		t.Fatal(err)
 	}
 	routingPath := filepath.Join(repo, filepath.FromSlash(render.RoutingDirectory))
@@ -926,7 +926,7 @@ func TestApplyRemovesGeneratedRoutingTreeWithEmptyManifestPack(t *testing.T) {
 	}
 
 	empty := rulepack.Pack{Layout: rulepack.LayoutManifest, BaselineCommit: ws.Baseline()}
-	result, err := render.Apply(ws, empty, false)
+	result, err := render.Apply(t.Context(), ws, empty, false)
 	if err != nil {
 		t.Fatal(err)
 	}

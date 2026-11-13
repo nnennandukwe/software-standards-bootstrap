@@ -93,10 +93,15 @@ func TestReleaseConfigurationKeepsToolchainTargetsAndAttestationGates(t *testing
 		"skills/software-standards-bootstrap/SKILL.md",
 		"draft: true",
 		"replace_existing_artifacts: false",
+		"internal/buildinfo.Version={{ .Tag }}",
+		"internal/buildinfo.Commit={{ .FullCommit }}",
 	} {
 		if !strings.Contains(config, required) {
 			t.Errorf("GoReleaser config missing %q", required)
 		}
+	}
+	if strings.Contains(config, "{{ .Date }}") || strings.Contains(config, "buildinfo.Date") {
+		t.Error("release identity mustn't include a wall-clock build date")
 	}
 }
 
