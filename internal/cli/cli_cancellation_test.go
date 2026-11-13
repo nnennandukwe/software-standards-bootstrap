@@ -287,3 +287,60 @@ func (ctx *cancelDuringReviewLoadContext) Err() error {
 	}
 	return ctx.Context.Err()
 }
+
+func TestCancellationPreservesPackReadFailure(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("requires owner read permissions to deny the pack read")
+	}
+	for _, command := range []string{"validate", "render", "adr"} {
+		t.Run(command, func(t *testing.T) {
+			root, baseline := evidenceRepository(t)
+			writeValidPack(t, root, baseline)
+			report := filepath.Join(root, ".software-standards", "report.md")
+			if err := os.Chmod(report, 0o000); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(report, 0o644) })
+			args := []string{command, "--repo", root}
+			var normalOutput, normalDiagnostics bytes.Buffer
+			if code := cli.Run(args, &normalOutput, &normalDiagnostics); code != 3 ||
+				!strings.Contains(normalDiagnostics.String(), "read .software-standards/report.md") {
+				t.Fatalf("normal pack read failure: exit=%d stdout=%q stderr=%q", code, &normalOutput, &normalDiagnostics)
+			}
+			parent, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			ctx := cancelAfterPackReadContext{Context: parent, cancel: cancel}
+			var output, diagnostics bytes.Buffer
+			code := cli.RunContext(&ctx, args, &output, &diagnostics)
+			if !ctx.triggered || parent.Err() != context.Canceled {
+				t.Fatal("pack-read failure didn't coincide with caller cancellation")
+			}
+			if code != 3 || output.Len() != 0 || diagnostics.String() != normalDiagnostics.String() {
+				t.Fatalf("canceled pack read failure: exit=%d stdout=%q stderr=%q; want stderr=%q", code, &output, &diagnostics, &normalDiagnostics)
+			}
+			if err := os.Chmod(report, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			output.Reset()
+			diagnostics.Reset()
+			if code := cli.Run(args, &output, &diagnostics); code != 0 {
+				t.Fatalf("retry after restoring report access: exit=%d stdout=%q stderr=%q", code, &output, &diagnostics)
+			}
+		})
+	}
+}
+
+type cancelAfterPackReadContext struct {
+	context.Context
+	cancel    context.CancelFunc
+	triggered bool
+}
+
+func (ctx *cancelAfterPackReadContext) Err() error {
+	pc, _, _, ok := runtime.Caller(1)
+	if ok && strings.Contains(runtime.FuncForPC(pc).Name(), "/internal/rulepack.validateActionablePack.func") {
+		ctx.triggered = true
+		ctx.cancel()
+	}
+	return ctx.Context.Err()
+}

@@ -1392,7 +1392,7 @@ func validateActionablePack(
 		return Pack{}, nil, err
 	}
 	defer func() {
-		if err := ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil && returnErr == nil {
 			pack, diagnostics, returnErr = Pack{}, nil, err
 		}
 	}()
