@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/cli"
@@ -166,4 +168,60 @@ type cancelDuringDeliveryWriter struct {
 func (writer cancelDuringDeliveryWriter) Write(data []byte) (int, error) {
 	writer.cancel()
 	return writer.Writer.Write(data)
+}
+
+func TestCancellationPreservesRecoveryFailure(t *testing.T) {
+	root, _ := evidenceRepository(t)
+	lock := filepath.Join(root, ".software-standards", "reviews", "review-one", ".transition.lock")
+	obstruction := filepath.Join(lock, "retained-file")
+	writeFile(t, obstruction, "keep this recovery evidence\n")
+	args := []string{"prune", "recover", "--repo", root, "--review", "review-one", "--clear-stale-lock"}
+	var normalOutput, normalDiagnostics bytes.Buffer
+	wantCode := cli.Run(args, &normalOutput, &normalDiagnostics)
+	if wantCode != 3 || !strings.Contains(normalDiagnostics.String(), "clear stale review transition lock") {
+		t.Fatalf("normal recovery failure: exit=%d stdout=%q stderr=%q", wantCode, &normalOutput, &normalDiagnostics)
+	}
+	parent, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	ctx := cancelAtRecoveryBoundaryContext{Context: parent, cancel: cancel}
+	var output, diagnostics bytes.Buffer
+	code := cli.RunContext(&ctx, args, &output, &diagnostics)
+	if !ctx.triggered || parent.Err() != context.Canceled {
+		t.Fatal("recovery didn't reach its bounded cleanup after the caller was canceled")
+	}
+	if code != wantCode || output.Len() != 0 || diagnostics.String() != normalDiagnostics.String() {
+		t.Fatalf("canceled recovery failure: exit=%d stdout=%q stderr=%q; want exit=%d stderr=%q", code, &output, &diagnostics, wantCode, &normalDiagnostics)
+	}
+	if data, err := os.ReadFile(obstruction); err != nil || string(data) != "keep this recovery evidence\n" {
+		t.Fatalf("recovery evidence changed: %q, %v", data, err)
+	}
+	if err := os.Remove(obstruction); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	diagnostics.Reset()
+	if code := cli.Run(args, &output, &diagnostics); code != 0 {
+		t.Fatalf("recovery retry: exit=%d stdout=%q stderr=%q", code, &output, &diagnostics)
+	}
+	if _, err := os.Lstat(lock); !os.IsNotExist(err) {
+		t.Fatalf("recovery retry left its lock: %v", err)
+	}
+}
+
+// Simulate an interrupt immediately after Recover accepts its last cancellable
+// check. Its real filesystem cleanup then fails inside the bounded sequence.
+type cancelAtRecoveryBoundaryContext struct {
+	context.Context
+	cancel    context.CancelFunc
+	triggered bool
+}
+
+func (ctx *cancelAtRecoveryBoundaryContext) Err() error {
+	err := ctx.Context.Err()
+	pc, _, _, ok := runtime.Caller(1)
+	if ok && strings.HasSuffix(runtime.FuncForPC(pc).Name(), "/internal/prune.Recover") {
+		ctx.triggered = true
+		ctx.cancel()
+	}
+	return err
 }

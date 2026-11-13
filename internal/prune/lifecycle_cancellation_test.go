@@ -74,6 +74,52 @@ func TestCancellationDuringPlanDerivation(t *testing.T) {
 	}
 }
 
+func TestLoadReviewCancellationAfterEntry(t *testing.T) {
+	for _, invalidCandidate := range []bool{false, true} {
+		t.Run(strconv.FormatBool(invalidCandidate), func(t *testing.T) {
+			root := lifecycleRepository(t)
+			candidate := configureRuleUpdateCandidate(t, root)
+			if invalidCandidate {
+				if err := os.WriteFile(candidate, []byte("changed candidate\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			parent, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			ctx := cancelAfterLoadEntryContext{Context: parent, cancel: cancel}
+			review, diagnostics, err := prune.LoadReview(&ctx, root, "review-one")
+			if parent.Err() != context.Canceled || !errors.Is(err, context.Canceled) {
+				t.Fatalf("caller=%v, loaded=%s, diagnostics=%v, error=%v", parent.Err(), review.Context.ReviewID, diagnostics, err)
+			}
+			if review.Context.ReviewID != "" || len(diagnostics) != 0 {
+				t.Fatalf("canceled load exposed a review or diagnostics: %+v, %v", review, diagnostics)
+			}
+			for _, name := range []string{"events.jsonl", "application-journal.json", ".transition.lock"} {
+				if _, err := os.Lstat(filepath.Join(root, ".software-standards", "reviews", "review-one", name)); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("canceled load left %s: %v", name, err)
+				}
+			}
+		})
+	}
+}
+
+// Cancel just after the loader's entry check observes a live caller. This
+// reproduces cancellation during the subsequent filesystem validation window.
+type cancelAfterLoadEntryContext struct {
+	context.Context
+	cancel context.CancelFunc
+	checks int
+}
+
+func (ctx *cancelAfterLoadEntryContext) Err() error {
+	err := ctx.Context.Err()
+	ctx.checks++
+	if ctx.checks == 2 {
+		ctx.cancel()
+	}
+	return err
+}
+
 func TestApprovalCancellationBeforeEvent(t *testing.T) {
 	root := cancellationRemovalReview(t)
 	ctx, cancel := context.WithCancel(t.Context())

@@ -298,7 +298,16 @@ func loadReviewFromStore(ctx context.Context, store *reviewStore) (Review, []Dia
 		}
 		return Review{}, nil, validationError("%v", err)
 	}
-	return review, validateProposal(reviewContext, proposal, store.ReadRegular), nil
+	diagnostics := validateProposal(reviewContext, proposal, func(name string) ([]byte, os.FileInfo, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		return store.ReadRegular(name)
+	})
+	if err := ctx.Err(); err != nil {
+		return Review{}, nil, err
+	}
+	return review, diagnostics, nil
 }
 
 // ValidateReview extends structural loading with candidate contracts and the

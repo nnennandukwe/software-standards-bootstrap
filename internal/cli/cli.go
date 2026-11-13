@@ -42,6 +42,8 @@ Exit codes:
   3  unexpected internal failure
   4  inventory coverage incomplete
   130 interrupted before output delivery
+
+Independent failures keep their exit code and recovery diagnostics.
 `
 
 const (
@@ -137,7 +139,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 // RunContext executes a command using the caller's cancellation lifetime.
 // It holds output until execution completes so cancellation before delivery
 // never exposes partial results. Once final delivery starts, finish it and return
-// the command's result.
+// the command's result. An independent failure retains its result and recovery
+// diagnostics despite caller cancellation.
 func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if ctx.Err() != nil {
 		fmt.Fprintln(stderr, "error: interrupted")
@@ -145,7 +148,8 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	}
 	var output, diagnostics bytes.Buffer
 	code := dispatch(ctx, args, &output, &diagnostics)
-	if ctx.Err() != nil || code == 130 {
+	canceled := ctx.Err() != nil
+	if code == 130 || (canceled && code == 0) {
 		fmt.Fprintln(stderr, "error: interrupted")
 		return 130
 	}
@@ -157,6 +161,13 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return 3
 	}
 	return code
+}
+
+func commandErrorExitCode(err error, fallback int) int {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return 130
+	}
+	return fallback
 }
 
 func dispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -217,12 +228,12 @@ func runADR(ctx context.Context, args []string, stdout, stderr io.Writer) (exitC
 		if errors.Is(err, workspace.ErrPrecondition) {
 			return 2
 		}
-		return 3
+		return commandErrorExitCode(err, 3)
 	}
 	pack, diagnostics, err := validateRulePackForCommand(ctx, repo, *reviewID)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: validation failed unexpectedly: %s\n", err)
-		return 3
+		return commandErrorExitCode(err, 3)
 	}
 	if len(diagnostics) != 0 {
 		writeValidationDiagnostics(stderr, diagnostics)
@@ -347,12 +358,12 @@ func runRender(ctx context.Context, args []string, stdout, stderr io.Writer) (ex
 		if errors.Is(err, workspace.ErrPrecondition) {
 			return 2
 		}
-		return 3
+		return commandErrorExitCode(err, 3)
 	}
 	pack, diagnostics, err := validateRulePackForCommand(ctx, repo, *reviewID)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: validation failed unexpectedly: %s\n", err)
-		return 3
+		return commandErrorExitCode(err, 3)
 	}
 	if len(diagnostics) != 0 {
 		writeValidationDiagnostics(stderr, diagnostics)
@@ -398,7 +409,7 @@ func runRender(ctx context.Context, args []string, stdout, stderr io.Writer) (ex
 			}
 			return 2
 		}
-		return 3
+		return commandErrorExitCode(err, 3)
 	}
 	if *dryRun {
 		if !result.Changed {
@@ -597,12 +608,12 @@ func runValidate(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		if errors.Is(err, workspace.ErrPrecondition) {
 			return 2
 		}
-		return 3
+		return commandErrorExitCode(err, 3)
 	}
 	pack, diagnostics, err := rulepack.Validate(ctx, repo)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: validation failed unexpectedly: %s\n", err)
-		return 3
+		return commandErrorExitCode(err, 3)
 	}
 	response := validationResponse{
 		SchemaVersion:   3,
@@ -766,7 +777,7 @@ func runInspect(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		if errors.Is(err, workspace.ErrPrecondition) {
 			return 2
 		}
-		return 3
+		return commandErrorExitCode(err, 3)
 	}
 	report, err := inventory.Scan(ctx, repo, inventory.Limits{
 		MaxCandidateFiles: *maxCandidateFiles,
@@ -779,7 +790,7 @@ func runInspect(ctx context.Context, args []string, stdout, stderr io.Writer) in
 			fmt.Fprintln(stderr, "next: stabilize the repository and rerun ssb inspect --repo PATH.")
 			return 2
 		}
-		return 3
+		return commandErrorExitCode(err, 3)
 	}
 
 	if *format == "json" {

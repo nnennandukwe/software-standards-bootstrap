@@ -377,7 +377,9 @@ Release builds report the exact tag and source commit; local builds print
 `ssb dev (commit unknown)`. Use `ssb version --help` for focused help.
 
 Before final output delivery starts, Ctrl-C cancels the command and returns exit `130`, with exactly
-`error: interrupted` on stderr and no stdout. Cancellation stops preparation
+`error: interrupted` on stderr and no stdout. An independent failure, including
+failed rollback or lock cleanup, keeps its failure code and diagnostics so
+recovery instructions stay available. Cancellation stops preparation
 before durable writes. If publication or application has started, SSB finishes
 that bounded sequence or runs its existing rollback before returning.
 After an interrupted prune mutation, check `ssb prune status --review ID`
