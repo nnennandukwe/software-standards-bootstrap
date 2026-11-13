@@ -376,12 +376,14 @@ ssb --version
 Release builds report the exact tag and source commit; local builds print
 `ssb dev (commit unknown)`. Use `ssb version --help` for focused help.
 
-Ctrl-C cancels the command and returns exit `130`, with exactly
+Before final output delivery starts, Ctrl-C cancels the command and returns exit `130`, with exactly
 `error: interrupted` on stderr and no stdout. Cancellation stops preparation
 before durable writes. If publication or application has started, SSB finishes
 that bounded sequence or runs its existing rollback before returning.
 After an interrupted prune mutation, check `ssb prune status --review ID`
 before retrying; the bounded operation may have completed.
+Once final stdout/stderr delivery starts, SSB finishes that delivery and returns
+the command's result even if cancellation arrives during the write.
 
 `inspect` supports `--max-candidate-files` and `--max-candidate-bytes`. `--allow-partial` permits diagnostic output from an incomplete inventory, but that output cannot be used to generate a proposal. Exit code `4`: inventory coverage incomplete.
 

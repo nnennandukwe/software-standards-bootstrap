@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -122,4 +123,47 @@ func (ctx *cancelAfterPublicationContext) Err() error {
 		ctx.cancel()
 	}
 	return ctx.Context.Err()
+}
+
+func TestRunContextCancellationDuringDeliveryReturnsCommandResult(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+		code int
+	}{
+		{name: "stdout", args: []string{"version"}, code: 0},
+		{name: "stderr", args: []string{"unknown"}, code: 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var wantOutput, wantDiagnostics bytes.Buffer
+			if code := cli.Run(test.args, &wantOutput, &wantDiagnostics); code != test.code {
+				t.Fatalf("normal exit = %d, want %d", code, test.code)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var output, diagnostics bytes.Buffer
+			var stdout io.Writer = &output
+			var stderr io.Writer = &diagnostics
+			if test.name == "stdout" {
+				stdout = cancelDuringDeliveryWriter{Writer: stdout, cancel: cancel}
+			} else {
+				stderr = cancelDuringDeliveryWriter{Writer: stderr, cancel: cancel}
+			}
+			code := cli.RunContext(ctx, test.args, stdout, stderr)
+			if ctx.Err() != context.Canceled || code != test.code ||
+				output.String() != wantOutput.String() || diagnostics.String() != wantDiagnostics.String() {
+				t.Fatalf("cancellation=%v exit=%d stdout=%q stderr=%q", ctx.Err(), code, &output, &diagnostics)
+			}
+		})
+	}
+}
+
+type cancelDuringDeliveryWriter struct {
+	io.Writer
+	cancel context.CancelFunc
+}
+
+func (writer cancelDuringDeliveryWriter) Write(data []byte) (int, error) {
+	writer.cancel()
+	return writer.Writer.Write(data)
 }

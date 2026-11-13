@@ -41,7 +41,7 @@ Exit codes:
   2  usage or repository precondition failure
   3  unexpected internal failure
   4  inventory coverage incomplete
-  130 interrupted
+  130 interrupted before output delivery
 `
 
 const (
@@ -135,7 +135,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 }
 
 // RunContext executes a command using the caller's cancellation lifetime.
-// Output is held until completion so interruption never exposes partial results.
+// It holds output until execution completes so cancellation before delivery
+// never exposes partial results. Once final delivery starts, finish it and return
+// the command's result.
 func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if ctx.Err() != nil {
 		fmt.Fprintln(stderr, "error: interrupted")
