@@ -1,7 +1,6 @@
 package prune_test
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -19,6 +18,7 @@ import (
 )
 
 func TestBuildContextInventoriesAllRulesAndRepositorySkills(t *testing.T) {
+	t.Parallel()
 	repo := lifecycleRepository(t)
 	profile := capabilityProfile(t)
 	provenance := filepath.Join(t.TempDir(), "provenance.yaml")
@@ -34,11 +34,11 @@ artifacts:
     declaration: Authored and adopted directly by the repository maintainer.
 `)
 
-	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	ws, err := workspace.OpenForPrune(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := prune.BuildContext(context.Background(), ws, prune.ContextOptions{
+	got, err := prune.BuildReviewContext(t.Context(), ws, prune.CreateReviewOptions{
 		ReviewID:        "review-one",
 		Capabilities:    profile,
 		Provenance:      provenance,
@@ -71,12 +71,13 @@ artifacts:
 }
 
 func TestBuildContextFailsClosedOnIncompleteInventory(t *testing.T) {
+	t.Parallel()
 	repo := lifecycleRepository(t)
-	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	ws, err := workspace.OpenForPrune(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = prune.BuildContext(context.Background(), ws, prune.ContextOptions{
+	_, err = prune.BuildReviewContext(t.Context(), ws, prune.CreateReviewOptions{
 		ReviewID:     "review-one",
 		Capabilities: capabilityProfile(t),
 		InventoryLimits: inventory.Limits{
@@ -91,8 +92,9 @@ func TestBuildContextFailsClosedOnIncompleteInventory(t *testing.T) {
 }
 
 func TestBuildContextRejectsBackslashCapabilityEvidenceBeforeRead(t *testing.T) {
+	t.Parallel()
 	repo := lifecycleRepository(t)
-	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	ws, err := workspace.OpenForPrune(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +119,7 @@ capabilities:
     evidence_ids: [host-run]
 `)
 
-	_, err = prune.BuildContext(context.Background(), ws, prune.ContextOptions{
+	_, err = prune.BuildReviewContext(t.Context(), ws, prune.CreateReviewOptions{
 		ReviewID:        "unsafe-path",
 		Capabilities:    profilePath,
 		InventoryLimits: inventory.DefaultLimits(),
@@ -128,8 +130,9 @@ capabilities:
 }
 
 func TestBuildContextRejectsSymlinkedCapabilityEvidenceBeforeRead(t *testing.T) {
+	t.Parallel()
 	repo := lifecycleRepository(t)
-	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	ws, err := workspace.OpenForPrune(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +161,7 @@ capabilities:
     evidence_ids: [host-run]
 `)
 
-	_, err = prune.BuildContext(context.Background(), ws, prune.ContextOptions{
+	_, err = prune.BuildReviewContext(t.Context(), ws, prune.CreateReviewOptions{
 		ReviewID:        "unsafe-symlink",
 		Capabilities:    profilePath,
 		InventoryLimits: inventory.DefaultLimits(),
@@ -170,14 +173,14 @@ capabilities:
 
 func TestBuildContextAcceptsRelativeCapabilityProfile(t *testing.T) {
 	repo := lifecycleRepository(t)
-	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	ws, err := workspace.OpenForPrune(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	profile := capabilityProfile(t)
 	t.Chdir(filepath.Dir(profile))
 
-	if _, err := prune.BuildContext(context.Background(), ws, prune.ContextOptions{
+	if _, err := prune.BuildReviewContext(t.Context(), ws, prune.CreateReviewOptions{
 		ReviewID:        "relative-profile",
 		Capabilities:    filepath.Base(profile),
 		InventoryLimits: inventory.DefaultLimits(),
@@ -187,8 +190,9 @@ func TestBuildContextAcceptsRelativeCapabilityProfile(t *testing.T) {
 }
 
 func TestBuildContextRejectsDuplicateCapabilityEvidencePath(t *testing.T) {
+	t.Parallel()
 	repo := lifecycleRepository(t)
-	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	ws, err := workspace.OpenForPrune(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +220,7 @@ capabilities:
     evidence_ids: [host-run]
 `)
 
-	_, err = prune.BuildContext(context.Background(), ws, prune.ContextOptions{
+	_, err = prune.BuildReviewContext(t.Context(), ws, prune.CreateReviewOptions{
 		ReviewID:        "duplicate-evidence",
 		Capabilities:    profilePath,
 		InventoryLimits: inventory.DefaultLimits(),
@@ -227,6 +231,7 @@ capabilities:
 }
 
 func TestBuildContextRejectsNonPortableTrackedSkillSupport(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows cannot create the POSIX-only baseline fixture")
 	}
@@ -234,11 +239,11 @@ func TestBuildContextRejectsNonPortableTrackedSkillSupport(t *testing.T) {
 	writeFile(t, filepath.Join(repo, ".agents", "skills", "orphan-skill", "CON"), "support\n")
 	git(t, repo, "add", ".agents/skills/orphan-skill/CON")
 	git(t, repo, "commit", "-m", "add non-portable support")
-	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	ws, err := workspace.OpenForPrune(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = prune.BuildContext(context.Background(), ws, prune.ContextOptions{
+	_, err = prune.BuildReviewContext(t.Context(), ws, prune.CreateReviewOptions{
 		ReviewID:        "non-portable-baseline",
 		Capabilities:    capabilityProfile(t),
 		InventoryLimits: inventory.DefaultLimits(),
@@ -249,15 +254,16 @@ func TestBuildContextRejectsNonPortableTrackedSkillSupport(t *testing.T) {
 }
 
 func TestBuildContextFailsClosedWhenSkillSupportExceedsInventoryBoundary(t *testing.T) {
+	t.Parallel()
 	repo := lifecycleRepository(t)
 	writeFile(t, filepath.Join(repo, ".agents", "skills", "orphan-skill", "assets", "large.txt"), strings.Repeat("x", 2048))
 	git(t, repo, "add", ".agents/skills/orphan-skill")
 	git(t, repo, "commit", "-m", "add oversized skill support")
-	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	ws, err := workspace.OpenForPrune(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = prune.BuildContext(context.Background(), ws, prune.ContextOptions{
+	_, err = prune.BuildReviewContext(t.Context(), ws, prune.CreateReviewOptions{
 		ReviewID:     "review-one",
 		Capabilities: capabilityProfile(t),
 		InventoryLimits: inventory.Limits{
@@ -272,12 +278,13 @@ func TestBuildContextFailsClosedWhenSkillSupportExceedsInventoryBoundary(t *test
 }
 
 func TestBuildContextMarksMissingProvenanceUnknown(t *testing.T) {
+	t.Parallel()
 	repo := lifecycleRepository(t)
-	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	ws, err := workspace.OpenForPrune(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := prune.BuildContext(context.Background(), ws, prune.ContextOptions{
+	got, err := prune.BuildReviewContext(t.Context(), ws, prune.CreateReviewOptions{
 		ReviewID:        "review-one",
 		Capabilities:    capabilityProfile(t),
 		InventoryLimits: inventory.DefaultLimits(),
@@ -293,6 +300,7 @@ func TestBuildContextMarksMissingProvenanceUnknown(t *testing.T) {
 }
 
 func TestBuildContextRequiresProvenanceForEverySkillBundleFile(t *testing.T) {
+	t.Parallel()
 	repo := lifecycleRepository(t)
 	supportPath := filepath.Join(repo, ".agents", "skills", "orphan-skill", "scripts", "check.sh")
 	writeFile(t, supportPath, "#!/bin/sh\nexit 0\n")
@@ -308,11 +316,11 @@ artifacts:
     origin: generated
     declaration: Generated before the supporting script was added.
 `)
-	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	ws, err := workspace.OpenForPrune(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := prune.BuildContext(context.Background(), ws, prune.ContextOptions{
+	got, err := prune.BuildReviewContext(t.Context(), ws, prune.CreateReviewOptions{
 		ReviewID:        "partial-provenance",
 		Capabilities:    capabilityProfile(t),
 		Provenance:      provenance,
@@ -345,7 +353,7 @@ artifacts:
     origin: user-authored
     declaration: Maintainer-authored supporting script.
 `)
-	got, err = prune.BuildContext(context.Background(), ws, prune.ContextOptions{
+	got, err = prune.BuildReviewContext(t.Context(), ws, prune.CreateReviewOptions{
 		ReviewID:        "mixed-provenance",
 		Capabilities:    capabilityProfile(t),
 		Provenance:      provenance,
@@ -362,7 +370,8 @@ artifacts:
 }
 
 func TestValidateProposalRequiresCompleteNonOverlappingActions(t *testing.T) {
-	context := prune.Context{
+	t.Parallel()
+	context := prune.ReviewContext{
 		Schema:        prune.ContextSchema,
 		ReviewID:      "review-one",
 		ContextDigest: "sha256:" + strings.Repeat("1", 64),
@@ -423,7 +432,8 @@ func TestValidateProposalRequiresCompleteNonOverlappingActions(t *testing.T) {
 }
 
 func TestValidateProposalForcesUnknownProvenanceToUnableToDetermine(t *testing.T) {
-	context := prune.Context{
+	t.Parallel()
+	context := prune.ReviewContext{
 		Schema:        prune.ContextSchema,
 		ReviewID:      "review-one",
 		ContextDigest: "sha256:" + strings.Repeat("1", 64),
@@ -622,11 +632,11 @@ func manifestLayoutLifecycleRepository(t *testing.T) string {
 	git(t, repo, "commit", "-m", "baseline")
 	baseline := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
 	evidenceDigest := fileDigest(t, filepath.Join(repo, "README.md"))
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	recorded, err := inventory.ScanAtBaseline(context.Background(), ws, inventory.DefaultLimits())
+	recorded, err := inventory.ScanAtBaseline(t.Context(), ws, inventory.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}

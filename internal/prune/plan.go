@@ -45,7 +45,12 @@ func canonicalApplicationPlan(ctx context.Context, review Review, approval Appro
 	if err != nil {
 		return applicationPlan{}, err
 	}
-	return buildApplicationPlan(ctx, review, approval, approvalEvent.EventDigest)
+	return buildApplicationPlan(
+		ctx,
+		review,
+		approval,
+		approvalEvent.EventDigest,
+	)
 }
 
 func buildApplicationPlan(

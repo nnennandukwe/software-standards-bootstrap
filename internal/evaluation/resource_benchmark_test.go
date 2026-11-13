@@ -1,7 +1,6 @@
 package evaluation_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -15,7 +14,7 @@ func TestPinnedInventoryResourceEnvelope(t *testing.T) {
 		t.Run(target.Name, func(t *testing.T) {
 			repo := benchmarktest.Open(t, root, target)
 			start := time.Now()
-			report, err := inventory.Scan(context.Background(), repo, inventory.DefaultLimits())
+			report, err := inventory.Scan(t.Context(), repo, inventory.DefaultLimits())
 			elapsed := time.Since(start)
 			if err != nil {
 				t.Fatal(err)
@@ -45,8 +44,8 @@ func BenchmarkPinnedInventory(b *testing.B) {
 			repo := benchmarktest.Open(b, root, target)
 			b.ReportAllocs()
 			b.ResetTimer()
-			for range b.N {
-				report, err := inventory.Scan(context.Background(), repo, inventory.DefaultLimits())
+			for b.Loop() {
+				report, err := inventory.Scan(b.Context(), repo, inventory.DefaultLimits())
 				if err != nil {
 					b.Fatal(err)
 				}

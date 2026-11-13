@@ -138,13 +138,25 @@ func ReadEvidence(ctx context.Context, repo *workspace.Repository, filePath stri
 
 // Scan reads blobs from the pinned baseline commit, not from the worktree.
 func Scan(ctx context.Context, repo *workspace.Repository, limits Limits) (Report, error) {
-	return scan(ctx, repo, limits, defaultBatchPolicy, repo.VerifyInspectSnapshot)
+	return scan(
+		ctx,
+		repo,
+		limits,
+		defaultBatchPolicy,
+		repo.VerifyInspectSnapshot,
+	)
 }
 
 // ScanForPrune reads the same bounded current-HEAD inventory while preserving
 // the adopted standards pack required by prune review.
 func ScanForPrune(ctx context.Context, repo *workspace.Repository, limits Limits) (Report, error) {
-	return scan(ctx, repo, limits, defaultBatchPolicy, repo.VerifyPruneSnapshot)
+	return scan(
+		ctx,
+		repo,
+		limits,
+		defaultBatchPolicy,
+		repo.VerifyPruneSnapshot,
+	)
 }
 
 // ScanAtBaseline rebuilds deterministic coverage accounting for an explicit
@@ -152,7 +164,13 @@ func ScanForPrune(ctx context.Context, repo *workspace.Repository, limits Limits
 // including a historical ancestor, and therefore does not reinterpret current
 // worktree state as part of the recorded baseline.
 func ScanAtBaseline(ctx context.Context, repo *workspace.Repository, limits Limits) (Report, error) {
-	return scan(ctx, repo, limits, defaultBatchPolicy, func(context.Context) error { return nil })
+	return scan(
+		ctx,
+		repo,
+		limits,
+		defaultBatchPolicy,
+		func(context.Context) error { return nil },
+	)
 }
 
 func scan(
@@ -181,7 +199,14 @@ func scan(
 		Files:            make([]File, 0),
 	}
 
-	rawTree, err := repo.Git(ctx, "ls-tree", "-rz", "-l", "--full-tree", repo.Baseline())
+	rawTree, err := repo.Git(
+		ctx,
+		"ls-tree",
+		"-rz",
+		"-l",
+		"--full-tree",
+		repo.Baseline(),
+	)
 	if err != nil {
 		return Report{}, fmt.Errorf("list baseline tree: %w", err)
 	}
@@ -312,7 +337,12 @@ func readBlobBatch(ctx context.Context, repo *workspace.Repository, entries []tr
 		input.WriteString(entry.oid)
 		input.WriteByte('\n')
 	}
-	raw, err := repo.GitWithInput(ctx, []byte(input.String()), "cat-file", "--batch")
+	raw, err := repo.GitWithInput(
+		ctx,
+		[]byte(input.String()),
+		"cat-file",
+		"--batch",
+	)
 	if err != nil {
 		return nil, fmt.Errorf("read baseline blob batch: %w", err)
 	}

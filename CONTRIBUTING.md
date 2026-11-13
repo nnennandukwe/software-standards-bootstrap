@@ -30,7 +30,7 @@ Every write path needs a happy path, a blocked path, recovery guidance, and a no
 
 ## Scope guardrails
 
-Do not add:
+Don't add:
 
 - runtime network behavior, telemetry, API keys, or model clients;
 - generic rule catalogs or tool-specific synchronization;
@@ -52,4 +52,17 @@ Keep changes behavior-closed. Include:
 - documentation or Agent Skill parity updates; and
 - residual manual acceptance gaps.
 
-Do not claim agent-host, release, or public-benchmark acceptance without a recorded run against the exact host version and commit.
+Don't claim agent-host, release, or public-benchmark acceptance without a recorded run against the exact host version and commit.
+
+## Parser fuzzing
+
+Seed cases run with the ordinary test suite. Run a bounded fuzz session for each parser:
+
+```bash
+go test ./internal/prune -run '^$' -fuzz '^FuzzPortableGovernedPath$' -fuzztime 30s
+go test ./internal/rulepack -run '^$' -fuzz '^FuzzSplitFrontmatter$' -fuzztime 30s
+go test ./internal/inventory -run '^$' -fuzz '^FuzzParseGitTree$' -fuzztime 30s
+```
+
+Fault-injection tests own their operations. Keep tests that change process
+state, simulate crashes, or share benchmark checkouts serial.

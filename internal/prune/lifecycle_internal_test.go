@@ -15,6 +15,7 @@ import (
 )
 
 func TestValidateReviewEventsRejectsEmptyRerenderPayload(t *testing.T) {
+	t.Parallel()
 	proposal := Proposal{Actions: []Action{
 		{
 			ID:          "keep-rule",
@@ -33,7 +34,7 @@ func TestValidateReviewEventsRejectsEmptyRerenderPayload(t *testing.T) {
 	approved := ApprovalPayload{Approved: []string{"keep-rule", "remove-skill"}}
 	approval, _ := json.Marshal(approved)
 	review := Review{
-		Context: Context{
+		Context: ReviewContext{
 			ReviewID:       "review-one",
 			BaselineCommit: "baseline",
 			ContextDigest:  "context",
@@ -73,6 +74,7 @@ func TestValidateReviewEventsRejectsEmptyRerenderPayload(t *testing.T) {
 }
 
 func TestVerifyRenderedPoststateBindsOptionalRoutingTreeDigest(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	agentsPath := filepath.Join(root, "AGENTS.md")
 	catalogPath := filepath.Join(root, ".software-standards", "routing", "catalog.md")
@@ -135,6 +137,7 @@ func writeInternalTestFile(t *testing.T, target, content string) {
 }
 
 func TestAppendEventFailurePreservesCompletePriorLog(t *testing.T) {
+	t.Parallel()
 	repoRoot := t.TempDir()
 	root := filepath.Join(repoRoot, ".software-standards", "reviews", "review-one")
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -145,16 +148,16 @@ func TestAppendEventFailurePreservesCompletePriorLog(t *testing.T) {
 	if err := os.WriteFile(eventPath, prior, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	originalWriter := writeEventLogAtomically
-	writeEventLogAtomically = func(*reviewStore, []byte, os.FileMode) error {
+	store := internalTestReviewStore(t, repoRoot, "review-one")
+	store.events.write = func(*reviewStore, []byte, os.FileMode) error {
 		return errors.New("injected replacement failure")
 	}
-	t.Cleanup(func() { writeEventLogAtomically = originalWriter })
 
 	err := appendEvent(t.Context(), Review{
+		store:    store,
 		RepoRoot: repoRoot,
 		Root:     root,
-		Context:  Context{ReviewID: "review-one"},
+		Context:  ReviewContext{ReviewID: "review-one"},
 	}, Event{Schema: EventSchema, ID: "approved-001"})
 	if err == nil {
 		t.Fatal("expected injected append failure")
@@ -169,6 +172,7 @@ func TestAppendEventFailurePreservesCompletePriorLog(t *testing.T) {
 }
 
 func TestAtomicReviewWriteReportsRenameAndTemporaryCleanupFailures(t *testing.T) {
+	t.Parallel()
 	repoRoot := t.TempDir()
 	reviewRoot := filepath.Join(repoRoot, ".software-standards", "reviews", "review-one")
 	if err := os.MkdirAll(reviewRoot, 0o755); err != nil {
@@ -187,21 +191,16 @@ func TestAtomicReviewWriteReportsRenameAndTemporaryCleanupFailures(t *testing.T)
 
 	renameFailure := errors.New("injected rename failure")
 	removeFailure := errors.New("injected temporary cleanup failure")
-	originalRename := renameAtomicReviewFile
-	originalRemove := removeAtomicReviewFile
-	renameAtomicReviewFile = func(*os.Root, string, string) error {
+	originalRemove := store.files.remove
+	store.files.rename = func(*os.Root, string, string) error {
 		return renameFailure
 	}
-	removeAtomicReviewFile = func(root *os.Root, name string) error {
+	store.files.remove = func(root *os.Root, name string) error {
 		if strings.HasPrefix(filepath.Base(name), ".ssb-prune-") {
 			return removeFailure
 		}
 		return originalRemove(root, name)
 	}
-	t.Cleanup(func() {
-		renameAtomicReviewFile = originalRename
-		removeAtomicReviewFile = originalRemove
-	})
 
 	err = store.AtomicWrite("events.jsonl", []byte("{\"next\":true}\n"), 0o644)
 	if !errors.Is(err, renameFailure) || !errors.Is(err, removeFailure) {
@@ -234,6 +233,7 @@ func TestAtomicReviewWriteReportsRenameAndTemporaryCleanupFailures(t *testing.T)
 }
 
 func TestAppendEventCannotFollowReviewRootSwapInsideWriter(t *testing.T) {
+	t.Parallel()
 	repoRoot := t.TempDir()
 	root := filepath.Join(repoRoot, ".software-standards", "reviews", "review-one")
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -245,8 +245,9 @@ func TestAppendEventCannotFollowReviewRootSwapInsideWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	external := filepath.Join(t.TempDir(), "review-one")
-	originalWriter := writeEventLogAtomically
-	writeEventLogAtomically = func(store *reviewStore, data []byte, mode os.FileMode) error {
+	store := internalTestReviewStore(t, repoRoot, "review-one")
+	originalWriter := store.events.write
+	store.events.write = func(store *reviewStore, data []byte, mode os.FileMode) error {
 		if err := os.Rename(root, external); err != nil {
 			return err
 		}
@@ -255,12 +256,12 @@ func TestAppendEventCannotFollowReviewRootSwapInsideWriter(t *testing.T) {
 		}
 		return originalWriter(store, data, mode)
 	}
-	t.Cleanup(func() { writeEventLogAtomically = originalWriter })
 
 	err := appendEvent(t.Context(), Review{
+		store:    store,
 		RepoRoot: repoRoot,
 		Root:     root,
-		Context:  Context{ReviewID: "review-one"},
+		Context:  ReviewContext{ReviewID: "review-one"},
 	}, Event{Schema: EventSchema, ID: "approved-001"})
 	if err == nil {
 		t.Fatal("review-root swap inside event writer unexpectedly succeeded")
@@ -275,18 +276,19 @@ func TestAppendEventCannotFollowReviewRootSwapInsideWriter(t *testing.T) {
 }
 
 func TestReviewLockCleanupCannotFollowReviewRootSwapInsideRemover(t *testing.T) {
+	t.Parallel()
 	repoRoot := t.TempDir()
 	root := filepath.Join(repoRoot, ".software-standards", "reviews", "review-one")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	_, unlock, err := acquireReviewLock(t.Context(), repoRoot, "review-one")
+	store, unlock, err := acquireReviewLock(t.Context(), repoRoot, "review-one")
 	if err != nil {
 		t.Fatal(err)
 	}
 	external := filepath.Join(t.TempDir(), "review-one")
-	originalRemover := removeReviewTransitionLock
-	removeReviewTransitionLock = func(store *reviewStore) error {
+	originalRemover := store.events.removeLock
+	store.events.removeLock = func(store *reviewStore) error {
 		if err := os.Rename(root, external); err != nil {
 			return err
 		}
@@ -295,7 +297,6 @@ func TestReviewLockCleanupCannotFollowReviewRootSwapInsideRemover(t *testing.T) 
 		}
 		return originalRemover(store)
 	}
-	t.Cleanup(func() { removeReviewTransitionLock = originalRemover })
 
 	if err := unlock(); err == nil {
 		t.Fatal("review-root swap inside lock remover unexpectedly succeeded")
@@ -310,6 +311,7 @@ func TestReviewLockCleanupCannotFollowReviewRootSwapInsideRemover(t *testing.T) 
 }
 
 func TestApplicationJournalOperationsCannotFollowReviewRootSwap(t *testing.T) {
+	t.Parallel()
 	for name, exercise := range map[string]func(*reviewStore) error{
 		"create": func(store *reviewStore) error {
 			return store.WriteExclusive("application-journal.json", []byte("new journal\n"), 0o600)
@@ -360,6 +362,7 @@ func TestApplicationJournalOperationsCannotFollowReviewRootSwap(t *testing.T) {
 }
 
 func TestReviewStoreCannotFollowSiblingSymlinkInsideRepository(t *testing.T) {
+	t.Parallel()
 	for name, exercise := range map[string]func(*reviewStore) error{
 		"remove lock": func(store *reviewStore) error {
 			return store.Remove(".transition.lock")
@@ -421,6 +424,7 @@ func TestReviewStoreCannotFollowSiblingSymlinkInsideRepository(t *testing.T) {
 }
 
 func TestLockedReviewSessionRejectsRealDirectoryReplacement(t *testing.T) {
+	t.Parallel()
 	repoRoot := t.TempDir()
 	reviewRoot := filepath.Join(repoRoot, ".software-standards", "reviews", "review-one")
 	replacement := filepath.Join(repoRoot, ".software-standards", "reviews", "replacement")
@@ -455,7 +459,7 @@ func TestLockedReviewSessionRejectsRealDirectoryReplacement(t *testing.T) {
 	if err := appendEvent(t.Context(), Review{
 		RepoRoot: repoRoot,
 		Root:     reviewRoot,
-		Context:  Context{ReviewID: "review-one"},
+		Context:  ReviewContext{ReviewID: "review-one"},
 		store:    store,
 	}, Event{Schema: EventSchema, ID: "approved-001"}); err == nil ||
 		!strings.Contains(err.Error(), "changed") {
@@ -470,6 +474,7 @@ func TestLockedReviewSessionRejectsRealDirectoryReplacement(t *testing.T) {
 }
 
 func TestReviewPublicationCannotFollowPackRootSwap(t *testing.T) {
+	t.Parallel()
 	repoRoot := t.TempDir()
 	packRoot := filepath.Join(repoRoot, ".software-standards")
 	if err := os.MkdirAll(packRoot, 0o755); err != nil {
@@ -500,6 +505,7 @@ func TestReviewPublicationCannotFollowPackRootSwap(t *testing.T) {
 }
 
 func TestApplicationRollbackRemovesCreatedDirectories(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	relative := ".agents/skills/new-skill/references/check.md"
 	content := []byte("candidate\n")
@@ -521,14 +527,14 @@ func TestApplicationRollbackRemovesCreatedDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := filepath.Join(root, filepath.FromSlash(relative))
-	if err := writeNewExclusive(target, content, 0o644); err != nil {
+	if err := defaultApplicationPublicationOps().writeNewExclusive(target, content, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	journal := applicationJournal{
 		Entries:            []journalEntry{{Path: relative}},
 		CreatedDirectories: directories,
 	}
-	if err := restoreJournalPaths(
+	if err := defaultApplicationPublicationOps().restoreJournalPaths(
 		root,
 		journal,
 		map[string]struct{}{relative: {}},
@@ -542,6 +548,7 @@ func TestApplicationRollbackRemovesCreatedDirectories(t *testing.T) {
 }
 
 func TestManifestPublicationRollback(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	rulePath := filepath.Join(root, ".software-standards", "rules", "keep-rule.md")
 	skillPath := filepath.Join(root, ".agents", "skills", "orphan-skill", "SKILL.md")
@@ -580,20 +587,20 @@ func TestManifestPublicationRollback(t *testing.T) {
 		{Path: ".agents/skills/orphan-skill/SKILL.md", Existed: true, Mode: 0o644, Content: skillBefore},
 		{Path: actionableManifestPath, Existed: true, Mode: 0o644, Content: manifestBefore},
 	}}
-	originalPublish := publishApplicationFile
-	publishApplicationFile = func(staging, target string) error {
+	publication := defaultApplicationPublicationOps()
+	originalPublish := publication.publish
+	publication.publish = func(staging, target string) error {
 		if strings.HasSuffix(filepath.ToSlash(target), actionableManifestPath) {
 			return errors.New("injected manifest publication failure")
 		}
 		return originalPublish(staging, target)
 	}
-	t.Cleanup(func() { publishApplicationFile = originalPublish })
 
-	completed, executeErr := executeOperations(root, operations)
+	completed, executeErr := publication.executeOperations(root, operations)
 	if executeErr == nil || !strings.Contains(executeErr.Error(), "injected manifest publication failure") {
 		t.Fatalf("execute error = %v, want injected manifest failure", executeErr)
 	}
-	if err := restoreJournalPaths(root, journal, completed, operationPoststates(operations)); err != nil {
+	if err := defaultApplicationPublicationOps().restoreJournalPaths(root, journal, completed, operationPoststates(operations)); err != nil {
 		t.Fatalf("rollback manifest-layout pack: %v", err)
 	}
 	for itemPath, want := range map[string][]byte{
@@ -617,7 +624,8 @@ func TestWriteNewExclusiveDoesNotExposePartialTargetAfterProcessCrash(t *testing
 				os.Exit(96)
 			}
 		}
-		openExclusiveFile = func(
+		exclusive := defaultExclusiveFileOps()
+		exclusive.open = func(
 			name string,
 			flag int,
 			perm os.FileMode,
@@ -628,7 +636,9 @@ func TestWriteNewExclusiveDoesNotExposePartialTargetAfterProcessCrash(t *testing
 			}
 			return &crashDuringWriteFile{File: file}, nil
 		}
-		_ = writeNewExclusive(target, []byte("complete governed content\n"), 0o644)
+		publication := defaultApplicationPublicationOps()
+		publication.exclusive = exclusive
+		_ = publication.writeNewExclusive(target, []byte("complete governed content\n"), 0o644)
 		os.Exit(98)
 	}
 
@@ -673,7 +683,7 @@ func TestWriteNewExclusiveDoesNotExposePartialTargetAfterProcessCrash(t *testing
 				Mode:    0o644,
 				Content: prestate,
 			}
-			if err := restoreJournalEntry(target, entry, digestBytes(poststate)); err != nil {
+			if err := defaultApplicationPublicationOps().restoreJournalEntry(target, entry, digestBytes(poststate)); err != nil {
 				t.Fatalf("recover after process crash: %v", err)
 			}
 			if testCase.existed {
@@ -694,6 +704,7 @@ func TestWriteNewExclusiveDoesNotExposePartialTargetAfterProcessCrash(t *testing
 }
 
 func TestInterruptedApplicationPublicationKeepsPrestateClaimRecoverable(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	target := filepath.Join(root, "governed.md")
 	prestate := []byte("approved prestate\n")
@@ -705,13 +716,12 @@ func TestInterruptedApplicationPublicationKeepsPrestateClaimRecoverable(t *testi
 		t.Fatal(err)
 	}
 
-	originalPublish := publishApplicationFile
-	publishApplicationFile = func(string, string) error {
+	publication := defaultApplicationPublicationOps()
+	publication.publish = func(string, string) error {
 		return errors.New("injected interruption before publication")
 	}
-	t.Cleanup(func() { publishApplicationFile = originalPublish })
 
-	if err := writeNewExclusive(target, poststate, 0o644); err == nil ||
+	if err := publication.writeNewExclusive(target, poststate, 0o644); err == nil ||
 		!strings.Contains(err.Error(), "injected interruption") {
 		t.Fatalf("error = %v, want interrupted publication", err)
 	}
@@ -721,7 +731,7 @@ func TestInterruptedApplicationPublicationKeepsPrestateClaimRecoverable(t *testi
 	entry := journalEntry{
 		Path: "governed.md", Existed: true, Mode: 0o644, Content: prestate,
 	}
-	if err := restoreJournalEntry(target, entry, digestBytes(poststate)); err != nil {
+	if err := defaultApplicationPublicationOps().restoreJournalEntry(target, entry, digestBytes(poststate)); err != nil {
 		t.Fatalf("recover prestate claim: %v", err)
 	}
 	got, err := os.ReadFile(target)
@@ -731,12 +741,13 @@ func TestInterruptedApplicationPublicationKeepsPrestateClaimRecoverable(t *testi
 }
 
 func TestWriteNewExclusiveNeverOverwritesExistingTarget(t *testing.T) {
+	t.Parallel()
 	target := filepath.Join(t.TempDir(), "governed.md")
 	existing := []byte("concurrent content\n")
 	if err := os.WriteFile(target, existing, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := writeNewExclusive(target, []byte("approved content\n"), 0o644)
+	err := defaultApplicationPublicationOps().writeNewExclusive(target, []byte("approved content\n"), 0o644)
 	if err == nil {
 		t.Fatal("exclusive publication overwrote an existing target")
 	}
@@ -752,6 +763,7 @@ func TestWriteNewExclusiveNeverOverwritesExistingTarget(t *testing.T) {
 }
 
 func TestRecoveryReconcilesCompleteApplicationPublicationClaims(t *testing.T) {
+	t.Parallel()
 	for _, testCase := range []struct {
 		name      string
 		existed   bool
@@ -795,7 +807,7 @@ func TestRecoveryReconcilesCompleteApplicationPublicationClaims(t *testing.T) {
 				Mode:    0o644,
 				Content: prestate,
 			}
-			if err := restoreJournalEntry(target, entry, digestBytes(poststate)); err != nil {
+			if err := defaultApplicationPublicationOps().restoreJournalEntry(target, entry, digestBytes(poststate)); err != nil {
 				t.Fatal(err)
 			}
 			if testCase.existed {
@@ -820,6 +832,7 @@ func TestRecoveryReconcilesCompleteApplicationPublicationClaims(t *testing.T) {
 }
 
 func TestRecoveryFailsClosedWhenIncompletePublicationClaimMeetsHumanEdit(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	target := filepath.Join(root, "governed.md")
 	publication := claimPathForTarget(target, publicationClaim)
@@ -833,7 +846,7 @@ func TestRecoveryFailsClosedWhenIncompletePublicationClaimMeetsHumanEdit(t *test
 	entry := journalEntry{
 		Path: "governed.md", Existed: true, Content: []byte("approved prestate\n"),
 	}
-	err := restoreJournalEntry(target, entry, digestBytes([]byte("approved poststate\n")))
+	err := defaultApplicationPublicationOps().restoreJournalEntry(target, entry, digestBytes([]byte("approved poststate\n")))
 	if err == nil ||
 		!strings.Contains(err.Error(), "publication claim") ||
 		!strings.Contains(err.Error(), "unapproved bytes") {
@@ -848,6 +861,7 @@ func TestRecoveryFailsClosedWhenIncompletePublicationClaimMeetsHumanEdit(t *test
 }
 
 func TestClaimedMutationPreservesConcurrentReplacement(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	target := filepath.Join(root, "target.md")
 	original := []byte("approved original\n")
@@ -879,17 +893,18 @@ func TestClaimedMutationPreservesConcurrentReplacement(t *testing.T) {
 }
 
 func TestApplicationJournalCleanupFailureNamesRecoveryCommand(t *testing.T) {
-	original := removeApplicationJournal
-	removeApplicationJournal = func(*reviewStore) error { return errors.New("injected cleanup failure") }
-	t.Cleanup(func() { removeApplicationJournal = original })
+	t.Parallel()
+	store := internalTestReviewStore(t, t.TempDir(), "review-one")
+	store.files.remove = func(*os.Root, string) error { return errors.New("injected cleanup failure") }
 
-	err := cleanupApplicationJournal(nil, "review-one")
+	err := cleanupApplicationJournal(store, "review-one")
 	if err == nil || !strings.Contains(err.Error(), "ssb prune recover --review review-one") {
 		t.Fatalf("error = %v, want exact recovery command", err)
 	}
 }
 
 func TestRecoveryResumesFromPoststateClaim(t *testing.T) {
+	t.Parallel()
 	for name, prestateAlreadyWritten := range map[string]bool{
 		"after poststate claim":     false,
 		"after prestate recreation": true,
@@ -907,12 +922,12 @@ func TestRecoveryResumesFromPoststateClaim(t *testing.T) {
 				t.Fatal(err)
 			}
 			if prestateAlreadyWritten {
-				if err := writeNewExclusive(target, prestate, 0o644); err != nil {
+				if err := defaultApplicationPublicationOps().writeNewExclusive(target, prestate, 0o644); err != nil {
 					t.Fatal(err)
 				}
 			}
 			entry := journalEntry{Path: "target.md", Existed: true, Mode: 0o644, Content: prestate}
-			if err := restoreJournalEntry(target, entry, digestBytes(poststate)); err != nil {
+			if err := defaultApplicationPublicationOps().restoreJournalEntry(target, entry, digestBytes(poststate)); err != nil {
 				t.Fatal(err)
 			}
 			got, err := os.ReadFile(target)
@@ -927,6 +942,7 @@ func TestRecoveryResumesFromPoststateClaim(t *testing.T) {
 }
 
 func TestRecoveryReconcilesDualClaimsAfterSecondCrash(t *testing.T) {
+	t.Parallel()
 	for name, prestateAlreadyWritten := range map[string]bool{
 		"target absent":           false,
 		"prestate target written": true,
@@ -950,7 +966,7 @@ func TestRecoveryReconcilesDualClaimsAfterSecondCrash(t *testing.T) {
 				}
 			}
 			entry := journalEntry{Path: "target.md", Existed: true, Mode: 0o644, Content: prestate}
-			if err := restoreJournalEntry(target, entry, digestBytes(poststate)); err != nil {
+			if err := defaultApplicationPublicationOps().restoreJournalEntry(target, entry, digestBytes(poststate)); err != nil {
 				t.Fatal(err)
 			}
 			got, err := os.ReadFile(target)
@@ -967,36 +983,37 @@ func TestRecoveryReconcilesDualClaimsAfterSecondCrash(t *testing.T) {
 }
 
 func TestRepositoryMutationLockSerializesDistinctReviews(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".software-standards"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	unlock, err := acquireMutationLock(t.Context(), root, "review-one")
+	unlock, err := defaultMutationLockOps().acquireMutationLock(t.Context(), root, "review-one")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer unlock()
-	if _, err := acquireMutationLock(t.Context(), root, "review-two"); err == nil ||
+	if _, err := defaultMutationLockOps().acquireMutationLock(t.Context(), root, "review-two"); err == nil ||
 		!strings.Contains(err.Error(), "mutation lock") {
 		t.Fatalf("error = %v, want cross-review serialization", err)
 	}
 }
 
 func TestLockReleaseFailuresAreReported(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".software-standards"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	unlock, err := acquireMutationLock(t.Context(), root, "review-one")
+	operations := defaultMutationLockOps()
+	unlock, err := operations.acquireMutationLock(t.Context(), root, "review-one")
 	if err != nil {
 		t.Fatal(err)
 	}
-	original := removePruneMutationLock
-	removePruneMutationLock = func(*os.Root, os.FileInfo) error {
+	operations.remove = func(*os.Root, os.FileInfo) error {
 		return errors.New("injected lock cleanup failure")
 	}
 	t.Cleanup(func() {
-		removePruneMutationLock = original
 		_ = os.Remove(filepath.Join(root, ".software-standards", ".prune-mutation.lock"))
 	})
 	if err := unlock(); err == nil || !strings.Contains(err.Error(), "injected lock cleanup failure") {
@@ -1005,18 +1022,20 @@ func TestLockReleaseFailuresAreReported(t *testing.T) {
 }
 
 func TestMutationLockCleanupCannotFollowPackRootSwapInsideRemover(t *testing.T) {
+	t.Parallel()
 	repoRoot := t.TempDir()
 	packRoot := filepath.Join(repoRoot, ".software-standards")
 	if err := os.MkdirAll(packRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	unlock, err := acquireMutationLock(t.Context(), repoRoot, "review-one")
+	operations := defaultMutationLockOps()
+	unlock, err := operations.acquireMutationLock(t.Context(), repoRoot, "review-one")
 	if err != nil {
 		t.Fatal(err)
 	}
 	external := filepath.Join(t.TempDir(), "software-standards")
-	original := removePruneMutationLock
-	removePruneMutationLock = func(root *os.Root, identity os.FileInfo) error {
+	original := operations.remove
+	operations.remove = func(root *os.Root, identity os.FileInfo) error {
 		if err := os.Rename(packRoot, external); err != nil {
 			return err
 		}
@@ -1025,7 +1044,6 @@ func TestMutationLockCleanupCannotFollowPackRootSwapInsideRemover(t *testing.T) 
 		}
 		return original(root, identity)
 	}
-	t.Cleanup(func() { removePruneMutationLock = original })
 
 	if err := unlock(); err == nil {
 		t.Fatal("pack-root swap inside mutation-lock remover unexpectedly succeeded")
@@ -1040,28 +1058,27 @@ func TestMutationLockCleanupCannotFollowPackRootSwapInsideRemover(t *testing.T) 
 }
 
 func TestTransitionCompleteReportsCommittedEventWhenLockCleanupFails(t *testing.T) {
+	t.Parallel()
 	repoRoot := t.TempDir()
 	root := filepath.Join(repoRoot, ".software-standards", "reviews", "review-one")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	_, unlock, err := acquireReviewLock(t.Context(), repoRoot, "review-one")
+	store, unlock, err := acquireReviewLock(t.Context(), repoRoot, "review-one")
 	if err != nil {
 		t.Fatal(err)
 	}
-	original := removeReviewTransitionLock
-	removeReviewTransitionLock = func(*reviewStore) error {
+	store.events.removeLock = func(*reviewStore) error {
 		return errors.New("injected review lock cleanup failure")
 	}
 	t.Cleanup(func() {
-		removeReviewTransitionLock = original
 		_ = os.Remove(filepath.Join(root, ".transition.lock"))
 	})
 	transition := &Transition{
 		review: Review{
 			RepoRoot: repoRoot,
 			Root:     root,
-			Context: Context{
+			Context: ReviewContext{
 				ReviewID:       "review-one",
 				BaselineCommit: "baseline",
 				ContextDigest:  "context",
@@ -1089,22 +1106,37 @@ func TestTransitionCompleteReportsCommittedEventWhenLockCleanupFails(t *testing.
 }
 
 func TestWriteExclusiveRemovesPartialFinalFile(t *testing.T) {
-	original := openExclusiveFile
-	openExclusiveFile = func(name string, flag int, perm os.FileMode) (durableExclusiveFile, error) {
+	t.Parallel()
+	exclusive := defaultExclusiveFileOps()
+	exclusive.open = func(name string, flag int, perm os.FileMode) (durableExclusiveFile, error) {
 		file, err := os.OpenFile(name, flag, perm)
 		if err != nil {
 			return nil, err
 		}
 		return &shortWriteExclusiveFile{File: file}, nil
 	}
-	t.Cleanup(func() { openExclusiveFile = original })
 
-	for name, write := range map[string]func(string, []byte, os.FileMode) error{
-		"review artifact": writeExclusive,
-		"governed file":   writeNewExclusive,
-	} {
+	publication := defaultApplicationPublicationOps()
+	publication.exclusive = exclusive
+	for _, name := range []string{"review artifact", "governed file"} {
 		t.Run(name, func(t *testing.T) {
 			target := filepath.Join(t.TempDir(), "target")
+			write := publication.writeNewExclusive
+			if name == "review artifact" {
+				store := internalTestReviewStore(t, t.TempDir(), "review-one")
+				realOpen := store.files.open
+				store.files.open = func(root *os.Root, name string, flags int, mode os.FileMode) (durableExclusiveFile, error) {
+					file, err := realOpen(root, name, flags, mode)
+					if err != nil {
+						return nil, err
+					}
+					// The default store opener returns an OS file; wrap only this store's write.
+					return &shortWriteExclusiveFile{File: file.(*os.File)}, nil
+				}
+				target = store.display("target")
+				write = func(_ string, data []byte, mode os.FileMode) error { return store.WriteExclusive("target", data, mode) }
+			}
+
 			if err := write(target, []byte("complete content\n"), 0o600); err == nil {
 				t.Fatal("expected injected short write")
 			}
@@ -1116,29 +1148,41 @@ func TestWriteExclusiveRemovesPartialFinalFile(t *testing.T) {
 }
 
 func TestWriteExclusiveReportsPartialCleanupFailure(t *testing.T) {
-	originalOpen := openExclusiveFile
-	originalRemove := removeIncompleteExclusiveFile
-	openExclusiveFile = func(name string, flag int, perm os.FileMode) (durableExclusiveFile, error) {
+	t.Parallel()
+	exclusive := defaultExclusiveFileOps()
+	exclusive.open = func(name string, flag int, perm os.FileMode) (durableExclusiveFile, error) {
 		file, err := os.OpenFile(name, flag, perm)
 		if err != nil {
 			return nil, err
 		}
 		return &shortWriteExclusiveFile{File: file}, nil
 	}
-	removeIncompleteExclusiveFile = func(string) error {
+	exclusive.remove = func(string) error {
 		return errors.New("injected incomplete cleanup failure")
 	}
-	t.Cleanup(func() {
-		openExclusiveFile = originalOpen
-		removeIncompleteExclusiveFile = originalRemove
-	})
 
-	for name, write := range map[string]func(string, []byte, os.FileMode) error{
-		"review artifact": writeExclusive,
-		"governed file":   writeNewExclusive,
-	} {
+	publication := defaultApplicationPublicationOps()
+	publication.exclusive = exclusive
+	for _, name := range []string{"review artifact", "governed file"} {
 		t.Run(name, func(t *testing.T) {
 			target := filepath.Join(t.TempDir(), "target")
+			write := publication.writeNewExclusive
+			if name == "review artifact" {
+				store := internalTestReviewStore(t, t.TempDir(), "review-one")
+				realOpen := store.files.open
+				store.files.open = func(root *os.Root, name string, flags int, mode os.FileMode) (durableExclusiveFile, error) {
+					file, err := realOpen(root, name, flags, mode)
+					if err != nil {
+						return nil, err
+					}
+					// The default store opener returns an OS file; wrap only this store's write.
+					return &shortWriteExclusiveFile{File: file.(*os.File)}, nil
+				}
+				store.files.remove = func(*os.Root, string) error { return errors.New("injected incomplete cleanup failure") }
+				target = store.display("target")
+				write = func(_ string, data []byte, mode os.FileMode) error { return store.WriteExclusive("target", data, mode) }
+			}
+
 			t.Cleanup(func() { _ = os.Remove(target) })
 			err := write(target, []byte("complete content\n"), 0o600)
 			if err == nil ||
@@ -1172,9 +1216,10 @@ func (file *crashDuringWriteFile) Write(data []byte) (int, error) {
 }
 
 func TestCaptureJournalRejectsDisappearedApprovedPrestate(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	review := Review{
-		Context:        Context{ReviewID: "review-one"},
+		Context:        ReviewContext{ReviewID: "review-one"},
 		ProposalDigest: "sha256:" + strings.Repeat("a", 64),
 	}
 	plan := applicationPlan{PlanDigest: "sha256:" + strings.Repeat("b", 64)}
@@ -1198,6 +1243,7 @@ func TestCaptureJournalRejectsDisappearedApprovedPrestate(t *testing.T) {
 }
 
 func TestCaptureJournalRejectsChangedApprovedPrestate(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	target := filepath.Join(root, ".agents", "skills", "old-skill", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
@@ -1207,7 +1253,7 @@ func TestCaptureJournalRejectsChangedApprovedPrestate(t *testing.T) {
 		t.Fatal(err)
 	}
 	review := Review{
-		Context:        Context{ReviewID: "review-one"},
+		Context:        ReviewContext{ReviewID: "review-one"},
 		ProposalDigest: "sha256:" + strings.Repeat("a", 64),
 	}
 	plan := applicationPlan{PlanDigest: "sha256:" + strings.Repeat("b", 64)}
@@ -1231,6 +1277,7 @@ func TestCaptureJournalRejectsChangedApprovedPrestate(t *testing.T) {
 }
 
 func TestReadCandidateFileRejectsSymlinkAfterValidation(t *testing.T) {
+	t.Parallel()
 	repoRoot := t.TempDir()
 	root := filepath.Join(repoRoot, ".software-standards", "reviews", "review-one")
 	outside := filepath.Join(t.TempDir(), "candidate.md")
@@ -1247,7 +1294,7 @@ func TestReadCandidateFileRejectsSymlinkAfterValidation(t *testing.T) {
 	review := Review{
 		RepoRoot: repoRoot,
 		Root:     root,
-		Context: Context{
+		Context: ReviewContext{
 			ReviewID: "review-one",
 			Inventory: inventory.Report{Limits: inventory.Limits{
 				MaxFileBytes: 1 << 20,
@@ -1261,6 +1308,7 @@ func TestReadCandidateFileRejectsSymlinkAfterValidation(t *testing.T) {
 }
 
 func TestCandidateModePortabilityContract(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		mode    string
@@ -1313,6 +1361,7 @@ func TestRequireRegularBundleFileAcceptsRelativeRoot(t *testing.T) {
 }
 
 func TestApplicationPlanModePortabilityContract(t *testing.T) {
+	t.Parallel()
 	executable := FileState{
 		Exists: true,
 		SHA256: "sha256:" + strings.Repeat("a", 64),
@@ -1393,6 +1442,7 @@ func TestApplicationPlanModePortabilityContract(t *testing.T) {
 }
 
 func TestApplicationPlanPreservesWindowsModePreconditionClassification(t *testing.T) {
+	t.Parallel()
 	executable := FileState{
 		Exists: true,
 		SHA256: "sha256:" + strings.Repeat("a", 64),
@@ -1416,6 +1466,7 @@ func TestApplicationPlanPreservesWindowsModePreconditionClassification(t *testin
 }
 
 func TestWindowsValidationBlocksExecutableEntrypointAndSupportBeforeMutation(t *testing.T) {
+	t.Parallel()
 	action := Action{
 		ID:          "update-skill",
 		Disposition: DispositionUpdate,
@@ -1466,6 +1517,7 @@ func TestWindowsValidationBlocksExecutableEntrypointAndSupportBeforeMutation(t *
 }
 
 func TestCandidateValidationRejectsCaseFoldedTargetCollision(t *testing.T) {
+	t.Parallel()
 	action := Action{
 		ID:          "update-skill",
 		Disposition: DispositionUpdate,
@@ -1509,6 +1561,7 @@ func TestCandidateValidationRejectsCaseFoldedTargetCollision(t *testing.T) {
 }
 
 func TestSafeRelativePathRejectsNonPortableForms(t *testing.T) {
+	t.Parallel()
 	for _, candidate := range []string{
 		`..\outside`,
 		`.agents\skills\example-skill\SKILL.md`,
@@ -1552,6 +1605,7 @@ func TestSafeRelativePathRejectsNonPortableForms(t *testing.T) {
 }
 
 func TestValidateGovernedTreePathsRejectsNonPortableOrCollidingBaseline(t *testing.T) {
+	t.Parallel()
 	for name, paths := range map[string][]string{
 		"reserved device": {
 			".agents/skills/example/SKILL.md",
@@ -1596,6 +1650,7 @@ func TestValidateGovernedTreePathsRejectsNonPortableOrCollidingBaseline(t *testi
 }
 
 func TestEventAppendHonorsCancellationAtWriteBoundary(t *testing.T) {
+	t.Parallel()
 	for _, cancelBeforeWrite := range []bool{true, false} {
 		name := "during atomic replacement"
 		if cancelBeforeWrite {
@@ -1609,17 +1664,18 @@ func TestEventAppendHonorsCancellationAtWriteBoundary(t *testing.T) {
 			}
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			original := writeEventLogAtomically
-			writeEventLogAtomically = func(store *reviewStore, data []byte, mode os.FileMode) error {
+			store := internalTestReviewStore(t, root, "review-one")
+			original := store.events.write
+			store.events.write = func(store *reviewStore, data []byte, mode os.FileMode) error {
 				cancel()
 				return original(store, data, mode)
 			}
-			t.Cleanup(func() { writeEventLogAtomically = original })
 			if cancelBeforeWrite {
 				cancel()
 			}
 			err := appendEvent(ctx, Review{
-				RepoRoot: root, Root: reviewRoot, Context: Context{ReviewID: "review-one"},
+				store:    store,
+				RepoRoot: root, Root: reviewRoot, Context: ReviewContext{ReviewID: "review-one"},
 			}, Event{ID: "approved-001"})
 			data, readErr := os.ReadFile(filepath.Join(reviewRoot, "events.jsonl"))
 			if cancelBeforeWrite {
@@ -1631,4 +1687,17 @@ func TestEventAppendHonorsCancellationAtWriteBoundary(t *testing.T) {
 			}
 		})
 	}
+}
+
+func internalTestReviewStore(t *testing.T, repoRoot, reviewID string) *reviewStore {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(repoRoot, ".software-standards", "reviews", reviewID), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	store, err := openReviewStore(repoRoot, reviewID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return store
 }

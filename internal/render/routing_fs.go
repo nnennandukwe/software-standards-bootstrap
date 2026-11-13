@@ -72,7 +72,12 @@ func (fileSystem *rootedRoutingFileSystem) readFile(name string, maxBytes int64)
 		return nil, fmt.Errorf("%w: routing path %s is not a regular file", ErrUnsafeTarget, name)
 	}
 	if before.Size() > maxBytes {
-		return nil, fmt.Errorf("%w: routing path %s exceeds the %d-byte file limit", ErrUnsafeTarget, name, maxBytes)
+		return nil, fmt.Errorf(
+			"%w: routing path %s exceeds the %d-byte file limit",
+			ErrUnsafeTarget,
+			name,
+			maxBytes,
+		)
 	}
 	file, err := fileSystem.root.Open(rootedName)
 	if err != nil {
@@ -91,7 +96,12 @@ func (fileSystem *rootedRoutingFileSystem) readFile(name string, maxBytes int64)
 		return nil, err
 	}
 	if int64(len(content)) > maxBytes {
-		return nil, fmt.Errorf("%w: routing path %s exceeds the %d-byte file limit", ErrUnsafeTarget, name, maxBytes)
+		return nil, fmt.Errorf(
+			"%w: routing path %s exceeds the %d-byte file limit",
+			ErrUnsafeTarget,
+			name,
+			maxBytes,
+		)
 	}
 	afterFirst, err := file.Stat()
 	if err != nil {
@@ -105,7 +115,12 @@ func (fileSystem *rootedRoutingFileSystem) readFile(name string, maxBytes int64)
 		return nil, err
 	}
 	if int64(len(second)) > maxBytes {
-		return nil, fmt.Errorf("%w: routing path %s exceeds the %d-byte file limit", ErrUnsafeTarget, name, maxBytes)
+		return nil, fmt.Errorf(
+			"%w: routing path %s exceeds the %d-byte file limit",
+			ErrUnsafeTarget,
+			name,
+			maxBytes,
+		)
 	}
 	afterSecond, err := file.Stat()
 	if err != nil {

@@ -67,7 +67,12 @@ func decodeVerificationRecipe(sourcePath string, data []byte) (VerificationRecip
 	switch version.Schema {
 	case VerificationSchemaV1:
 		var raw verificationRecipeV1
-		if err := yaml.Load(data, &raw, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+		if err := yaml.Load(
+			data,
+			&raw,
+			yaml.WithKnownFields(),
+			yaml.WithUniqueKeys(),
+		); err != nil {
 			return VerificationRecipe{Schema: version.Schema, SourcePath: sourcePath}, []Diagnostic{yamlDiagnostic(
 				sourcePath,
 				err,
@@ -90,7 +95,12 @@ func decodeVerificationRecipe(sourcePath string, data []byte) (VerificationRecip
 		}, nil
 	case VerificationSchemaV2:
 		var raw verificationRecipeV2
-		if err := yaml.Load(data, &raw, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
+		if err := yaml.Load(
+			data,
+			&raw,
+			yaml.WithKnownFields(),
+			yaml.WithUniqueKeys(),
+		); err != nil {
 			return VerificationRecipe{Schema: version.Schema, SourcePath: sourcePath}, []Diagnostic{yamlDiagnostic(
 				sourcePath,
 				err,
@@ -127,7 +137,12 @@ func validateVerificationRecipe(
 ) []Diagnostic {
 	diagnostics := make([]Diagnostic, 0)
 	add := func(field, message, recovery string) {
-		diagnostics = append(diagnostics, diagnostic(recipe.SourcePath, field, message, recovery))
+		diagnostics = append(diagnostics, diagnostic(
+			recipe.SourcePath,
+			field,
+			message,
+			recovery,
+		))
 	}
 	if recipe.Schema != VerificationSchemaV1 && recipe.Schema != VerificationSchemaV2 {
 		return diagnostics
@@ -143,7 +158,13 @@ func validateVerificationRecipe(
 	}
 	diagnostics = append(diagnostics, validateActionableLenses(recipe.SourcePath, "lenses", recipe.Lenses)...)
 	diagnostics = append(diagnostics, validateScopes(recipe.SourcePath, recipe.Scopes)...)
-	diagnostics = append(diagnostics, validateDerivationEvidence(ctx, repo, recipe.SourcePath, recipe.Derivation, recipe.Evidence)...)
+	diagnostics = append(diagnostics, validateDerivationEvidence(
+		ctx,
+		repo,
+		recipe.SourcePath,
+		recipe.Derivation,
+		recipe.Evidence,
+	)...)
 	if strings.TrimSpace(recipe.When) == "" {
 		add("when", "when is required", "state the exact handoff context in which the recipe applies")
 	}
@@ -180,7 +201,13 @@ func validateVerificationRecipe(
 			add(field+".expected_result", "expected_result is required", "state the observable successful result")
 		}
 		if recipe.Schema == VerificationSchemaV2 {
-			diagnostics = append(diagnostics, validateWorkingDirectory(ctx, repo, recipe.SourcePath, field+".working_directory", step.WorkingDirectory)...)
+			diagnostics = append(diagnostics, validateWorkingDirectory(
+				ctx,
+				repo,
+				recipe.SourcePath,
+				field+".working_directory",
+				step.WorkingDirectory,
+			)...)
 		}
 	}
 	return diagnostics
@@ -194,7 +221,12 @@ func validateWorkingDirectory(
 	relative string,
 ) []Diagnostic {
 	add := func(message, recovery string) []Diagnostic {
-		return []Diagnostic{diagnostic(sourcePath, field, message, recovery)}
+		return []Diagnostic{diagnostic(
+			sourcePath,
+			field,
+			message,
+			recovery,
+		)}
 	}
 	if relative == "" {
 		return add("working_directory is required by verification/v2", "use . or a canonical tracked repository directory")

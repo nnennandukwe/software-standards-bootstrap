@@ -14,6 +14,7 @@ import (
 )
 
 func TestOpenPreservesPreCanceledContext(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	_, err := workspace.Open(ctx, t.TempDir())
@@ -23,13 +24,14 @@ func TestOpenPreservesPreCanceledContext(t *testing.T) {
 }
 
 func TestOpenForInspectAcceptsUntrackedFilesButRejectsTrackedChanges(t *testing.T) {
+	t.Parallel()
 	repo := newRepository(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "committed\n")
 	git(t, repo, "add", "tracked.txt")
 	git(t, repo, "commit", "-m", "baseline")
 
 	writeFile(t, filepath.Join(repo, "notes.txt"), "untracked proposal\n")
-	got, err := workspace.OpenForInspect(context.Background(), repo)
+	got, err := workspace.OpenForInspect(t.Context(), repo)
 	if err != nil {
 		t.Fatalf("untracked files must not block inspection: %v", err)
 	}
@@ -38,7 +40,7 @@ func TestOpenForInspectAcceptsUntrackedFilesButRejectsTrackedChanges(t *testing.
 	}
 
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "changed\n")
-	_, err = workspace.OpenForInspect(context.Background(), repo)
+	_, err = workspace.OpenForInspect(t.Context(), repo)
 	if err == nil {
 		t.Fatal("expected tracked changes to block inspection")
 	}
@@ -48,6 +50,7 @@ func TestOpenForInspectAcceptsUntrackedFilesButRejectsTrackedChanges(t *testing.
 }
 
 func TestOpenForInspectRejectsStagedDetachedUnbornAndNonGitStates(t *testing.T) {
+	t.Parallel()
 	t.Run("staged", func(t *testing.T) {
 		repo := newRepository(t)
 		writeFile(t, filepath.Join(repo, "tracked.txt"), "committed\n")
@@ -56,7 +59,7 @@ func TestOpenForInspectRejectsStagedDetachedUnbornAndNonGitStates(t *testing.T) 
 		writeFile(t, filepath.Join(repo, "staged.txt"), "staged\n")
 		git(t, repo, "add", "staged.txt")
 
-		_, err := workspace.OpenForInspect(context.Background(), repo)
+		_, err := workspace.OpenForInspect(t.Context(), repo)
 		assertErrorContains(t, err, "commit, stash, or restore tracked changes")
 	})
 
@@ -64,29 +67,30 @@ func TestOpenForInspectRejectsStagedDetachedUnbornAndNonGitStates(t *testing.T) 
 		repo := committedRepository(t)
 		git(t, repo, "checkout", "--detach")
 
-		_, err := workspace.OpenForInspect(context.Background(), repo)
+		_, err := workspace.OpenForInspect(t.Context(), repo)
 		assertErrorContains(t, err, "switch to a branch")
 	})
 
 	t.Run("unborn", func(t *testing.T) {
 		repo := newRepository(t)
 
-		_, err := workspace.OpenForInspect(context.Background(), repo)
+		_, err := workspace.OpenForInspect(t.Context(), repo)
 		assertErrorContains(t, err, "create an initial commit")
 	})
 
 	t.Run("not git", func(t *testing.T) {
-		_, err := workspace.OpenForInspect(context.Background(), t.TempDir())
+		_, err := workspace.OpenForInspect(t.Context(), t.TempDir())
 		assertErrorContains(t, err, "run ssb from a non-bare Git repository")
 	})
 }
 
 func TestOpenForInspectRejectsExistingPackWithoutChangingIt(t *testing.T) {
+	t.Parallel()
 	repo := committedRepository(t)
 	rule := filepath.Join(repo, ".software-standards", "rules", "keep-me.md")
 	writeFile(t, rule, "developer work\n")
 
-	_, err := workspace.OpenForInspect(context.Background(), repo)
+	_, err := workspace.OpenForInspect(t.Context(), repo)
 	assertErrorContains(t, err, "edit or remove the existing pack")
 
 	got, readErr := os.ReadFile(rule)
@@ -99,9 +103,10 @@ func TestOpenForInspectRejectsExistingPackWithoutChangingIt(t *testing.T) {
 }
 
 func TestOpenForPruneRequiresCommittedPackAndPreservesInspectBoundary(t *testing.T) {
+	t.Parallel()
 	repo := committedRepository(t)
 
-	_, err := workspace.OpenForPrune(context.Background(), repo)
+	_, err := workspace.OpenForPrune(t.Context(), repo)
 	assertErrorContains(t, err, "requires an existing .software-standards pack")
 
 	rule := filepath.Join(repo, ".software-standards", "rules", "keep-me.md")
@@ -109,7 +114,7 @@ func TestOpenForPruneRequiresCommittedPackAndPreservesInspectBoundary(t *testing
 	git(t, repo, "add", ".software-standards")
 	git(t, repo, "commit", "-m", "adopt standards")
 
-	got, err := workspace.OpenForPrune(context.Background(), repo)
+	got, err := workspace.OpenForPrune(t.Context(), repo)
 	if err != nil {
 		t.Fatalf("adopted pack must be eligible for prune inspection: %v", err)
 	}
@@ -117,18 +122,19 @@ func TestOpenForPruneRequiresCommittedPackAndPreservesInspectBoundary(t *testing
 		t.Fatal("expected a commit-backed prune baseline")
 	}
 
-	_, err = workspace.OpenForInspect(context.Background(), repo)
+	_, err = workspace.OpenForInspect(t.Context(), repo)
 	assertErrorContains(t, err, "edit or remove the existing pack")
 }
 
 func TestOpenForPruneDirtyWorktreeNamesThePruneRecoveryCommand(t *testing.T) {
+	t.Parallel()
 	repo := committedRepository(t)
 	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "keep-me.md"), "committed\n")
 	git(t, repo, "add", ".software-standards")
 	git(t, repo, "commit", "-m", "adopt standards")
 	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "keep-me.md"), "dirty\n")
 
-	_, err := workspace.OpenForPrune(context.Background(), repo)
+	_, err := workspace.OpenForPrune(t.Context(), repo)
 	if err == nil ||
 		!strings.Contains(err.Error(), "rerun ssb prune inspect") ||
 		strings.Contains(err.Error(), "rerun ssb inspect") {
@@ -137,6 +143,7 @@ func TestOpenForPruneDirtyWorktreeNamesThePruneRecoveryCommand(t *testing.T) {
 }
 
 func TestOpenForPruneRejectsUntrackedCanonicalConfiguration(t *testing.T) {
+	t.Parallel()
 	for name, relative := range map[string]string{
 		"skill entrypoint": ".agents/skills/untracked/SKILL.md",
 		"skill support":    ".agents/skills/committed/references/new.md",
@@ -148,7 +155,7 @@ func TestOpenForPruneRejectsUntrackedCanonicalConfiguration(t *testing.T) {
 			git(t, root, "add", ".software-standards", ".agents/skills")
 			git(t, root, "commit", "-m", "adopt standards")
 			writeFile(t, filepath.Join(root, filepath.FromSlash(relative)), "untracked\n")
-			_, err := workspace.OpenForPrune(context.Background(), root)
+			_, err := workspace.OpenForPrune(t.Context(), root)
 			if err == nil || !strings.Contains(err.Error(), "untracked configuration") {
 				t.Fatalf("error = %v, want untracked configuration block", err)
 			}
@@ -157,6 +164,7 @@ func TestOpenForPruneRejectsUntrackedCanonicalConfiguration(t *testing.T) {
 }
 
 func TestOpenForPruneRejectsIgnoredUntrackedConfiguration(t *testing.T) {
+	t.Parallel()
 	root := committedRepository(t)
 	writeFile(t, filepath.Join(root, ".software-standards", "rules", "keep.md"), "committed\n")
 	writeFile(t, filepath.Join(root, ".gitignore"), ".agents/skills/hidden/\n")
@@ -164,55 +172,58 @@ func TestOpenForPruneRejectsIgnoredUntrackedConfiguration(t *testing.T) {
 	git(t, root, "commit", "-m", "adopt standards")
 	writeFile(t, filepath.Join(root, ".agents", "skills", "hidden", "SKILL.md"), "ignored\n")
 
-	_, err := workspace.OpenForPrune(context.Background(), root)
+	_, err := workspace.OpenForPrune(t.Context(), root)
 	if err == nil || !strings.Contains(err.Error(), "untracked configuration") {
 		t.Fatalf("error = %v, want ignored configuration block", err)
 	}
 }
 
 func TestVerifyPruneSnapshotRejectsConcurrentTrackedChangesButAllowsPack(t *testing.T) {
+	t.Parallel()
 	repo := committedRepository(t)
 	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "keep-me.md"), "developer work\n")
 	git(t, repo, "add", ".software-standards")
 	git(t, repo, "commit", "-m", "adopt standards")
 
-	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	ws, err := workspace.OpenForPrune(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ws.VerifyPruneSnapshot(context.Background()); err != nil {
+	if err := ws.VerifyPruneSnapshot(t.Context()); err != nil {
 		t.Fatalf("unchanged adopted pack must remain valid: %v", err)
 	}
 
 	writeFile(t, filepath.Join(repo, "README.md"), "changed concurrently\n")
-	err = ws.VerifyPruneSnapshot(context.Background())
+	err = ws.VerifyPruneSnapshot(t.Context())
 	assertErrorContains(t, err, "tracked or staged files changed during prune inspection")
 }
 
 func TestVerifyPruneSnapshotNamesPruneCommandWhenHeadDetaches(t *testing.T) {
+	t.Parallel()
 	repo := committedRepository(t)
 	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "keep-me.md"), "developer work\n")
 	git(t, repo, "add", ".software-standards")
 	git(t, repo, "commit", "-m", "adopt standards")
 
-	ws, err := workspace.OpenForPrune(context.Background(), repo)
+	ws, err := workspace.OpenForPrune(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	git(t, repo, "checkout", "--detach", "HEAD")
 
-	err = ws.VerifyPruneSnapshot(context.Background())
+	err = ws.VerifyPruneSnapshot(t.Context())
 	assertErrorContains(t, err, "switch to a branch and rerun ssb prune inspect")
 }
 
 func TestOpenForInspectResolvesNestedPathToWorktreeRoot(t *testing.T) {
+	t.Parallel()
 	repo := committedRepository(t)
 	nested := filepath.Join(repo, "path", "with spaces", "日本語")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := workspace.OpenForInspect(context.Background(), nested)
+	got, err := workspace.OpenForInspect(t.Context(), nested)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,6 +237,7 @@ func TestOpenForInspectResolvesNestedPathToWorktreeRoot(t *testing.T) {
 }
 
 func TestOpenForInspectPreservesHostValidWhitespaceAndUnicodeInRepositoryRoot(t *testing.T) {
+	t.Parallel()
 	repositoryName := "repo \n日本語 "
 	if runtime.GOOS == "windows" {
 		// Win32 rejects newlines and trailing spaces in path components.
@@ -240,7 +252,7 @@ func TestOpenForInspectPreservesHostValidWhitespaceAndUnicodeInRepositoryRoot(t 
 	git(t, repo, "add", "README.md")
 	git(t, repo, "commit", "-m", "baseline")
 
-	got, err := workspace.OpenForInspect(context.Background(), repo)
+	got, err := workspace.OpenForInspect(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,6 +266,7 @@ func TestOpenForInspectPreservesHostValidWhitespaceAndUnicodeInRepositoryRoot(t 
 }
 
 func TestAtCommitRejectsResolvableCommitOutsideCurrentHistory(t *testing.T) {
+	t.Parallel()
 	repo := committedRepository(t)
 	writeFile(t, filepath.Join(repo, "orphaned.txt"), "never adopted on current history\n")
 	git(t, repo, "add", "orphaned.txt")
@@ -261,22 +274,23 @@ func TestAtCommitRejectsResolvableCommitOutsideCurrentHistory(t *testing.T) {
 	orphaned := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
 	git(t, repo, "reset", "--hard", "HEAD~1")
 
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if resolved := strings.TrimSpace(git(t, repo, "rev-parse", "--verify", orphaned+"^{commit}")); resolved != orphaned {
 		t.Fatalf("orphaned commit did not remain resolvable: %q", resolved)
 	}
-	if _, err := ws.AtCommit(context.Background(), orphaned); err == nil ||
+	if _, err := ws.AtCommit(t.Context(), orphaned); err == nil ||
 		!strings.Contains(err.Error(), "not an ancestor") {
 		t.Fatalf("error = %v, want current-history ancestry block", err)
 	}
 }
 
 func TestAtCommitPreservesCanceledContextAsOperationalFailure(t *testing.T) {
+	t.Parallel()
 	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,21 +309,22 @@ func TestAtCommitPreservesCanceledContextAsOperationalFailure(t *testing.T) {
 }
 
 func TestVerifyInspectSnapshotRejectsConcurrentHeadOrTrackedChanges(t *testing.T) {
+	t.Parallel()
 	t.Run("tracked change", func(t *testing.T) {
 		repo := committedRepository(t)
-		ws, err := workspace.OpenForInspect(context.Background(), repo)
+		ws, err := workspace.OpenForInspect(t.Context(), repo)
 		if err != nil {
 			t.Fatal(err)
 		}
 		writeFile(t, filepath.Join(repo, "README.md"), "changed concurrently\n")
 
-		err = ws.VerifyInspectSnapshot(context.Background())
+		err = ws.VerifyInspectSnapshot(t.Context())
 		assertErrorContains(t, err, "tracked or staged files changed during inspection")
 	})
 
 	t.Run("head change", func(t *testing.T) {
 		repo := committedRepository(t)
-		ws, err := workspace.OpenForInspect(context.Background(), repo)
+		ws, err := workspace.OpenForInspect(t.Context(), repo)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -317,19 +332,19 @@ func TestVerifyInspectSnapshotRejectsConcurrentHeadOrTrackedChanges(t *testing.T
 		git(t, repo, "add", "next.txt")
 		git(t, repo, "commit", "-m", "concurrent")
 
-		err = ws.VerifyInspectSnapshot(context.Background())
+		err = ws.VerifyInspectSnapshot(t.Context())
 		assertErrorContains(t, err, "HEAD changed during inspection")
 	})
 
 	t.Run("detached head names inspect command", func(t *testing.T) {
 		repo := committedRepository(t)
-		ws, err := workspace.OpenForInspect(context.Background(), repo)
+		ws, err := workspace.OpenForInspect(t.Context(), repo)
 		if err != nil {
 			t.Fatal(err)
 		}
 		git(t, repo, "checkout", "--detach", "HEAD")
 
-		err = ws.VerifyInspectSnapshot(context.Background())
+		err = ws.VerifyInspectSnapshot(t.Context())
 		assertErrorContains(t, err, "switch to a branch and rerun ssb inspect")
 	})
 }

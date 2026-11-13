@@ -25,11 +25,11 @@ import (
 
 func TestCreateReviewWritesImmutableContext(t *testing.T) {
 	root := lifecycleRepository(t)
-	ws, err := workspace.OpenForPrune(context.Background(), root)
+	ws, err := workspace.OpenForPrune(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := prune.CreateReview(context.Background(), ws, prune.ContextOptions{
+	result, err := prune.CreateReview(t.Context(), ws, prune.CreateReviewOptions{
 		ReviewID:        "review-one",
 		Capabilities:    capabilityProfile(t),
 		InventoryLimits: inventory.DefaultLimits(),
@@ -52,7 +52,7 @@ func TestCreateReviewWritesImmutableContext(t *testing.T) {
 			t.Fatalf("missing durable capability snapshot %s: %v", snapshot, err)
 		}
 	}
-	if _, err := prune.CreateReview(context.Background(), ws, prune.ContextOptions{
+	if _, err := prune.CreateReview(t.Context(), ws, prune.CreateReviewOptions{
 		ReviewID:        "review-one",
 		Capabilities:    capabilityProfile(t),
 		InventoryLimits: inventory.DefaultLimits(),
@@ -110,17 +110,17 @@ func TestReviewLifecycleRejectsSymlinkedReviewRootBeforeExternalWrites(t *testin
 	}
 	_, _, err = prune.LoadReview(t.Context(), root, "review-one")
 	assertSymlinkBlock("load", err)
-	_, err = prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	_, err = prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	})
 	assertSymlinkBlock("approve", err)
-	_, err = prune.Apply(context.Background(), root, prune.ApplyOptions{
+	_, err = prune.Apply(t.Context(), root, prune.ApplyOptions{
 		ReviewID: "review-one",
 		Write:    true,
 	})
 	assertSymlinkBlock("apply", err)
-	err = prune.Recover(context.Background(), root, "review-one", true)
+	err = prune.Recover(t.Context(), root, "review-one", true)
 	assertSymlinkBlock("recover", err)
 	_, _, err = prune.ReviewStatus(t.Context(), root, "review-one")
 	assertSymlinkBlock("status", err)
@@ -147,13 +147,13 @@ func TestTransitionRevalidatesReviewRootBeforeEventAndLockCleanup(t *testing.T) 
 	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), proposalData, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
+	if _, err := prune.Apply(t.Context(), root, prune.ApplyOptions{
 		ReviewID: "review-one",
 		Write:    true,
 	}); err != nil {
@@ -216,11 +216,11 @@ func TestTransitionRevalidatesReviewRootBeforeEventAndLockCleanup(t *testing.T) 
 func TestCreateReviewWriteFailureLeavesNoPartialReview(t *testing.T) {
 	root := lifecycleRepository(t)
 	writeFile(t, filepath.Join(root, ".software-standards", "reviews"), "blocks directory\n")
-	ws, err := workspace.OpenForPrune(context.Background(), root)
+	ws, err := workspace.OpenForPrune(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = prune.CreateReview(context.Background(), ws, prune.ContextOptions{
+	_, err = prune.CreateReview(t.Context(), ws, prune.CreateReviewOptions{
 		ReviewID:        "review-one",
 		Capabilities:    capabilityProfile(t),
 		InventoryLimits: inventory.DefaultLimits(),
@@ -236,7 +236,7 @@ func TestCreateReviewWriteFailureLeavesNoPartialReview(t *testing.T) {
 func TestApproveBindsExactProposalAndRequiresEveryDecision(t *testing.T) {
 	root := lifecycleRepository(t)
 	review := createReviewWithProposal(t, root, false)
-	_, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	_, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule"},
 		Now:      func() time.Time { return time.Unix(1, 0).UTC() },
@@ -245,7 +245,7 @@ func TestApproveBindsExactProposalAndRequiresEveryDecision(t *testing.T) {
 		t.Fatalf("error = %v, want missing decision", err)
 	}
 
-	event, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	event, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule"},
 		Rejected: []string{"orphan-skill"},
@@ -257,7 +257,7 @@ func TestApproveBindsExactProposalAndRequiresEveryDecision(t *testing.T) {
 	if event.Kind != prune.EventApproved || event.ProposalDigest != review.ProposalDigest {
 		t.Fatalf("unexpected approval: %#v", event)
 	}
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule"},
 		Rejected: []string{"orphan-skill"},
@@ -269,7 +269,7 @@ func TestApproveBindsExactProposalAndRequiresEveryDecision(t *testing.T) {
 func TestApproveNeverApprovesUnableToDetermine(t *testing.T) {
 	root := lifecycleRepository(t)
 	createReviewWithProposal(t, root, true)
-	_, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	_, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	})
@@ -294,7 +294,7 @@ func TestApproveAllowsZeroRulePoststateWithAtomicReportUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule"},
 		Rejected: []string{"orphan-skill"},
@@ -406,7 +406,7 @@ func TestApplyDefaultsToDryRunThenAppliesApprovedRemoval(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err != nil {
@@ -414,7 +414,7 @@ func TestApplyDefaultsToDryRunThenAppliesApprovedRemoval(t *testing.T) {
 	}
 
 	skillPath := filepath.Join(root, ".agents", "skills", "orphan-skill", "SKILL.md")
-	dryRun, err := prune.Apply(context.Background(), root, prune.ApplyOptions{ReviewID: "review-one"})
+	dryRun, err := prune.Apply(t.Context(), root, prune.ApplyOptions{ReviewID: "review-one"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,7 +463,7 @@ func TestApplyDefaultsToDryRunThenAppliesApprovedRemoval(t *testing.T) {
 		t.Fatalf("dry run changed skill: %v", err)
 	}
 
-	applied, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
+	applied, err := prune.Apply(t.Context(), root, prune.ApplyOptions{
 		ReviewID: "review-one",
 		Write:    true,
 	})
@@ -496,11 +496,11 @@ func TestApplyDefaultsToDryRunThenAppliesApprovedRemoval(t *testing.T) {
 	if strings.Contains(string(report), "id: orphan-skill") {
 		t.Fatalf("report retained removed skill entry:\n%s", report)
 	}
-	repo, err := workspace.Open(context.Background(), root)
+	repo, err := workspace.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, diagnostics, err := rulepack.ValidateRetainedPack(context.Background(), repo); err != nil {
+	if _, diagnostics, err := rulepack.ValidateRetainedPack(t.Context(), repo); err != nil {
 		t.Fatal(err)
 	} else if len(diagnostics) != 0 {
 		t.Fatalf("atomically updated pack is invalid: %#v", diagnostics)
@@ -533,13 +533,13 @@ func TestApplyManifestRemoval(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), proposalData, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	dryRun, err := prune.Apply(context.Background(), root, prune.ApplyOptions{ReviewID: "review-one"})
+	dryRun, err := prune.Apply(t.Context(), root, prune.ApplyOptions{ReviewID: "review-one"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -548,7 +548,7 @@ func TestApplyManifestRemoval(t *testing.T) {
 		dryRun.Changes[1].Path != ".software-standards/manifest.yaml" {
 		t.Fatalf("manifest-layout removal plan did not bind artifact and manifest: %#v", dryRun.Changes)
 	}
-	if _, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
+	if _, err := prune.Apply(t.Context(), root, prune.ApplyOptions{
 		ReviewID: "review-one",
 		Write:    true,
 	}); err != nil {
@@ -572,11 +572,11 @@ func TestApplyManifestRemoval(t *testing.T) {
 	if inventoryAfter, err := os.ReadFile(inventoryPath); err != nil || !bytes.Equal(inventoryAfter, inventoryBefore) {
 		t.Fatalf("manifest-layout prune changed inventory: error=%v", err)
 	}
-	repo, err := workspace.Open(context.Background(), root)
+	repo, err := workspace.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, diagnostics, err := rulepack.ValidateRetainedPack(context.Background(), repo); err != nil {
+	if _, diagnostics, err := rulepack.ValidateRetainedPack(t.Context(), repo); err != nil {
 		t.Fatal(err)
 	} else if len(diagnostics) != 0 {
 		t.Fatalf("manifest-layout pack invalid after atomic removal: %#v", diagnostics)
@@ -629,11 +629,11 @@ related_artifacts:
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := workspace.Open(context.Background(), root)
+	repo, err := workspace.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, diagnostics, err := prune.ValidateReview(context.Background(), repo, "review-one")
+	_, diagnostics, err := prune.ValidateReview(t.Context(), repo, "review-one")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -667,13 +667,13 @@ func TestApplyRefreshesManifestDigest(t *testing.T) {
 	if err := yaml.Load(manifestBeforeData, &manifestBefore, yaml.WithKnownFields(), yaml.WithUniqueKeys()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	dryRun, err := prune.Apply(context.Background(), root, prune.ApplyOptions{ReviewID: "review-one"})
+	dryRun, err := prune.Apply(t.Context(), root, prune.ApplyOptions{ReviewID: "review-one"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -682,7 +682,7 @@ func TestApplyRefreshesManifestDigest(t *testing.T) {
 		dryRun.Changes[1].Path != ".software-standards/rules/keep-rule.md" {
 		t.Fatalf("manifest-layout update plan did not bind rule and manifest: %#v", dryRun.Changes)
 	}
-	if _, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
+	if _, err := prune.Apply(t.Context(), root, prune.ApplyOptions{
 		ReviewID: "review-one",
 		Write:    true,
 	}); err != nil {
@@ -707,11 +707,11 @@ func TestApplyRefreshesManifestDigest(t *testing.T) {
 		manifestAfter.Inventory != manifestBefore.Inventory || manifestAfter.Report != manifestBefore.Report {
 		t.Fatalf("manifest-layout update changed immutable metadata or missed digest: before=%#v after=%#v", manifestBefore, manifestAfter)
 	}
-	repo, err := workspace.Open(context.Background(), root)
+	repo, err := workspace.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, diagnostics, err := rulepack.ValidateRetainedPack(context.Background(), repo); err != nil {
+	if _, diagnostics, err := rulepack.ValidateRetainedPack(t.Context(), repo); err != nil {
 		t.Fatal(err)
 	} else if len(diagnostics) != 0 {
 		t.Fatalf("manifest-layout pack invalid after atomic update: %#v", diagnostics)
@@ -733,13 +733,13 @@ func TestAppliedReviewRemainsAuditableAfterCommittingChanges(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), proposalData, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
+	if _, err := prune.Apply(t.Context(), root, prune.ApplyOptions{
 		ReviewID: "review-one",
 		Write:    true,
 	}); err != nil {
@@ -760,7 +760,7 @@ func TestAppliedReviewRemainsAuditableAfterCommittingChanges(t *testing.T) {
 
 func TestZeroArtifactRemovalClearsProjectionAndRecordsReplayableRender(t *testing.T) {
 	root := lifecycleRepository(t)
-	repo, err := workspace.Open(context.Background(), root)
+	repo, err := workspace.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -810,24 +810,24 @@ func TestZeroArtifactRemovalClearsProjectionAndRecordsReplayableRender(t *testin
 	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), proposalData, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
+	if _, err := prune.Apply(t.Context(), root, prune.ApplyOptions{
 		ReviewID: "review-one",
 		Write:    true,
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	repo, err = workspace.Open(context.Background(), root)
+	repo, err = workspace.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack, packDiagnostics, err := rulepack.ValidateRetainedPack(context.Background(), repo)
+	pack, packDiagnostics, err := rulepack.ValidateRetainedPack(t.Context(), repo)
 	if err != nil || len(packDiagnostics) != 0 {
 		t.Fatalf("validate zero-artifact pack: diagnostics=%#v error=%v", packDiagnostics, err)
 	}
@@ -882,24 +882,24 @@ func TestZeroArtifactRenderWithoutTargetRecordsReplayableNoOp(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), proposalData, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
+	if _, err := prune.Apply(t.Context(), root, prune.ApplyOptions{
 		ReviewID: "review-one",
 		Write:    true,
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	repo, err := workspace.Open(context.Background(), root)
+	repo, err := workspace.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack, diagnostics, err := rulepack.ValidateRetainedPack(context.Background(), repo)
+	pack, diagnostics, err := rulepack.ValidateRetainedPack(t.Context(), repo)
 	if err != nil || len(diagnostics) != 0 {
 		t.Fatalf("validate zero-artifact pack: diagnostics=%#v error=%v", diagnostics, err)
 	}
@@ -956,20 +956,20 @@ func TestApplyRemovesTheCompleteTrackedSkillBundle(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	dryRun, err := prune.Apply(context.Background(), root, prune.ApplyOptions{ReviewID: "review-one"})
+	dryRun, err := prune.Apply(t.Context(), root, prune.ApplyOptions{ReviewID: "review-one"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := len(dryRun.Changes); got != 2+len(supportingPaths) {
 		t.Fatalf("dry-run change count = %d, want %d: %#v", got, 2+len(supportingPaths), dryRun)
 	}
-	if _, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
+	if _, err := prune.Apply(t.Context(), root, prune.ApplyOptions{
 		ReviewID: "review-one",
 		Write:    true,
 	}); err != nil {
@@ -1028,13 +1028,13 @@ Use the replacement workflow.
 	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	result, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
+	result, err := prune.Apply(t.Context(), root, prune.ApplyOptions{
 		ReviewID: "review-one",
 		Write:    true,
 	})
@@ -1087,7 +1087,7 @@ Use the replacement workflow.
 		t.Fatal(err)
 	}
 
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err == nil ||
@@ -1102,14 +1102,14 @@ Use the replacement workflow.
 func TestApplyFailsClosedWhenTrackedSourceDrifts(t *testing.T) {
 	root := lifecycleRepository(t)
 	createReviewWithProposal(t, root, false)
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(root, ".software-standards", "rules", "keep-rule.md"), "drift\n")
-	_, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
+	_, err := prune.Apply(t.Context(), root, prune.ApplyOptions{
 		ReviewID: "review-one",
 		Write:    true,
 	})
@@ -1158,7 +1158,7 @@ func TestApprovalRejectsRetainedRuleWithUnreachableBaselineBeforeMutation(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err == nil ||
@@ -1205,7 +1205,7 @@ func TestApprovalRejectsEmbeddedRelationship(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err == nil || !strings.Contains(err.Error(), "field related_skills not found") {
@@ -1239,17 +1239,17 @@ func TestValidateAndApprovalRejectMalformedCandidateBeforeEventOrWrite(t *testin
 	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	repo, err := workspace.Open(context.Background(), root)
+	repo, err := workspace.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, diagnostics, err := prune.ValidateReview(context.Background(), repo, "review-one"); err != nil {
+	if _, diagnostics, err := prune.ValidateReview(t.Context(), repo, "review-one"); err != nil {
 		t.Fatal(err)
 	} else if len(diagnostics) == 0 ||
 		!strings.Contains(diagnostics[len(diagnostics)-1].Message, "rule contract") {
 		t.Fatalf("diagnostics = %#v, want candidate-contract failure", diagnostics)
 	}
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err == nil || !errors.Is(err, prune.ErrValidation) ||
@@ -1274,7 +1274,7 @@ func TestValidateApproveAndApplyShareCandidateDigestCheck(t *testing.T) {
 			root := lifecycleRepository(t)
 			candidatePath := configureRuleUpdateCandidate(t, root)
 			if stage == "apply" {
-				if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+				if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 					ReviewID: "review-one",
 					Approved: []string{"keep-rule", "orphan-skill"},
 				}); err != nil {
@@ -1286,12 +1286,12 @@ func TestValidateApproveAndApplyShareCandidateDigestCheck(t *testing.T) {
 			var message string
 			switch stage {
 			case "validate":
-				repo, err := workspace.Open(context.Background(), root)
+				repo, err := workspace.Open(t.Context(), root)
 				if err != nil {
 					t.Fatal(err)
 				}
 				_, diagnostics, err := prune.ValidateReview(
-					context.Background(),
+					t.Context(),
 					repo,
 					"review-one",
 				)
@@ -1303,7 +1303,7 @@ func TestValidateApproveAndApplyShareCandidateDigestCheck(t *testing.T) {
 				}
 				message = diagnostics[len(diagnostics)-1].Message
 			case "approve":
-				_, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+				_, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 					ReviewID: "review-one",
 					Approved: []string{"keep-rule", "orphan-skill"},
 				})
@@ -1312,7 +1312,7 @@ func TestValidateApproveAndApplyShareCandidateDigestCheck(t *testing.T) {
 				}
 				message = err.Error()
 			case "apply":
-				_, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
+				_, err := prune.Apply(t.Context(), root, prune.ApplyOptions{
 					ReviewID: "review-one",
 				})
 				if err == nil || !errors.Is(err, prune.ErrValidation) {
@@ -1345,13 +1345,13 @@ func TestVerifyRequiresExactExternalReceiptAndKeepsStatesSeparate(t *testing.T) 
 	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
+	if _, err := prune.Apply(t.Context(), root, prune.ApplyOptions{
 		ReviewID: "review-one", Write: true,
 	}); err != nil {
 		t.Fatal(err)
@@ -1378,7 +1378,7 @@ evidence:
   - path: logs/go-test.txt
     sha256: `+fileDigest(t, evidence)+`
 `)
-	if _, err := prune.Verify(context.Background(), root, prune.VerificationOptions{ReviewID: "review-one", ReceiptsDir: receipts, Now: nil}); err == nil ||
+	if _, err := prune.Verify(t.Context(), root, prune.VerificationOptions{ReviewID: "review-one", ReceiptsDir: receipts, Now: nil}); err == nil ||
 		!strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("error = %v, want exact receipt mismatch", err)
 	}
@@ -1399,14 +1399,14 @@ func TestVerifyBindsReceiptToAppliedPoststate(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 		Now:      func() time.Time { return time.Date(2026, 7, 27, 18, 0, 0, 0, time.UTC) },
 	}); err != nil {
 		t.Fatal(err)
 	}
-	applied, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
+	applied, err := prune.Apply(t.Context(), root, prune.ApplyOptions{
 		ReviewID: "review-one",
 		Write:    true,
 		Now:      func() time.Time { return time.Date(2026, 7, 27, 18, 1, 0, 0, time.UTC) },
@@ -1452,7 +1452,7 @@ evidence:
 		t.Fatal(err)
 	}
 	writeFile(t, rulePath, "human edit after application\n")
-	if _, err := prune.Verify(context.Background(), root, prune.VerificationOptions{ReviewID: "review-one", ReceiptsDir: receipts, Now: nil}); err == nil ||
+	if _, err := prune.Verify(t.Context(), root, prune.VerificationOptions{ReviewID: "review-one", ReceiptsDir: receipts, Now: nil}); err == nil ||
 		!strings.Contains(err.Error(), "poststate") {
 		t.Fatalf("error = %v, want poststate drift block", err)
 	}
@@ -1472,7 +1472,7 @@ evidence:
 		t.Fatal(err)
 	}
 	writeFile(t, receiptPath, strings.Replace(string(receiptData), "18:02:00Z", "18:00:00Z", 1))
-	if _, err := prune.Verify(context.Background(), root, prune.VerificationOptions{ReviewID: "review-one", ReceiptsDir: receipts, Now: nil}); err == nil ||
+	if _, err := prune.Verify(t.Context(), root, prune.VerificationOptions{ReviewID: "review-one", ReceiptsDir: receipts, Now: nil}); err == nil ||
 		!strings.Contains(err.Error(), "predates") {
 		t.Fatalf("error = %v, want pre-application receipt block", err)
 	}
@@ -1481,7 +1481,7 @@ evidence:
 	}
 	t.Chdir(filepath.Dir(receipts))
 	result, err := prune.Verify(
-		context.Background(),
+		t.Context(),
 		root,
 		prune.VerificationOptions{
 			ReviewID:    "review-one",
@@ -1517,13 +1517,13 @@ func TestVerifyBindsOptionalRenderForSkillOnlyApplication(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), proposalData, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	applied, err := prune.Apply(context.Background(), root, prune.ApplyOptions{
+	applied, err := prune.Apply(t.Context(), root, prune.ApplyOptions{
 		ReviewID: "review-one",
 		Write:    true,
 	})
@@ -1587,7 +1587,7 @@ evidence:
   - path: logs/ssb-validate.txt
     sha256: `+fileDigest(t, evidence)+`
 `)
-	result, err := prune.Verify(context.Background(), root, prune.VerificationOptions{ReviewID: "review-one", ReceiptsDir: receipts, Now: nil})
+	result, err := prune.Verify(t.Context(), root, prune.VerificationOptions{ReviewID: "review-one", ReceiptsDir: receipts, Now: nil})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1609,7 +1609,7 @@ evidence:
 func TestTransitionsCannotSkipApplication(t *testing.T) {
 	root := lifecycleRepository(t)
 	createReviewWithProposal(t, root, false)
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err != nil {
@@ -1644,7 +1644,7 @@ func TestRecoverRestoresJournaledBytesWithoutInferringApplication(t *testing.T) 
 			if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), proposalData, 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+			if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 				ReviewID: "review-one",
 				Approved: []string{"keep-rule", "orphan-skill"},
 			}); err != nil {
@@ -1725,7 +1725,7 @@ func TestRecoverRestoresJournaledBytesWithoutInferringApplication(t *testing.T) 
 func TestRecoverRejectsJournalPathEscape(t *testing.T) {
 	root := lifecycleRepository(t)
 	createReviewWithProposal(t, root, false)
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err != nil {
@@ -1740,7 +1740,7 @@ func TestRecoverRejectsJournalPathEscape(t *testing.T) {
   "entries": [{"path": "../outside", "existed": false}]
 }
 `)
-	if err := prune.Recover(context.Background(), root, "review-one", false); err == nil ||
+	if err := prune.Recover(t.Context(), root, "review-one", false); err == nil ||
 		!strings.Contains(err.Error(), "non-canonical") {
 		t.Fatalf("error = %v, want path-escape block", err)
 	}
@@ -1749,7 +1749,7 @@ func TestRecoverRejectsJournalPathEscape(t *testing.T) {
 func TestRecoverRejectsCanonicalPathOutsideApprovedPlan(t *testing.T) {
 	root := lifecycleRepository(t)
 	createReviewWithProposal(t, root, false)
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err != nil {
@@ -1774,7 +1774,7 @@ func TestRecoverRejectsCanonicalPathOutsideApprovedPlan(t *testing.T) {
   }]
 }
 `)
-	if err := prune.Recover(context.Background(), root, "review-one", false); err == nil ||
+	if err := prune.Recover(t.Context(), root, "review-one", false); err == nil ||
 		!strings.Contains(err.Error(), "approved operation") {
 		t.Fatalf("error = %v, want approved-plan binding block", err)
 	}
@@ -1795,7 +1795,7 @@ func TestRecoverRejectsAndPreservesPostCrashHumanEdit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(review.Root, "proposal.yaml"), proposalData, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err != nil {
@@ -1833,7 +1833,7 @@ func TestRecoverRejectsAndPreservesPostCrashHumanEdit(t *testing.T) {
   }]
 }
 `)
-	if err := prune.Recover(context.Background(), root, "review-one", false); err == nil ||
+	if err := prune.Recover(t.Context(), root, "review-one", false); err == nil ||
 		!strings.Contains(err.Error(), "neither approved prestate nor poststate") {
 		t.Fatalf("error = %v, want third-state recovery block", err)
 	}
@@ -1849,7 +1849,7 @@ func TestRecoverRejectsAndPreservesPostCrashHumanEdit(t *testing.T) {
 func TestRecoverClearsReviewOwnedStaleLocksWithoutJournal(t *testing.T) {
 	root := lifecycleRepository(t)
 	createReviewWithProposal(t, root, false)
-	if _, err := prune.Approve(context.Background(), root, prune.ApprovalOptions{
+	if _, err := prune.Approve(t.Context(), root, prune.ApprovalOptions{
 		ReviewID: "review-one",
 		Approved: []string{"keep-rule", "orphan-skill"},
 	}); err != nil {
@@ -1861,7 +1861,7 @@ func TestRecoverClearsReviewOwnedStaleLocksWithoutJournal(t *testing.T) {
 	writeFile(t, transitionLock, "review-one\n")
 	writeFile(t, mutationLock, "review-one\n")
 
-	if err := prune.Recover(context.Background(), root, "review-one", true); err != nil {
+	if err := prune.Recover(t.Context(), root, "review-one", true); err != nil {
 		t.Fatal(err)
 	}
 	for _, lockPath := range []string{transitionLock, mutationLock} {
@@ -1921,7 +1921,7 @@ func configureRuleUpdateCandidate(t *testing.T, root string) string {
 
 func reviewPlanDigest(t *testing.T, root string) string {
 	t.Helper()
-	result, err := prune.Apply(context.Background(), root, prune.ApplyOptions{ReviewID: "review-one"})
+	result, err := prune.Apply(t.Context(), root, prune.ApplyOptions{ReviewID: "review-one"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1942,7 +1942,7 @@ func reviewDigest(t *testing.T, root string) string {
 
 func createReviewWithProposal(t *testing.T, root string, unknownSkill bool) preparedReview {
 	t.Helper()
-	ws, err := workspace.OpenForPrune(context.Background(), root)
+	ws, err := workspace.OpenForPrune(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1984,7 +1984,7 @@ artifacts:
 		t.Fatal(err)
 	}
 	writeFile(t, provenance, provenanceContent)
-	created, err := prune.CreateReview(context.Background(), ws, prune.ContextOptions{
+	created, err := prune.CreateReview(t.Context(), ws, prune.CreateReviewOptions{
 		ReviewID:        "review-one",
 		Capabilities:    capabilityProfile(t),
 		Provenance:      provenance,
@@ -2047,7 +2047,7 @@ func validAction(id, disposition string, artifact prune.Artifact, evidenceDigest
 	}
 }
 
-func contextFileDigest(context prune.Context, path string) string {
+func contextFileDigest(context prune.ReviewContext, path string) string {
 	for _, file := range context.Inventory.Files {
 		if file.Path == path {
 			return file.SHA256

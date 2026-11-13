@@ -105,7 +105,12 @@ func readExistingRoutingTreeWithFS(store routingFileSystem, target string) (map[
 		}
 		relative := strings.TrimPrefix(current, target+"/")
 		if relative == current || relative == "" {
-			return fmt.Errorf("%w: routing walk returned path %s outside %s", ErrUnsafeTarget, current, target)
+			return fmt.Errorf(
+				"%w: routing walk returned path %s outside %s",
+				ErrUnsafeTarget,
+				current,
+				target,
+			)
 		}
 		if entry.Type()&fs.ModeSymlink != 0 {
 			return fmt.Errorf("%w: routing path %s is a symlink", ErrUnsafeTarget, relative)
@@ -345,7 +350,12 @@ func stageRoutingTargetWithFS(store routingFileSystem, routing *RoutingResult) (
 func routingRelativePath(filePath string) (string, error) {
 	prefix := RoutingDirectory + "/"
 	if !strings.HasPrefix(filePath, prefix) {
-		return "", fmt.Errorf("%w: routing output %s is outside %s", ErrUnsafeTarget, filePath, RoutingDirectory)
+		return "", fmt.Errorf(
+			"%w: routing output %s is outside %s",
+			ErrUnsafeTarget,
+			filePath,
+			RoutingDirectory,
+		)
 	}
 	relative := strings.TrimPrefix(filePath, prefix)
 	if relative == "" || strings.HasPrefix(relative, "/") || filepath.IsAbs(filepath.FromSlash(relative)) ||
@@ -517,7 +527,12 @@ func restoreRoutingBackupWithFS(store routingFileSystem, backup, target string) 
 	if err := store.rename(backup, target); err == nil {
 		return nil
 	} else if copyErr := restoreRoutingBackupByCopyWithFS(store, backup, target); copyErr != nil {
-		return fmt.Errorf("rename backup: %v; copy recovery: %w; previous tree remains at %s", err, copyErr, backup)
+		return fmt.Errorf(
+			"rename backup: %v; copy recovery: %w; previous tree remains at %s",
+			err,
+			copyErr,
+			backup,
+		)
 	}
 	if err := discardRoutingBackupWithFS(store, backup); err != nil {
 		return fmt.Errorf("copy recovery restored the target but backup cleanup failed: %w", err)
@@ -544,7 +559,12 @@ func restoreRoutingBackupByCopyWithFS(store routingFileSystem, backup, target st
 			return fmt.Errorf("create routing recovery parent: %w; partial recovery remains at %s", err, target)
 		}
 		if err := writeSyncedFileWithFS(store, fileTarget, existing[relative]); err != nil {
-			return fmt.Errorf("restore routing backup file %s: %w; partial recovery remains at %s", relative, err, target)
+			return fmt.Errorf(
+				"restore routing backup file %s: %w; partial recovery remains at %s",
+				relative,
+				err,
+				target,
+			)
 		}
 	}
 	return nil

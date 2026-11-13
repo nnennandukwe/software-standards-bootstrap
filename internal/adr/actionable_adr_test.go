@@ -1,7 +1,6 @@
 package adr_test
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -17,7 +16,7 @@ import (
 
 func TestCreateRecordsAdoptableArtifactsAndExcludesAutomation(t *testing.T) {
 	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +27,7 @@ func TestCreateRecordsAdoptableArtifactsAndExcludesAutomation(t *testing.T) {
 		Summary: &rulepack.OrientationStatement{Text: "Orientation is context, not an adoptable artifact."},
 	}
 
-	result, err := adr.Create(context.Background(), ws, pack, adr.Options{DryRun: true})
+	result, err := adr.Create(t.Context(), ws, pack, adr.Options{DryRun: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +60,7 @@ func TestCreateRecordsAdoptableArtifactsAndExcludesAutomation(t *testing.T) {
 
 func TestCreateIncludesManifestPaths(t *testing.T) {
 	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +69,7 @@ func TestCreateIncludesManifestPaths(t *testing.T) {
 	pack.ManifestPath = ".software-standards/manifest.yaml"
 	pack.InventoryPath = ".software-standards/inventory.json"
 
-	result, err := adr.Create(context.Background(), ws, pack, adr.Options{DryRun: true})
+	result, err := adr.Create(t.Context(), ws, pack, adr.Options{DryRun: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,13 +88,13 @@ func TestCreateIncludesManifestPaths(t *testing.T) {
 
 func TestCreatePreservesEmbeddedBytes(t *testing.T) {
 	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pack := actionableADRPack(strings.Repeat("a", 40))
 	pack.Layout = rulepack.LayoutEmbedded
-	result, err := adr.Create(context.Background(), ws, pack, adr.Options{DryRun: true})
+	result, err := adr.Create(t.Context(), ws, pack, adr.Options{DryRun: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,11 +122,11 @@ func TestCreateFailsSafelyWhenNothingIsAdoptable(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			repo := committedRepository(t)
-			ws, err := workspace.Open(context.Background(), repo)
+			ws, err := workspace.Open(t.Context(), repo)
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = adr.Create(context.Background(), ws, test.pack, adr.Options{})
+			_, err = adr.Create(t.Context(), ws, test.pack, adr.Options{})
 			if !errors.Is(err, adr.ErrNoAdoptableArtifacts) {
 				t.Fatalf("error = %v, want ErrNoAdoptableArtifacts", err)
 			}

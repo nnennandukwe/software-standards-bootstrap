@@ -9,18 +9,17 @@ import (
 )
 
 func TestAtCommitRejectsIntermediateObjectIDLengthsBeforeGit(t *testing.T) {
+	t.Parallel()
 	repo := &Repository{
 		root:     t.TempDir(),
 		baseline: strings.Repeat("b", 40),
 		gitPath:  "git",
 	}
-	original := runRepositoryGit
-	t.Cleanup(func() { runRepositoryGit = original })
 
 	for _, length := range []int{41, 63} {
 		t.Run(strconv.Itoa(length), func(t *testing.T) {
 			gitCalled := false
-			runRepositoryGit = func(
+			repo.runGit = func(
 				context.Context,
 				string,
 				string,
@@ -31,7 +30,7 @@ func TestAtCommitRejectsIntermediateObjectIDLengthsBeforeGit(t *testing.T) {
 				return nil, errors.New("unexpected Git invocation")
 			}
 			commit := strings.Repeat("a", length)
-			_, err := repo.AtCommit(context.Background(), commit)
+			_, err := repo.AtCommit(t.Context(), commit)
 			if !errors.Is(err, ErrHistoricalCommit) ||
 				!strings.Contains(err.Error(), "full lowercase object id") {
 				t.Fatalf("error = %v, want non-canonical object-id rejection", err)
@@ -44,8 +43,7 @@ func TestAtCommitRejectsIntermediateObjectIDLengthsBeforeGit(t *testing.T) {
 }
 
 func TestAtCommitAcceptsFullSHA1AndSHA256ObjectIDs(t *testing.T) {
-	original := runRepositoryGit
-	t.Cleanup(func() { runRepositoryGit = original })
+	t.Parallel()
 
 	for _, length := range []int{40, 64} {
 		t.Run(strconv.Itoa(length), func(t *testing.T) {
@@ -55,7 +53,7 @@ func TestAtCommitAcceptsFullSHA1AndSHA256ObjectIDs(t *testing.T) {
 				baseline: strings.Repeat("b", length),
 				gitPath:  "git",
 			}
-			runRepositoryGit = func(
+			repo.runGit = func(
 				_ context.Context,
 				_, _ string,
 				input []byte,
@@ -69,15 +67,20 @@ func TestAtCommitAcceptsFullSHA1AndSHA256ObjectIDs(t *testing.T) {
 					return []byte(commit + " commit\n"), nil
 				case "merge-base":
 					return nil, nil
+				case "probe":
+					return []byte("inherited runner"), nil
 				default:
 					t.Fatalf("unexpected Git arguments: %#v", args)
 					return nil, nil
 				}
 			}
 
-			got, err := repo.AtCommit(context.Background(), commit)
+			got, err := repo.AtCommit(t.Context(), commit)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if output, err := got.Git(t.Context(), "probe"); err != nil || string(output) != "inherited runner" {
+				t.Fatalf("historical runner = %q, %v", output, err)
 			}
 			if got.Baseline() != commit {
 				t.Fatalf("baseline = %q, want %q", got.Baseline(), commit)
@@ -87,14 +90,14 @@ func TestAtCommitAcceptsFullSHA1AndSHA256ObjectIDs(t *testing.T) {
 }
 
 func TestAtCommitPreservesAncestryOperationalFailure(t *testing.T) {
+	t.Parallel()
 	commit := strings.Repeat("a", 40)
 	repo := &Repository{
 		root:     t.TempDir(),
 		baseline: strings.Repeat("b", 40),
 		gitPath:  "git",
 	}
-	original := runRepositoryGit
-	runRepositoryGit = func(
+	repo.runGit = func(
 		_ context.Context,
 		_, _ string,
 		input []byte,
@@ -113,9 +116,8 @@ func TestAtCommitPreservesAncestryOperationalFailure(t *testing.T) {
 			return nil, nil
 		}
 	}
-	t.Cleanup(func() { runRepositoryGit = original })
 
-	if _, err := repo.AtCommit(context.Background(), commit); err == nil {
+	if _, err := repo.AtCommit(t.Context(), commit); err == nil {
 		t.Fatal("injected ancestry failure unexpectedly succeeded")
 	} else {
 		if !errors.Is(err, context.Canceled) {
@@ -128,6 +130,7 @@ func TestAtCommitPreservesAncestryOperationalFailure(t *testing.T) {
 }
 
 func TestAtCommitPreservesResolutionOperationalFailure(t *testing.T) {
+	t.Parallel()
 	commit := strings.Repeat("a", 40)
 	repo := &Repository{
 		root:     t.TempDir(),
@@ -135,8 +138,7 @@ func TestAtCommitPreservesResolutionOperationalFailure(t *testing.T) {
 		gitPath:  "git",
 	}
 	injected := errors.New("injected resolution failure")
-	original := runRepositoryGit
-	runRepositoryGit = func(
+	repo.runGit = func(
 		_ context.Context,
 		_, _ string,
 		_ []byte,
@@ -147,9 +149,8 @@ func TestAtCommitPreservesResolutionOperationalFailure(t *testing.T) {
 		}
 		return nil, injected
 	}
-	t.Cleanup(func() { runRepositoryGit = original })
 
-	if _, err := repo.AtCommit(context.Background(), commit); err == nil {
+	if _, err := repo.AtCommit(t.Context(), commit); err == nil {
 		t.Fatal("injected resolution failure unexpectedly succeeded")
 	} else {
 		if !errors.Is(err, injected) {

@@ -2,7 +2,6 @@ package rulepack_test
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
@@ -61,11 +60,11 @@ evidence:
 Keep public API changes backward compatible.
 `, excerptHash("package main\n")))
 
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	pack, diagnostics, err := rulepack.Validate(t.Context(), ws)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,11 +100,11 @@ func TestValidateAcceptsZeroArtifactReport(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
 	writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), actionableReport(baseline, "  []"))
 
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	pack, diagnostics, err := rulepack.Validate(t.Context(), ws)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,11 +121,11 @@ func TestValidateAcceptsManifestRule(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
 	fixture := writeValidManifestLayoutPack(t, repo, baseline, true)
 
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	pack, diagnostics, err := rulepack.Validate(t.Context(), ws)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,11 +167,11 @@ func TestValidateNormalizesExplicitRootCoreAndRouting(t *testing.T) {
 	manifest = strings.Replace(manifest, "      - \"**/*.go\"", "      - \"**/*\"", 1)
 	writeFile(t, fixture.manifestPath, manifest)
 
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	pack, diagnostics, err := rulepack.Validate(t.Context(), ws)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,11 +245,11 @@ func TestValidateRejectsInvalidRootCore(t *testing.T) {
 			repo, baseline := evidenceRepository(t)
 			fixture := writeValidManifestLayoutPack(t, repo, baseline, true)
 			writeFile(t, fixture.manifestPath, test.mutate(fixture.manifest))
-			ws, err := workspace.Open(context.Background(), repo)
+			ws, err := workspace.Open(t.Context(), repo)
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+			_, diagnostics, err := rulepack.Validate(t.Context(), ws)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -296,11 +295,11 @@ func TestValidateGroupsArtifactsByExactSelector(t *testing.T) {
 	writeFile(t, fixture.manifestPath, fixture.manifest+secondEntry)
 	writeFile(t, filepath.Join(repo, ".software-standards", "rules", "keep-go-errors-contextual.md"), string(secondRule))
 
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	pack, diagnostics, err := rulepack.Validate(t.Context(), ws)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,11 +319,11 @@ func TestValidateAcceptsEmptyManifest(t *testing.T) {
 	repo, baseline := evidenceRepository(t)
 	writeValidManifestLayoutPack(t, repo, baseline, false)
 
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	pack, diagnostics, err := rulepack.Validate(t.Context(), ws)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,11 +351,11 @@ func TestValidateKeepsHumanReportSmallFor2239FileInventory(t *testing.T) {
 	baseline := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
 	fixture := writeValidManifestLayoutPack(t, repo, baseline, false)
 
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	pack, diagnostics, err := rulepack.Validate(t.Context(), ws)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,11 +420,11 @@ license: MIT
 	writeFile(t, fixture.manifestPath, strings.Replace(fixture.manifest, "  []", manifestEntry, 1))
 	writeFile(t, filepath.Join(repo, ".agents", "skills", "review-change", "SKILL.md"), string(skill))
 
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	pack, diagnostics, err := rulepack.Validate(t.Context(), ws)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,11 +495,11 @@ func TestValidateManifestPresentation(t *testing.T) {
 			if test.rule != nil {
 				writeManifestRuleAndRefreshManifest(t, fixture, test.rule)
 			}
-			ws, err := workspace.Open(context.Background(), repo)
+			ws, err := workspace.Open(t.Context(), repo)
 			if err != nil {
 				t.Fatal(err)
 			}
-			pack, diagnostics, err := rulepack.Validate(context.Background(), ws)
+			pack, diagnostics, err := rulepack.Validate(t.Context(), ws)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -542,11 +541,11 @@ func TestValidateManifestSizeLimits(t *testing.T) {
 			if err := file.Close(); err != nil {
 				t.Fatal(err)
 			}
-			ws, err := workspace.Open(context.Background(), repo)
+			ws, err := workspace.Open(t.Context(), repo)
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+			_, diagnostics, err := rulepack.Validate(t.Context(), ws)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -648,11 +647,11 @@ func TestValidateManifestNoFallback(t *testing.T) {
 	writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), actionableReport(baseline, "  []"))
 	writeFile(t, filepath.Join(repo, ".software-standards", "manifest.yaml"), "schema: ssb.dev/manifest/v0\nunknown: true\n")
 
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	pack, diagnostics, err := rulepack.Validate(t.Context(), ws)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -749,11 +748,11 @@ func TestValidateRejectsManifestSources(t *testing.T) {
 			repo, baseline := evidenceRepository(t)
 			fixture := writeValidManifestLayoutPack(t, repo, baseline, true)
 			test.mutate(t, repo, fixture)
-			ws, err := workspace.Open(context.Background(), repo)
+			ws, err := workspace.Open(t.Context(), repo)
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+			_, diagnostics, err := rulepack.Validate(t.Context(), ws)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -792,11 +791,11 @@ func TestValidateRejectsManifestSymlinks(t *testing.T) {
 			if err := os.Symlink(other, target); err != nil {
 				t.Fatal(err)
 			}
-			ws, err := workspace.Open(context.Background(), repo)
+			ws, err := workspace.Open(t.Context(), repo)
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+			_, diagnostics, err := rulepack.Validate(t.Context(), ws)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -900,11 +899,11 @@ Keep public API changes backward compatible.
 			writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), report)
 			writeFile(t, filepath.Join(repo, ".software-standards", "rules", "keep-public-api-compatible.md"), rule)
 
-			ws, err := workspace.Open(context.Background(), repo)
+			ws, err := workspace.Open(t.Context(), repo)
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+			_, diagnostics, err := rulepack.Validate(t.Context(), ws)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -968,11 +967,11 @@ evidence:
 Keep public API changes backward compatible.
 `, test.derivation, test.evidence))
 
-			ws, err := workspace.Open(context.Background(), repo)
+			ws, err := workspace.Open(t.Context(), repo)
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+			_, diagnostics, err := rulepack.Validate(t.Context(), ws)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1006,11 +1005,11 @@ evidence:
 Do the thing.
 `, excerptHash("package main\n")))
 
-		ws, err := workspace.Open(context.Background(), repo)
+		ws, err := workspace.Open(t.Context(), repo)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+		_, diagnostics, err := rulepack.Validate(t.Context(), ws)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1024,11 +1023,11 @@ Do the thing.
 		writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), actionableReport(baseline, "  []"))
 		writeFile(t, filepath.Join(repo, ".software-standards", "rules", "notes.txt"), "not a canonical rule\n")
 
-		ws, err := workspace.Open(context.Background(), repo)
+		ws, err := workspace.Open(t.Context(), repo)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+		_, diagnostics, err := rulepack.Validate(t.Context(), ws)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1042,11 +1041,11 @@ Do the thing.
 		writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), actionableReport(baseline, "  []"))
 		writeFile(t, filepath.Join(repo, ".software-standards", "rules", "nested", "unlisted.md"), "not canonical\n")
 
-		ws, err := workspace.Open(context.Background(), repo)
+		ws, err := workspace.Open(t.Context(), repo)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+		_, diagnostics, err := rulepack.Validate(t.Context(), ws)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1059,11 +1058,11 @@ Do the thing.
 		repo, baseline := evidenceRepository(t)
 		writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), actionableReport(baseline, validRuleManifestEntry()))
 
-		ws, err := workspace.Open(context.Background(), repo)
+		ws, err := workspace.Open(t.Context(), repo)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+		_, diagnostics, err := rulepack.Validate(t.Context(), ws)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1082,11 +1081,11 @@ Do the thing.
 		)
 		writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), actionableReport(baseline, entry))
 
-		ws, err := workspace.Open(context.Background(), repo)
+		ws, err := workspace.Open(t.Context(), repo)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+		_, diagnostics, err := rulepack.Validate(t.Context(), ws)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1118,11 +1117,11 @@ evidence:
 Keep public API changes backward compatible.
 `, excerptHash("package main\n")))
 
-		ws, err := workspace.Open(context.Background(), repo)
+		ws, err := workspace.Open(t.Context(), repo)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+		_, diagnostics, err := rulepack.Validate(t.Context(), ws)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1158,11 +1157,11 @@ Keep public API changes backward compatible.
 			t.Fatal(err)
 		}
 
-		ws, err := workspace.Open(context.Background(), repo)
+		ws, err := workspace.Open(t.Context(), repo)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+		_, diagnostics, err := rulepack.Validate(t.Context(), ws)
 		if err != nil {
 			t.Fatalf("symlinked artifact path returned internal error: %v", err)
 		}
@@ -1178,11 +1177,11 @@ func TestValidateRejectsDeprecatedSkillTopicMetadata(t *testing.T) {
 		"  category: correctness\n  topic: correctness",
 		excerptHash("verify:\n\tgo test ./...\n"),
 	)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	_, diagnostics, err := rulepack.Validate(t.Context(), ws)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1214,11 +1213,11 @@ func TestValidateReportsSkillProvenanceAtManifestField(t *testing.T) {
 		"  category: correctness",
 		"sha256:"+strings.Repeat("0", 64),
 	)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	_, diagnostics, err := rulepack.Validate(t.Context(), ws)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1246,11 +1245,11 @@ func TestValidateRejectsInventoryThatDoesNotMatchBaseline(t *testing.T) {
 	)
 	writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), report)
 
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	_, diagnostics, err := rulepack.Validate(t.Context(), ws)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1269,11 +1268,11 @@ func TestValidateRejectsNoncanonicalInventoryFileLimit(t *testing.T) {
 	)
 	writeFile(t, filepath.Join(repo, ".software-standards", "report.md"), report)
 
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	_, diagnostics, err := rulepack.Validate(t.Context(), ws)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1430,11 +1429,11 @@ expected_success: No incompatible public API change is found.
 expected_failure: Report every incompatible declaration and source location.
 `, excerptHash("package main\n"), excerptHash("func main() {}\n"), excerptHash("verify:\n")))
 
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	pack, diagnostics, err := rulepack.Validate(t.Context(), ws)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1580,11 +1579,11 @@ metadata:
 			writeFile(t, filepath.Join(repo, ".software-standards", "verification", "verify-change.yaml"), recipe)
 			writeFile(t, filepath.Join(repo, ".agents", "skills", "review-change", "SKILL.md"), skill)
 
-			ws, err := workspace.Open(context.Background(), repo)
+			ws, err := workspace.Open(t.Context(), repo)
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, diagnostics, err := rulepack.Validate(context.Background(), ws)
+			_, diagnostics, err := rulepack.Validate(t.Context(), ws)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1639,11 +1638,11 @@ expected_success: The condition holds.
 expected_failure: Report the violating source locations.
 `, excerptHash("package main\n"), excerptHash("func main() {}\n"), excerptHash("verify:\n")))
 
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack, diagnostics, err := rulepack.Validate(context.Background(), ws)
+	pack, diagnostics, err := rulepack.Validate(t.Context(), ws)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1782,11 +1781,11 @@ type manifestLayoutFixture struct {
 
 func writeValidManifestLayoutPack(t *testing.T, repo, baseline string, withRule bool) manifestLayoutFixture {
 	t.Helper()
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	recorded, err := inventory.ScanAtBaseline(context.Background(), ws, inventory.DefaultLimits())
+	recorded, err := inventory.ScanAtBaseline(t.Context(), ws, inventory.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,13 +18,13 @@ import (
 func TestCreatePreservesConventionAndNeverOverwrites(t *testing.T) {
 	repo := committedRepository(t)
 	writeFile(t, filepath.Join(repo, "docs", "adrs", "0007-existing.md"), "# Existing\n")
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pack := testPack(ws.Baseline())
 
-	dryRun, err := adr.Create(context.Background(), ws, pack, adr.Options{DryRun: true})
+	dryRun, err := adr.Create(t.Context(), ws, pack, adr.Options{DryRun: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestCreatePreservesConventionAndNeverOverwrites(t *testing.T) {
 		t.Fatalf("dry-run wrote an ADR: %v", err)
 	}
 
-	first, err := adr.Create(context.Background(), ws, pack, adr.Options{})
+	first, err := adr.Create(t.Context(), ws, pack, adr.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestCreatePreservesConventionAndNeverOverwrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := adr.Create(context.Background(), ws, pack, adr.Options{})
+	second, err := adr.Create(t.Context(), ws, pack, adr.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,11 +68,11 @@ func TestCreateRequiresDirectoryChoiceWhenAmbiguous(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(repo, "docs", "adrs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = adr.Create(context.Background(), ws, testPack(ws.Baseline()), adr.Options{})
+	_, err = adr.Create(t.Context(), ws, testPack(ws.Baseline()), adr.Options{})
 	if !errors.Is(err, adr.ErrAmbiguousDirectory) {
 		t.Fatalf("expected ambiguity error, got %v", err)
 	}
@@ -87,13 +87,13 @@ func TestCreateRequiresDirectoryChoiceWhenAmbiguous(t *testing.T) {
 
 func TestCreateRejectsTraversalAndSymlinkEscapes(t *testing.T) {
 	repo := committedRepository(t)
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pack := testPack(ws.Baseline())
 
-	_, err = adr.Create(context.Background(), ws, pack, adr.Options{Directory: "../outside"})
+	_, err = adr.Create(t.Context(), ws, pack, adr.Options{Directory: "../outside"})
 	if !errors.Is(err, adr.ErrUnsafeTarget) {
 		t.Fatalf("expected traversal rejection, got %v", err)
 	}
@@ -105,7 +105,7 @@ func TestCreateRejectsTraversalAndSymlinkEscapes(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(repo, "docs", "adr")); err != nil {
 		t.Fatal(err)
 	}
-	_, err = adr.Create(context.Background(), ws, pack, adr.Options{})
+	_, err = adr.Create(t.Context(), ws, pack, adr.Options{})
 	if !errors.Is(err, adr.ErrUnsafeTarget) {
 		t.Fatalf("expected symlink rejection, got %v", err)
 	}
@@ -125,11 +125,11 @@ func TestCreateRejectsADRDirectoryInsideSubmodule(t *testing.T) {
 	git(t, repo, "add", ".")
 	git(t, repo, "commit", "-m", "docs submodule")
 
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = adr.Create(context.Background(), ws, testPack(ws.Baseline()), adr.Options{Directory: "docs/adr"})
+	_, err = adr.Create(t.Context(), ws, testPack(ws.Baseline()), adr.Options{Directory: "docs/adr"})
 	if !errors.Is(err, adr.ErrUnsafeTarget) || !strings.Contains(err.Error(), "submodule") {
 		t.Fatalf("expected submodule target rejection, got %v", err)
 	}
@@ -144,7 +144,7 @@ func TestCreateWriteFailureLeavesNoPartialADR(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	ws, err := workspace.Open(context.Background(), repo)
+	ws, err := workspace.Open(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestCreateWriteFailureLeavesNoPartialADR(t *testing.T) {
 		}
 	}()
 
-	_, err = adr.Create(context.Background(), ws, testPack(ws.Baseline()), adr.Options{})
+	_, err = adr.Create(t.Context(), ws, testPack(ws.Baseline()), adr.Options{})
 	if err == nil {
 		t.Fatal("expected ADR write failure")
 	}
