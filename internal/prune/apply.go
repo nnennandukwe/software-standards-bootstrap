@@ -507,6 +507,9 @@ func validateCandidate(
 		} else {
 			_, diagnostics = rulepack.ValidateCandidateRule(ctx, repo, target.TargetPath, content)
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if len(diagnostics) != 0 {
 			return fmt.Errorf("candidate %s violates the rule contract: %s", target.SourcePath, diagnostics[0].Message)
 		}

@@ -7,10 +7,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/prune"
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/rulepack"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/workspace"
 	"go.yaml.in/yaml/v4"
 )
@@ -138,6 +141,16 @@ func approveCancellationReview(t *testing.T, root string) {
 }
 
 func cancelAtPlanGit(t *testing.T, release bool) (context.Context, func()) {
+	return cancelAtGit(t, gitCancellationOptions{Match: "cat-file --batch-check", Release: release})
+}
+
+type gitCancellationOptions struct {
+	Match              string
+	Release            bool
+	PackValidationRoot string
+}
+
+func cancelAtGit(t *testing.T, options gitCancellationOptions) (context.Context, func()) {
 	t.Helper()
 	realGit, err := exec.LookPath("git")
 	if err != nil {
@@ -154,14 +167,39 @@ func cancelAtPlanGit(t *testing.T, release bool) (context.Context, func()) {
 	}
 	ready := filepath.Join(toolsDir, "ready")
 	releasePath := ""
-	if release {
+	if options.Release {
 		releasePath = filepath.Join(toolsDir, "release")
 	}
 	t.Setenv("PATH", toolsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("SSB_REAL_GIT", realGit)
-	t.Setenv("SSB_GIT_BLOCK_MATCH", "cat-file --batch-check")
+	t.Setenv("SSB_GIT_BLOCK_MATCH", options.Match)
+	t.Setenv("SSB_GIT_BLOCK_SKIP", "0")
+	t.Setenv("SSB_GIT_RECORD_ONLY", "0")
 	t.Setenv("SSB_GIT_READY", ready)
 	t.Setenv("SSB_GIT_RELEASE", releasePath)
+	if options.PackValidationRoot != "" {
+		t.Setenv("SSB_GIT_RECORD_ONLY", "1")
+		repo, err := workspace.Open(t.Context(), options.PackValidationRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, diagnostics, err := rulepack.ValidateRetainedPack(t.Context(), repo); err != nil || len(diagnostics) != 0 {
+			t.Fatalf("calibrate pack validation: %v, %v", diagnostics, err)
+		}
+		data, err := os.ReadFile(ready + ".count")
+		if err != nil {
+			t.Fatal(err)
+		}
+		count, err := strconv.Atoi(string(data))
+		if err != nil || count < 1 {
+			t.Fatalf("pack evidence count = %q, %v", data, err)
+		}
+		if err := os.WriteFile(ready+".count", []byte("0"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("SSB_GIT_BLOCK_SKIP", strconv.Itoa(count))
+		t.Setenv("SSB_GIT_RECORD_ONLY", "0")
+	}
 	deadline, stop := context.WithTimeout(t.Context(), 30*time.Second)
 	t.Cleanup(stop)
 	ctx, cancel := context.WithCancel(deadline)
@@ -173,7 +211,7 @@ func cancelAtPlanGit(t *testing.T, release bool) (context.Context, func()) {
 		for {
 			if _, err := os.Stat(ready); err == nil {
 				cancel()
-				if release {
+				if options.Release {
 					done <- os.WriteFile(releasePath, []byte("resume\n"), 0o600)
 				} else {
 					done <- nil
@@ -193,5 +231,67 @@ func cancelAtPlanGit(t *testing.T, release bool) (context.Context, func()) {
 		if err := <-done; err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestCancellationDuringCandidateAndResultingRuleEvidence(t *testing.T) {
+	for _, candidateUpdate := range []bool{true, false} {
+		name := "retained rule evidence"
+		if candidateUpdate {
+			name = "candidate evidence"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := lifecycleRepository(t)
+			if candidateUpdate {
+				configureRuleUpdateCandidate(t, root)
+			} else {
+				createReviewWithProposal(t, root, false)
+			}
+			for _, operation := range []string{"validate", "approve", "apply"} {
+				t.Run(operation, func(t *testing.T) {
+					if operation == "apply" {
+						approveCancellationReview(t, root)
+					}
+					eventPath := filepath.Join(root, ".software-standards", "reviews", "review-one", "events.jsonl")
+					priorEvents, priorEventErr := os.ReadFile(eventPath)
+					oid := strings.TrimSpace(git(t, root, "rev-parse", "HEAD:README.md"))
+					ctx, finish := cancelAtGit(t, gitCancellationOptions{
+						Match:              "cat-file blob " + oid,
+						PackValidationRoot: root,
+					})
+					var err error
+					if operation == "validate" {
+						repo, openErr := workspace.Open(ctx, root)
+						if openErr != nil {
+							t.Fatal(openErr)
+						}
+						_, diagnostics, validateErr := prune.ValidateReview(ctx, repo, "review-one")
+						err = validateErr
+						if len(diagnostics) != 0 {
+							t.Logf("diagnostics: %v", diagnostics)
+						}
+					} else if operation == "apply" {
+						_, err = prune.Apply(ctx, root, prune.ApplyOptions{ReviewID: "review-one", Write: true})
+					} else {
+						_, err = prune.Approve(ctx, root, prune.ApprovalOptions{
+							ReviewID: "review-one", Approved: []string{"keep-rule", "orphan-skill"},
+						})
+					}
+					finish()
+					if !errors.Is(err, context.Canceled) || errors.Is(err, prune.ErrValidation) {
+						t.Fatalf("evidence cancellation lost its cause: %v", err)
+					}
+					events, readErr := os.ReadFile(eventPath)
+					if string(events) != string(priorEvents) || errors.Is(readErr, os.ErrNotExist) != errors.Is(priorEventErr, os.ErrNotExist) {
+						t.Fatalf("canceled evidence validation changed events: %q, %v", events, readErr)
+					}
+					for _, name := range []string{"application-journal.json", ".transition.lock"} {
+						if _, err := os.Stat(filepath.Join(root, ".software-standards", "reviews", "review-one", name)); !errors.Is(err, os.ErrNotExist) {
+							t.Fatalf("canceled evidence validation left %s: %v", name, err)
+						}
+					}
+				})
+			}
+		})
 	}
 }

@@ -2480,6 +2480,9 @@ func ValidateRetainedRule(
 	relative string,
 	data []byte,
 ) (Rule, []Diagnostic, error) {
+	if err := ctx.Err(); err != nil {
+		return Rule{}, nil, err
+	}
 	rule, parseDiagnostic := parseActionableRuleBytes(relative, data)
 	if parseDiagnostic != nil {
 		return Rule{}, []Diagnostic{*parseDiagnostic}, nil
@@ -2519,7 +2522,11 @@ func ValidateRetainedRule(
 			"restore the recorded baseline to current repository history or refresh the accepted pack through review",
 		)}, nil
 	}
-	return rule, validateActionableRule(ctx, historical, rule, manifest), nil
+	diagnostics = validateActionableRule(ctx, historical, rule, manifest)
+	if err := ctx.Err(); err != nil {
+		return Rule{}, nil, err
+	}
+	return rule, diagnostics, nil
 }
 
 func loadReport(repo *workspace.Repository) (Report, []Diagnostic, error) {
