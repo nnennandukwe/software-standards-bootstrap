@@ -1,0 +1,80 @@
+package cli_test
+
+import (
+	"bytes"
+	"context"
+	"testing"
+
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/cli"
+)
+
+func TestVersionForms(t *testing.T) {
+	for _, command := range []string{"version", "--version"} {
+		t.Run(command, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := cli.Run([]string{command}, &stdout, &stderr)
+			if code != 0 || stdout.String() != "ssb dev (commit unknown)\n" || stderr.Len() != 0 {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, &stdout, &stderr)
+			}
+		})
+	}
+}
+
+func TestVersionHelpAndArguments(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+		code int
+	}{
+		{name: "help", args: []string{"version", "--help"}, code: 0},
+		{name: "short help", args: []string{"version", "-h"}, code: 0},
+		{name: "extra version argument", args: []string{"version", "extra"}, code: 2},
+		{name: "extra flag argument", args: []string{"--version", "extra"}, code: 2},
+		{name: "flag help argument", args: []string{"--version", "--help"}, code: 2},
+		{name: "extra help argument", args: []string{"version", "--help", "extra"}, code: 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := cli.Run(test.args, &stdout, &stderr); code != test.code {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, &stdout, &stderr)
+			}
+			if test.code == 0 && (stdout.Len() == 0 || stderr.Len() != 0) {
+				t.Fatalf("help streams: stdout=%q stderr=%q", &stdout, &stderr)
+			}
+			if test.code == 2 && (stdout.Len() != 0 || stderr.Len() == 0) {
+				t.Fatalf("usage streams: stdout=%q stderr=%q", &stdout, &stderr)
+			}
+		})
+	}
+}
+
+func TestRunContextPreCanceled(t *testing.T) {
+	for _, args := range [][]string{
+		nil, {"--help"}, {"version"}, {"--version"}, {"unknown"},
+		{"inspect"}, {"validate"}, {"render"}, {"adr"},
+		{"prune", "inspect"}, {"prune", "validate"}, {"prune", "approve"},
+		{"prune", "apply", "--write"}, {"prune", "recover"},
+		{"prune", "status"}, {"prune", "verify"},
+	} {
+		t.Run(commandName(args), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			var stdout, stderr bytes.Buffer
+			code := cli.RunContext(ctx, args, &stdout, &stderr)
+			if code != 130 || stdout.Len() != 0 || stderr.String() != "error: interrupted\n" {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, &stdout, &stderr)
+			}
+		})
+	}
+}
+
+func commandName(args []string) string {
+	if len(args) == 0 {
+		return "empty"
+	}
+	name := args[0]
+	if len(args) > 1 {
+		name += " " + args[1]
+	}
+	return name
+}

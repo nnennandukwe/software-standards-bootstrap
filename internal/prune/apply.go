@@ -116,11 +116,11 @@ func Apply(
 		}
 	}()
 	if options.Write {
-		lockedReviewStore, unlockReview, err = acquireReviewLock(repo.Root(), options.ReviewID)
+		lockedReviewStore, unlockReview, err = acquireReviewLock(ctx, repo.Root(), options.ReviewID)
 		if err != nil {
 			return ApplyResult{}, err
 		}
-		unlockMutation, err = acquireMutationLock(repo.Root(), options.ReviewID)
+		unlockMutation, err = acquireMutationLock(ctx, repo.Root(), options.ReviewID)
 		if err != nil {
 			return ApplyResult{}, err
 		}
@@ -128,9 +128,9 @@ func Apply(
 	var review Review
 	var diagnostics []Diagnostic
 	if lockedReviewStore != nil {
-		review, diagnostics, err = loadReviewFromStore(lockedReviewStore)
+		review, diagnostics, err = loadReviewFromStore(ctx, lockedReviewStore)
 	} else {
-		review, diagnostics, err = LoadReview(repo.Root(), options.ReviewID)
+		review, diagnostics, err = LoadReview(ctx, repo.Root(), options.ReviewID)
 	}
 	if err != nil {
 		return ApplyResult{}, err
@@ -189,6 +189,11 @@ func Apply(
 	if err != nil {
 		return ApplyResult{}, fmt.Errorf("encode application journal: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return ApplyResult{}, err
+	}
+	// From journal creation through event publication, complete or roll back.
+	ctx = context.WithoutCancel(ctx)
 	if err := journalStore.WriteExclusive("application-journal.json", append(journalData, '\n'), 0o600); err != nil {
 		return ApplyResult{}, fmt.Errorf("application recovery journal already exists or cannot be created: %w", err)
 	}
@@ -239,7 +244,7 @@ func Apply(
 		now = time.Now
 	}
 	event := newEvent(review, EventApplied, payload, now().UTC())
-	if err := appendEvent(review, event); err != nil {
+	if err := appendEvent(ctx, review, event); err != nil {
 		rollbackErr := restoreJournal(repo.Root(), journal, operationPoststates(operations))
 		if rollbackErr == nil {
 			if removeErr := removeApplicationJournal(journalStore); removeErr != nil {
@@ -335,7 +340,7 @@ func planOperations(
 	review Review,
 	approval ApprovalPayload,
 ) (applicationPlan, []operation, error) {
-	plan, err := canonicalApplicationPlan(review, approval)
+	plan, err := canonicalApplicationPlan(ctx, review, approval)
 	if err != nil {
 		return applicationPlan{}, nil, err
 	}
@@ -544,7 +549,7 @@ func buildCandidateOperations(
 	approval ApprovalPayload,
 ) (map[string]operation, error) {
 	candidates := candidateInputsForApproval(review, approval)
-	_, reportContent, err := actionableMetadataChange(review, approval)
+	_, reportContent, err := actionableMetadataChange(ctx, review, approval)
 	if err != nil {
 		return nil, err
 	}
@@ -1273,6 +1278,11 @@ func Recover(
 		return err
 	}
 	if clearStaleLock {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		// Clearing crash-left locks begins this bounded recovery sequence.
+		ctx = context.WithoutCancel(ctx)
 		store, storeErr := openReviewStore(repo.Root(), reviewID)
 		if storeErr != nil {
 			return storeErr
@@ -1304,21 +1314,21 @@ func Recover(
 			return closeErr
 		}
 	}
-	lockedReviewStore, unlock, err := acquireReviewLock(repo.Root(), reviewID)
+	lockedReviewStore, unlock, err := acquireReviewLock(ctx, repo.Root(), reviewID)
 	if err != nil {
 		return err
 	}
 	defer func() {
 		returnErr = errors.Join(returnErr, unlock())
 	}()
-	unlockMutation, err := acquireMutationLock(repo.Root(), reviewID)
+	unlockMutation, err := acquireMutationLock(ctx, repo.Root(), reviewID)
 	if err != nil {
 		return err
 	}
 	defer func() {
 		returnErr = errors.Join(returnErr, unlockMutation())
 	}()
-	review, diagnostics, err := loadReviewFromStore(lockedReviewStore)
+	review, diagnostics, err := loadReviewFromStore(ctx, lockedReviewStore)
 	if err != nil {
 		return err
 	}
@@ -1363,6 +1373,9 @@ func Recover(
 		seen[entry.Path] = struct{}{}
 	}
 	if err := validateJournalPlan(ctx, repo, review, journal); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
 		return validationError("%v", err)
 	}
 	for _, event := range review.Events {
@@ -1374,20 +1387,30 @@ func Recover(
 			if applied.PlanDigest != journal.PlanDigest {
 				return validationError("application journal is bound to a different application plan")
 			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			return removeApplicationJournal(journalStore)
 		}
 	}
-	restorePaths, poststates, err := recoverableJournalPaths(repo.Root(), review, journal)
+	restorePaths, poststates, err := recoverableJournalPaths(ctx, repo.Root(), review, journal)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
 		return validationError("%v", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Restoration and journal cleanup are bounded once the first claim changes.
 	if err := restoreJournalPaths(repo.Root(), journal, restorePaths, poststates); err != nil {
 		return fmt.Errorf("restore application journal: %w", err)
 	}
 	return removeApplicationJournal(journalStore)
 }
 
-func acquireMutationLock(repoRoot, reviewID string) (func() error, error) {
+func acquireMutationLock(ctx context.Context, repoRoot, reviewID string) (func() error, error) {
 	lockPath := filepath.Join(repoRoot, ".software-standards", ".prune-mutation.lock")
 	root, packIdentity, err := openPruneRepositoryRoot(repoRoot)
 	if err != nil {
@@ -1397,6 +1420,11 @@ func acquireMutationLock(repoRoot, reviewID string) (func() error, error) {
 	if err != nil {
 		_ = root.Close()
 		return nil, fmt.Errorf("pin .software-standards for mutation lock: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		_ = pack.Close()
+		_ = root.Close()
+		return nil, err
 	}
 	file, err := pack.OpenFile(".prune-mutation.lock", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err == nil {
@@ -1461,6 +1489,7 @@ func clearMutationLock(repoRoot, reviewID string) error {
 }
 
 func recoverableJournalPaths(
+	ctx context.Context,
 	repoRoot string,
 	review Review,
 	journal applicationJournal,
@@ -1469,7 +1498,7 @@ func recoverableJournalPaths(
 	if err != nil {
 		return nil, nil, err
 	}
-	plan, err := canonicalApplicationPlan(review, approval)
+	plan, err := canonicalApplicationPlan(ctx, review, approval)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1536,7 +1565,7 @@ func validateJournalPlan(
 	if err != nil {
 		return err
 	}
-	plan, err := canonicalApplicationPlan(review, approval)
+	plan, err := canonicalApplicationPlan(ctx, review, approval)
 	if err != nil {
 		return err
 	}

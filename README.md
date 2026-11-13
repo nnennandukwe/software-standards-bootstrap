@@ -351,6 +351,8 @@ ssb validate [--repo PATH] [--format text|json]
 ssb render   [--repo PATH] [--review ID] [--dry-run]
 ssb adr      [--repo PATH] [--review ID] [--adr-dir PATH] [--dry-run]
 ssb prune    <inspect|validate|approve|apply|recover|status|verify> [options]
+ssb version
+ssb --version
 ```
 
 - `inspect` creates a safe inventory of one committed repository snapshot.
@@ -370,6 +372,15 @@ ssb prune    <inspect|validate|approve|apply|recover|status|verify> [options]
   the repository-relative backup path for manual cleanup.
 - `adr` creates one new Proposed ADR from retained rules, recipes, and skills.
 
+`ssb version` and `ssb --version` print `ssb <version> (commit <full-commit>)`.
+Release builds report the exact tag and source commit; local builds print
+`ssb dev (commit unknown)`. Use `ssb version --help` for focused help.
+
+Ctrl-C cancels the command and returns exit `130`, with exactly
+`error: interrupted` on stderr and no stdout. Cancellation stops preparation
+before durable writes. If publication or application has started, SSB finishes
+that bounded sequence or runs its existing rollback before returning.
+
 `inspect` supports `--max-candidate-files` and `--max-candidate-bytes`. `--allow-partial` permits diagnostic output from an incomplete inventory, but that output cannot be used to generate a proposal. Exit code `4`: inventory coverage incomplete.
 
 `ssb validate --format json` uses response schema 3. Valid output identifies
@@ -386,6 +397,7 @@ including `.` for `verification/v1`. Invalid output omits `pack`.
 - `2`: usage or repository precondition failure
 - `3`: unexpected internal failure
 - `4`: inventory coverage incomplete
+- `130`: interrupted
 
 Run `ssb <command> --help` for complete command options.
 

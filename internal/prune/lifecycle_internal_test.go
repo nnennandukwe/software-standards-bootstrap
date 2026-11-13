@@ -2,6 +2,7 @@ package prune
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -57,7 +58,7 @@ func TestValidateReviewEventsRejectsEmptyRerenderPayload(t *testing.T) {
 			{ID: "approved-001", ReviewID: "review-one", Kind: EventApproved, RecordedAt: "2026-07-27T18:00:00Z", BaselineCommit: "baseline", ContextDigest: "context", ProposalDigest: "proposal", Payload: approval, EventDigest: "sha256:" + strings.Repeat("b", 64)},
 		},
 	}
-	plan, err := canonicalApplicationPlan(review, approved)
+	plan, err := canonicalApplicationPlan(t.Context(), review, approved)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +67,7 @@ func TestValidateReviewEventsRejectsEmptyRerenderPayload(t *testing.T) {
 		Event{ID: "applied-002", ReviewID: "review-one", Kind: EventApplied, RecordedAt: "2026-07-27T18:01:00Z", BaselineCommit: "baseline", ContextDigest: "context", ProposalDigest: "proposal", Payload: applied},
 		Event{ID: "rendered-003", ReviewID: "review-one", Kind: EventRendered, RecordedAt: "2026-07-27T18:02:00Z", BaselineCommit: "baseline", ContextDigest: "context", ProposalDigest: "proposal", Payload: json.RawMessage(`{}`)},
 	)
-	if err := validateReviewEvents(review); err == nil || !strings.Contains(err.Error(), "rerender payload") {
+	if err := validateReviewEvents(t.Context(), review); err == nil || !strings.Contains(err.Error(), "rerender payload") {
 		t.Fatalf("error = %v, want invalid rerender payload", err)
 	}
 }
@@ -150,7 +151,7 @@ func TestAppendEventFailurePreservesCompletePriorLog(t *testing.T) {
 	}
 	t.Cleanup(func() { writeEventLogAtomically = originalWriter })
 
-	err := appendEvent(Review{
+	err := appendEvent(t.Context(), Review{
 		RepoRoot: repoRoot,
 		Root:     root,
 		Context:  Context{ReviewID: "review-one"},
@@ -256,7 +257,7 @@ func TestAppendEventCannotFollowReviewRootSwapInsideWriter(t *testing.T) {
 	}
 	t.Cleanup(func() { writeEventLogAtomically = originalWriter })
 
-	err := appendEvent(Review{
+	err := appendEvent(t.Context(), Review{
 		RepoRoot: repoRoot,
 		Root:     root,
 		Context:  Context{ReviewID: "review-one"},
@@ -279,7 +280,7 @@ func TestReviewLockCleanupCannotFollowReviewRootSwapInsideRemover(t *testing.T) 
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	_, unlock, err := acquireReviewLock(repoRoot, "review-one")
+	_, unlock, err := acquireReviewLock(t.Context(), repoRoot, "review-one")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,7 +436,7 @@ func TestLockedReviewSessionRejectsRealDirectoryReplacement(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(replacement, "context.json"), []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	store, unlock, err := acquireReviewLock(repoRoot, "review-one")
+	store, unlock, err := acquireReviewLock(t.Context(), repoRoot, "review-one")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,11 +448,11 @@ func TestLockedReviewSessionRejectsRealDirectoryReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, _, err := loadReviewFromStore(store); err == nil ||
+	if _, _, err := loadReviewFromStore(t.Context(), store); err == nil ||
 		!strings.Contains(err.Error(), "changed") {
 		t.Fatalf("load error = %v, want locked review identity rejection", err)
 	}
-	if err := appendEvent(Review{
+	if err := appendEvent(t.Context(), Review{
 		RepoRoot: repoRoot,
 		Root:     reviewRoot,
 		Context:  Context{ReviewID: "review-one"},
@@ -970,12 +971,12 @@ func TestRepositoryMutationLockSerializesDistinctReviews(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".software-standards"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	unlock, err := acquireMutationLock(root, "review-one")
+	unlock, err := acquireMutationLock(t.Context(), root, "review-one")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer unlock()
-	if _, err := acquireMutationLock(root, "review-two"); err == nil ||
+	if _, err := acquireMutationLock(t.Context(), root, "review-two"); err == nil ||
 		!strings.Contains(err.Error(), "mutation lock") {
 		t.Fatalf("error = %v, want cross-review serialization", err)
 	}
@@ -986,7 +987,7 @@ func TestLockReleaseFailuresAreReported(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".software-standards"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	unlock, err := acquireMutationLock(root, "review-one")
+	unlock, err := acquireMutationLock(t.Context(), root, "review-one")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1009,7 +1010,7 @@ func TestMutationLockCleanupCannotFollowPackRootSwapInsideRemover(t *testing.T) 
 	if err := os.MkdirAll(packRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	unlock, err := acquireMutationLock(repoRoot, "review-one")
+	unlock, err := acquireMutationLock(t.Context(), repoRoot, "review-one")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1044,7 +1045,7 @@ func TestTransitionCompleteReportsCommittedEventWhenLockCleanupFails(t *testing.
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	_, unlock, err := acquireReviewLock(repoRoot, "review-one")
+	_, unlock, err := acquireReviewLock(t.Context(), repoRoot, "review-one")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1070,7 +1071,7 @@ func TestTransitionCompleteReportsCommittedEventWhenLockCleanupFails(t *testing.
 		kind:   EventADR,
 		unlock: unlock,
 	}
-	event, err := transition.Complete(adrEventPayload{
+	event, err := transition.Complete(t.Context(), adrEventPayload{
 		Path: "docs/adr/0001-prune.md", Created: true,
 	})
 	if err == nil ||
@@ -1589,6 +1590,44 @@ func TestValidateGovernedTreePathsRejectsNonPortableOrCollidingBaseline(t *testi
 		t.Run(name, func(t *testing.T) {
 			if err := validateGovernedTreePaths(paths); err == nil {
 				t.Fatalf("paths = %#v, want portable baseline block", paths)
+			}
+		})
+	}
+}
+
+func TestEventAppendHonorsCancellationAtWriteBoundary(t *testing.T) {
+	for _, cancelBeforeWrite := range []bool{true, false} {
+		name := "during atomic replacement"
+		if cancelBeforeWrite {
+			name = "before atomic replacement"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			reviewRoot := filepath.Join(root, ".software-standards", "reviews", "review-one")
+			if err := os.MkdirAll(reviewRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			original := writeEventLogAtomically
+			writeEventLogAtomically = func(store *reviewStore, data []byte, mode os.FileMode) error {
+				cancel()
+				return original(store, data, mode)
+			}
+			t.Cleanup(func() { writeEventLogAtomically = original })
+			if cancelBeforeWrite {
+				cancel()
+			}
+			err := appendEvent(ctx, Review{
+				RepoRoot: root, Root: reviewRoot, Context: Context{ReviewID: "review-one"},
+			}, Event{ID: "approved-001"})
+			data, readErr := os.ReadFile(filepath.Join(reviewRoot, "events.jsonl"))
+			if cancelBeforeWrite {
+				if !errors.Is(err, context.Canceled) || !errors.Is(readErr, os.ErrNotExist) {
+					t.Fatalf("canceled append = %v; log = %q, %v", err, data, readErr)
+				}
+			} else if err != nil || readErr != nil || !bytes.HasSuffix(data, []byte("\n")) || !bytes.Contains(data, []byte("approved-001")) {
+				t.Fatalf("bounded append = %v; log = %q, %v", err, data, readErr)
 			}
 		})
 	}

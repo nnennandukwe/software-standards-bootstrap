@@ -128,7 +128,8 @@ func CreateReview(
 ) (CreateResult, error) {
 	reviewContext, err := BuildContext(ctx, repo, options)
 	if err != nil {
-		if errors.Is(err, ErrIncompleteInventory) || errors.Is(err, workspace.ErrPrecondition) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+			errors.Is(err, ErrIncompleteInventory) || errors.Is(err, workspace.ErrPrecondition) {
 			return CreateResult{}, err
 		}
 		return CreateResult{}, validationError("%v", err)
@@ -136,6 +137,10 @@ func CreateReview(
 	if err := repo.VerifyPruneSnapshot(ctx); err != nil {
 		return CreateResult{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return CreateResult{}, err
+	}
+	// Review publication is bounded; finish it or remove its owned staging tree.
 	staging, target, err := createReviewStagingStore(repo.Root(), options.ReviewID)
 	if err != nil {
 		return CreateResult{}, err
@@ -220,18 +225,24 @@ func snapshotFile(source string, staging *reviewStore, target, expectedDigest st
 
 // LoadReview strictly loads and validates the immutable context and current
 // proposal. Diagnostics are returned separately from I/O/contract errors.
-func LoadReview(repoRoot, reviewID string) (Review, []Diagnostic, error) {
+func LoadReview(ctx context.Context, repoRoot, reviewID string) (Review, []Diagnostic, error) {
+	if err := ctx.Err(); err != nil {
+		return Review{}, nil, err
+	}
 	store, err := openReviewStore(repoRoot, reviewID)
 	if err != nil {
 		return Review{}, nil, err
 	}
 	defer store.Close()
-	review, diagnostics, err := loadReviewFromStore(store)
+	review, diagnostics, err := loadReviewFromStore(ctx, store)
 	review.store = nil
 	return review, diagnostics, err
 }
 
-func loadReviewFromStore(store *reviewStore) (Review, []Diagnostic, error) {
+func loadReviewFromStore(ctx context.Context, store *reviewStore) (Review, []Diagnostic, error) {
+	if err := ctx.Err(); err != nil {
+		return Review{}, nil, err
+	}
 	repoRoot := store.repoRoot
 	reviewID := store.reviewID
 	contextData, _, err := store.ReadRegular("context.json")
@@ -281,7 +292,10 @@ func loadReviewFromStore(store *reviewStore) (Review, []Diagnostic, error) {
 		Events:         events,
 		store:          store,
 	}
-	if err := validateReviewEvents(review); err != nil {
+	if err := validateReviewEvents(ctx, review); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return Review{}, nil, err
+		}
 		return Review{}, nil, validationError("%v", err)
 	}
 	return review, validateProposal(reviewContext, proposal, store.ReadRegular), nil
@@ -294,7 +308,7 @@ func ValidateReview(
 	repo *workspace.Repository,
 	reviewID string,
 ) (Review, []Diagnostic, error) {
-	review, diagnostics, err := LoadReview(repo.Root(), reviewID)
+	review, diagnostics, err := LoadReview(ctx, repo.Root(), reviewID)
 	if err != nil || len(diagnostics) != 0 {
 		return review, diagnostics, err
 	}
@@ -308,7 +322,7 @@ func ValidateReview(
 	}
 	sort.Strings(approval.Approved)
 	sort.Strings(approval.Rejected)
-	plan, err := buildApplicationPlan(review, approval, "")
+	plan, err := buildApplicationPlan(ctx, review, approval, "")
 	if err == nil {
 		err = validateBuiltApplicationPlan(ctx, repo, review, plan, approval)
 	}
@@ -329,7 +343,7 @@ func ValidateReview(
 	return review, diagnostics, nil
 }
 
-func validateReviewEvents(review Review) error {
+func validateReviewEvents(ctx context.Context, review Review) error {
 	seen := make(map[string]bool)
 	applied := false
 	rendered := false
@@ -376,7 +390,7 @@ func validateReviewEvents(review Review) error {
 				len(payload.Changes) == 0 {
 				return fmt.Errorf("application payload is invalid")
 			}
-			expected, err := canonicalApplicationPlan(review, approval)
+			expected, err := canonicalApplicationPlan(ctx, review, approval)
 			if err != nil {
 				return fmt.Errorf("derive application plan: %w", err)
 			}
@@ -516,14 +530,14 @@ func Approve(ctx context.Context, repoPath string, options ApprovalOptions) (res
 	if err != nil {
 		return Event{}, err
 	}
-	store, unlock, err := acquireReviewLock(repo.Root(), options.ReviewID)
+	store, unlock, err := acquireReviewLock(ctx, repo.Root(), options.ReviewID)
 	if err != nil {
 		return Event{}, err
 	}
 	defer func() {
 		returnErr = errors.Join(returnErr, unlock())
 	}()
-	review, diagnostics, err := loadReviewFromStore(store)
+	review, diagnostics, err := loadReviewFromStore(ctx, store)
 	if err != nil {
 		return Event{}, err
 	}
@@ -587,8 +601,11 @@ func Approve(ctx context.Context, repoPath string, options ApprovalOptions) (res
 	approvedIDs := sortedKeys(approved)
 	rejectedIDs := sortedKeys(rejected)
 	approval := ApprovalPayload{Approved: approvedIDs, Rejected: rejectedIDs}
-	plan, err := buildApplicationPlan(review, approval, "")
+	plan, err := buildApplicationPlan(ctx, review, approval, "")
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return Event{}, err
+		}
 		return Event{}, preconditionError(
 			"approval cannot produce a safe application plan: %v",
 			err,
@@ -614,18 +631,22 @@ func Approve(ctx context.Context, repoPath string, options ApprovalOptions) (res
 		now = time.Now
 	}
 	event := newEvent(review, EventApproved, payload, now().UTC())
-	if err := appendEvent(review, event); err != nil {
+	if err := appendEvent(ctx, review, event); err != nil {
 		return Event{}, err
 	}
 	return event, nil
 }
 
-func acquireReviewLock(repoRoot, reviewID string) (*reviewStore, func() error, error) {
+func acquireReviewLock(ctx context.Context, repoRoot, reviewID string) (*reviewStore, func() error, error) {
 	store, err := openReviewStore(repoRoot, reviewID)
 	if err != nil {
 		return nil, nil, err
 	}
 	lockPath := store.display(".transition.lock")
+	if err := ctx.Err(); err != nil {
+		_ = store.Close()
+		return nil, nil, err
+	}
 	err = store.WriteExclusive(".transition.lock", []byte(reviewID+"\n"), 0o600)
 	if err != nil {
 		_ = store.Close()
@@ -862,7 +883,7 @@ func newEvent(review Review, kind string, payload []byte, recordedAt time.Time) 
 	return event
 }
 
-func appendEvent(review Review, event Event) error {
+func appendEvent(ctx context.Context, review Review, event Event) error {
 	store := review.store
 	owned := false
 	if store == nil {
@@ -894,6 +915,10 @@ func appendEvent(review Review, event Event) error {
 	next := make([]byte, 0, len(existing)+len(data))
 	next = append(next, existing...)
 	next = append(next, data...)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Atomic replacement and its cleanup complete once started.
 	if err := writeEventLogAtomically(store, next, 0o644); err != nil {
 		return fmt.Errorf("atomically replace review event log: %w", err)
 	}

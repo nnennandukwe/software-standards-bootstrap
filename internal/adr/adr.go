@@ -42,6 +42,9 @@ type Result struct {
 // Create chooses the repository's existing ADR convention or defaults to
 // docs/adr. It uses exclusive creation and never overwrites an existing file.
 func Create(ctx context.Context, repo *workspace.Repository, pack rulepack.Pack, options Options) (Result, error) {
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
 	if len(pack.Rules) == 0 && len(pack.Recipes) == 0 && len(pack.Skills) == 0 {
 		return Result{}, fmt.Errorf(
 			"%w: retain at least one semantic rule, verification recipe, or Agent Skill before creating an ADR",
@@ -79,6 +82,10 @@ func Create(ctx context.Context, repo *workspace.Repository, pack rulepack.Pack,
 		return result, nil
 	}
 
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	// Finish this exclusive file publication once directory creation starts.
 	if err := os.MkdirAll(absoluteDir, 0o755); err != nil {
 		return Result{}, fmt.Errorf("create ADR directory: %w", err)
 	}

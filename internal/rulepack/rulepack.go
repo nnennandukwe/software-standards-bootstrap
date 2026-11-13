@@ -1387,7 +1387,15 @@ func validateActionablePack(
 	ctx context.Context,
 	repo *workspace.Repository,
 	retained bool,
-) (Pack, []Diagnostic, error) {
+) (pack Pack, diagnostics []Diagnostic, returnErr error) {
+	if err := ctx.Err(); err != nil {
+		return Pack{}, nil, err
+	}
+	defer func() {
+		if err := ctx.Err(); err != nil {
+			pack, diagnostics, returnErr = Pack{}, nil, err
+		}
+	}()
 	manifestPath := filepath.Join(repo.Root(), ".software-standards", "manifest.yaml")
 	_, err := os.Lstat(manifestPath)
 	switch {

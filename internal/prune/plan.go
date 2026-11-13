@@ -40,19 +40,23 @@ type applicationPlan struct {
 	PlanDigest          string        `json:"plan_digest"`
 }
 
-func canonicalApplicationPlan(review Review, approval ApprovalPayload) (applicationPlan, error) {
+func canonicalApplicationPlan(ctx context.Context, review Review, approval ApprovalPayload) (applicationPlan, error) {
 	approvalEvent, err := recordedApprovalEvent(review)
 	if err != nil {
 		return applicationPlan{}, err
 	}
-	return buildApplicationPlan(review, approval, approvalEvent.EventDigest)
+	return buildApplicationPlan(ctx, review, approval, approvalEvent.EventDigest)
 }
 
 func buildApplicationPlan(
+	ctx context.Context,
 	review Review,
 	approval ApprovalPayload,
 	approvalEventDigest string,
 ) (applicationPlan, error) {
+	if err := ctx.Err(); err != nil {
+		return applicationPlan{}, err
+	}
 	initial := make(map[string]FileState)
 	for _, artifact := range review.Context.Artifacts {
 		initial[artifact.Path] = FileState{
@@ -141,7 +145,7 @@ func buildApplicationPlan(
 			write(supporting.TargetPath, supporting.SHA256, supporting.Mode)
 		}
 	}
-	reportChange, _, err := actionableMetadataChange(review, approval)
+	reportChange, _, err := actionableMetadataChange(ctx, review, approval)
 	if err != nil {
 		return applicationPlan{}, err
 	}
@@ -204,6 +208,7 @@ func buildApplicationPlan(
 }
 
 func actionableMetadataChange(
+	ctx context.Context,
 	review Review,
 	approval ApprovalPayload,
 ) (*Change, []byte, error) {
@@ -248,11 +253,11 @@ func actionableMetadataChange(
 		return nil, nil, nil
 	}
 
-	repo, err := workspace.Open(context.Background(), review.RepoRoot)
+	repo, err := workspace.Open(ctx, review.RepoRoot)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open repository for pack metadata update: %w", err)
 	}
-	reviewBaseline, err := repo.AtCommit(context.Background(), review.Context.BaselineCommit)
+	reviewBaseline, err := repo.AtCommit(ctx, review.Context.BaselineCommit)
 	if err != nil {
 		return nil, nil, fmt.Errorf(
 			"open actionable pack at review baseline %s: %w",
@@ -261,7 +266,7 @@ func actionableMetadataChange(
 		)
 	}
 	metadataPath := actionableReportPath
-	manifestEntry, manifestExists, err := reviewBaseline.EntryAtBaseline(context.Background(), actionableManifestPath)
+	manifestEntry, manifestExists, err := reviewBaseline.EntryAtBaseline(ctx, actionableManifestPath)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -271,11 +276,11 @@ func actionableMetadataChange(
 		}
 		metadataPath = actionableManifestPath
 	}
-	metadataData, err := reviewBaseline.ReadBaselineFile(context.Background(), metadataPath)
+	metadataData, err := reviewBaseline.ReadBaselineFile(ctx, metadataPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read actionable pack metadata at review baseline: %w", err)
 	}
-	metadataEntry, exists, err := reviewBaseline.EntryAtBaseline(context.Background(), metadataPath)
+	metadataEntry, exists, err := reviewBaseline.EntryAtBaseline(ctx, metadataPath)
 	if err != nil {
 		return nil, nil, err
 	}

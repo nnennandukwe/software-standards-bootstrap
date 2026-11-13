@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/adr"
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/buildinfo"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/inventory"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/prune"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/render"
@@ -30,6 +32,8 @@ Usage:
   ssb render   [--repo PATH] [--review ID] [--dry-run]
   ssb adr      [--repo PATH] [--review ID] [--adr-dir PATH] [--dry-run]
   ssb prune    <inspect|validate|approve|apply|recover|status|verify> [options]
+  ssb version
+  ssb --version
 
 Exit codes:
   0  success
@@ -37,6 +41,7 @@ Exit codes:
   2  usage or repository precondition failure
   3  unexpected internal failure
   4  inventory coverage incomplete
+  130 interrupted
 `
 
 const (
@@ -126,6 +131,33 @@ Commands:
 
 // Run executes one command and returns the documented process exit code.
 func Run(args []string, stdout, stderr io.Writer) int {
+	return RunContext(context.Background(), args, stdout, stderr)
+}
+
+// RunContext executes a command using the caller's cancellation lifetime.
+// Output is held until completion so interruption never exposes partial results.
+func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if ctx.Err() != nil {
+		fmt.Fprintln(stderr, "error: interrupted")
+		return 130
+	}
+	var output, diagnostics bytes.Buffer
+	code := dispatch(ctx, args, &output, &diagnostics)
+	if ctx.Err() != nil || code == 130 {
+		fmt.Fprintln(stderr, "error: interrupted")
+		return 130
+	}
+	if _, err := io.Copy(stdout, &output); err != nil {
+		fmt.Fprintf(stderr, "error: write command result: %s\n", err)
+		return 3
+	}
+	if _, err := io.Copy(stderr, &diagnostics); err != nil {
+		return 3
+	}
+	return code
+}
+
+func dispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, helpText)
 		return 2
@@ -138,23 +170,25 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprint(stdout, helpText)
 		return 0
+	case "version", "--version":
+		return runVersion(args, stdout, stderr)
 	case "inspect":
-		return runInspect(args[1:], stdout, stderr)
+		return runInspect(ctx, args[1:], stdout, stderr)
 	case "validate":
-		return runValidate(args[1:], stdout, stderr)
+		return runValidate(ctx, args[1:], stdout, stderr)
 	case "render":
-		return runRender(args[1:], stdout, stderr)
+		return runRender(ctx, args[1:], stdout, stderr)
 	case "adr":
-		return runADR(args[1:], stdout, stderr)
+		return runADR(ctx, args[1:], stdout, stderr)
 	case "prune":
-		return runPrune(args[1:], stdout, stderr)
+		return runPrune(ctx, args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "error: unknown command %q\n\n%s", args[0], helpText)
 		return 2
 	}
 }
 
-func runADR(args []string, stdout, stderr io.Writer) (exitCode int) {
+func runADR(ctx context.Context, args []string, stdout, stderr io.Writer) (exitCode int) {
 	flags := flag.NewFlagSet("adr", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	repoPath := flags.String("repo", ".", "repository path")
@@ -175,7 +209,6 @@ func runADR(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return 2
 	}
 
-	ctx := context.Background()
 	repo, err := workspace.Open(ctx, *repoPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %s\nnext: ssb adr --repo <repository-path>\n", err)
@@ -196,7 +229,7 @@ func runADR(args []string, stdout, stderr io.Writer) (exitCode int) {
 	var transition *prune.Transition
 	var adrRollbackDirs []string
 	if *reviewID != "" {
-		transition, err = prune.BeginTransition(repo.Root(), *reviewID, prune.EventADR, nil)
+		transition, err = prune.BeginTransition(ctx, repo.Root(), prune.TransitionOptions{ReviewID: *reviewID, Kind: prune.EventADR, Now: nil})
 		if err != nil {
 			return writePruneError(stderr, err)
 		}
@@ -234,7 +267,7 @@ func runADR(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return 0
 	}
 	if *reviewID != "" {
-		event, err := transition.Complete(result)
+		event, err := transition.Complete(ctx, result)
 		transitionErr := reconcileTransitionCompletion(
 			event,
 			err,
@@ -258,6 +291,9 @@ func runADR(args []string, stdout, stderr io.Writer) (exitCode int) {
 }
 
 func writeADRError(stderr io.Writer, err error) int {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return 130
+	}
 	fmt.Fprintf(stderr, "error: %s\n", err)
 	if errors.Is(err, adr.ErrNoAdoptableArtifacts) {
 		fmt.Fprintln(stderr, "next: retain a semantic rule, verification recipe, or Agent Skill before creating an ADR.")
@@ -283,7 +319,7 @@ func validateRulePackForCommand(
 	return rulepack.Validate(ctx, repo)
 }
 
-func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
+func runRender(ctx context.Context, args []string, stdout, stderr io.Writer) (exitCode int) {
 	flags := flag.NewFlagSet("render", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	repoPath := flags.String("repo", ".", "repository path")
@@ -303,7 +339,6 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return 2
 	}
 
-	ctx := context.Background()
 	repo, err := workspace.Open(ctx, *repoPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %s\nnext: ssb render --repo <repository-path>\n", err)
@@ -327,7 +362,7 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 	var after fileSnapshot
 	var afterRouting directorySnapshot
 	if *reviewID != "" {
-		transition, err = prune.BeginTransition(repo.Root(), *reviewID, prune.EventRendered, nil)
+		transition, err = prune.BeginTransition(ctx, repo.Root(), prune.TransitionOptions{ReviewID: *reviewID, Kind: prune.EventRendered, Now: nil})
 		if err != nil {
 			return writePruneError(stderr, err)
 		}
@@ -350,7 +385,7 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 			}
 		}
 	}
-	result, err := render.Apply(repo, pack, *dryRun)
+	result, err := render.Apply(ctx, repo, pack, *dryRun)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %s\n", err)
 		if errors.Is(err, render.ErrDrift) || errors.Is(err, render.ErrMarkers) || errors.Is(err, render.ErrUnsafeTarget) {
@@ -402,7 +437,7 @@ func runRender(args []string, stdout, stderr io.Writer) (exitCode int) {
 		if pack.Layout == rulepack.LayoutManifest {
 			afterRouting = projectedRoutingSnapshot(beforeRouting, result.Routing)
 		}
-		event, err := transition.Complete(result)
+		event, err := transition.Complete(ctx, result)
 		transitionErr := reconcileTransitionCompletion(
 			event,
 			err,
@@ -522,7 +557,7 @@ type validationResponse struct {
 	Pack            *rulepack.Pack            `json:"pack,omitempty"`
 }
 
-func runValidate(args []string, stdout, stderr io.Writer) int {
+func runValidate(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("validate", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	repoPath := flags.String("repo", ".", "repository path")
@@ -546,7 +581,6 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	ctx := context.Background()
 	repo, err := workspace.Open(ctx, *repoPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %s\nnext: ssb validate --repo <repository-path>\n", err)
@@ -666,7 +700,7 @@ func writeValidationDiagnostics(stderr io.Writer, diagnostics []rulepack.Diagnos
 	fmt.Fprintln(stderr, "Next: edit the reported source files and rerun ssb validate --repo PATH.")
 }
 
-func runInspect(args []string, stdout, stderr io.Writer) int {
+func runInspect(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	defaults := inventory.DefaultLimits()
 	flags := flag.NewFlagSet("inspect", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -716,7 +750,6 @@ func runInspect(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	ctx := context.Background()
 	repo, err := workspace.OpenForInspect(ctx, *repoPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %s\nnext: ssb inspect --repo <clean-repository-path>\n", err)
@@ -805,7 +838,7 @@ func writeTextInventory(out io.Writer, report inventory.Report) {
 	fmt.Fprintln(out, "Next: perform targeted semantic reads, route accepted candidates to actionable artifacts, then create inventory.json, human-facing artifacts, and manifest.yaml in .software-standards.")
 }
 
-func runPrune(args []string, stdout, stderr io.Writer) int {
+func runPrune(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, pruneHelp)
 		return 2
@@ -820,26 +853,26 @@ func runPrune(args []string, stdout, stderr io.Writer) int {
 	}
 	switch args[0] {
 	case "inspect":
-		return runPruneInspect(args[1:], stdout, stderr)
+		return runPruneInspect(ctx, args[1:], stdout, stderr)
 	case "validate":
-		return runPruneValidate(args[1:], stdout, stderr)
+		return runPruneValidate(ctx, args[1:], stdout, stderr)
 	case "approve":
-		return runPruneApprove(args[1:], stdout, stderr)
+		return runPruneApprove(ctx, args[1:], stdout, stderr)
 	case "apply":
-		return runPruneApply(args[1:], stdout, stderr)
+		return runPruneApply(ctx, args[1:], stdout, stderr)
 	case "recover":
-		return runPruneRecover(args[1:], stdout, stderr)
+		return runPruneRecover(ctx, args[1:], stdout, stderr)
 	case "status":
-		return runPruneStatus(args[1:], stdout, stderr)
+		return runPruneStatus(ctx, args[1:], stdout, stderr)
 	case "verify":
-		return runPruneVerify(args[1:], stdout, stderr)
+		return runPruneVerify(ctx, args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "error: unknown prune command %q\n\n%s", args[0], pruneHelp)
 		return 2
 	}
 }
 
-func runPruneInspect(args []string, stdout, stderr io.Writer) int {
+func runPruneInspect(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	defaults := inventory.DefaultLimits()
 	flags := flag.NewFlagSet("prune inspect", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -858,11 +891,11 @@ func runPruneInspect(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error: inspect requires --review ID, --capabilities PATH, valid limits, and --format text|json")
 		return 2
 	}
-	repo, err := workspace.OpenForPrune(context.Background(), *repoPath)
+	repo, err := workspace.OpenForPrune(ctx, *repoPath)
 	if err != nil {
 		return writePruneError(stderr, err)
 	}
-	result, err := prune.CreateReview(context.Background(), repo, prune.ContextOptions{
+	result, err := prune.CreateReview(ctx, repo, prune.ContextOptions{
 		ReviewID:     *reviewID,
 		Capabilities: *capabilities,
 		Provenance:   *provenance,
@@ -900,7 +933,7 @@ func runPruneInspect(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func runPruneValidate(args []string, stdout, stderr io.Writer) int {
+func runPruneValidate(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("prune validate", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	repoPath := flags.String("repo", ".", "repository path")
@@ -913,11 +946,11 @@ func runPruneValidate(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error: validate requires --review ID and --format text|json")
 		return 2
 	}
-	repo, err := workspace.Open(context.Background(), *repoPath)
+	repo, err := workspace.Open(ctx, *repoPath)
 	if err != nil {
 		return writePruneError(stderr, err)
 	}
-	review, diagnostics, err := prune.ValidateReview(context.Background(), repo, *reviewID)
+	review, diagnostics, err := prune.ValidateReview(ctx, repo, *reviewID)
 	if err != nil {
 		return writePruneError(stderr, err)
 	}
@@ -943,7 +976,7 @@ func runPruneValidate(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func runPruneApprove(args []string, stdout, stderr io.Writer) int {
+func runPruneApprove(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("prune approve", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	repoPath := flags.String("repo", ".", "repository path")
@@ -957,7 +990,7 @@ func runPruneApprove(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error: approve requires --review ID and explicit --approve/--reject decisions")
 		return 2
 	}
-	event, err := prune.Approve(context.Background(), *repoPath, prune.ApprovalOptions{
+	event, err := prune.Approve(ctx, *repoPath, prune.ApprovalOptions{
 		ReviewID: *reviewID,
 		Approved: commaList(*approved),
 		Rejected: commaList(*rejected),
@@ -970,7 +1003,7 @@ func runPruneApprove(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func runPruneApply(args []string, stdout, stderr io.Writer) int {
+func runPruneApply(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("prune apply", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	repoPath := flags.String("repo", ".", "repository path")
@@ -984,7 +1017,7 @@ func runPruneApply(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error: apply requires --review ID and --format text|json")
 		return 2
 	}
-	result, err := prune.Apply(context.Background(), *repoPath, prune.ApplyOptions{ReviewID: *reviewID, Write: *write})
+	result, err := prune.Apply(ctx, *repoPath, prune.ApplyOptions{ReviewID: *reviewID, Write: *write})
 	if err != nil {
 		return writePruneError(stderr, err)
 	}
@@ -1013,7 +1046,7 @@ func runPruneApply(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func runPruneRecover(args []string, stdout, stderr io.Writer) int {
+func runPruneRecover(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("prune recover", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	repoPath := flags.String("repo", ".", "repository path")
@@ -1026,18 +1059,18 @@ func runPruneRecover(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error: recover requires --review ID")
 		return 2
 	}
-	repo, err := workspace.Open(context.Background(), *repoPath)
+	repo, err := workspace.Open(ctx, *repoPath)
 	if err != nil {
 		return writePruneError(stderr, err)
 	}
-	if err := prune.Recover(context.Background(), repo.Root(), *reviewID, *clearStaleLock); err != nil {
+	if err := prune.Recover(ctx, repo.Root(), *reviewID, *clearStaleLock); err != nil {
 		return writePruneError(stderr, err)
 	}
 	fmt.Fprintln(stdout, "Recovery completed; crash-left locks and any application journal were reconciled.")
 	return 0
 }
 
-func runPruneStatus(args []string, stdout, stderr io.Writer) int {
+func runPruneStatus(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("prune status", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	repoPath := flags.String("repo", ".", "repository path")
@@ -1050,18 +1083,18 @@ func runPruneStatus(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error: status requires --review ID and --format text|json")
 		return 2
 	}
-	repo, err := workspace.Open(context.Background(), *repoPath)
+	repo, err := workspace.Open(ctx, *repoPath)
 	if err != nil {
 		return writePruneError(stderr, err)
 	}
-	status, diagnostics, err := prune.ReviewStatus(repo.Root(), *reviewID)
+	status, diagnostics, err := prune.ReviewStatus(ctx, repo.Root(), *reviewID)
 	if err != nil {
 		return writePruneError(stderr, err)
 	}
 	if *format == "json" {
 		summary := pruneProposalSummary{Counts: map[string]int{}, Rows: []pruneProposalRow{}}
 		if status.Proposed {
-			if review, _, loadErr := prune.LoadReview(repo.Root(), *reviewID); loadErr == nil {
+			if review, _, loadErr := prune.LoadReview(ctx, repo.Root(), *reviewID); loadErr == nil {
 				summary = summarizePruneProposal(review.Proposal)
 			}
 		}
@@ -1075,14 +1108,14 @@ func runPruneStatus(args []string, stdout, stderr io.Writer) int {
 		status.ReviewID, status.Inspected, status.Proposed, status.ProposalValid, status.Approved,
 		status.NoChangesApproved, status.Applied, status.Rendered, status.ADRRecorded, status.Verified)
 	if status.Proposed {
-		if review, _, loadErr := prune.LoadReview(repo.Root(), *reviewID); loadErr == nil {
+		if review, _, loadErr := prune.LoadReview(ctx, repo.Root(), *reviewID); loadErr == nil {
 			writePruneSummary(stdout, summarizePruneProposal(review.Proposal))
 		}
 	}
 	return 0
 }
 
-func runPruneVerify(args []string, stdout, stderr io.Writer) int {
+func runPruneVerify(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("prune verify", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	repoPath := flags.String("repo", ".", "repository path")
@@ -1095,7 +1128,7 @@ func runPruneVerify(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error: verify requires --review ID and --receipts PATH")
 		return 2
 	}
-	result, err := prune.Verify(context.Background(), *repoPath, *reviewID, *receipts, nil)
+	result, err := prune.Verify(ctx, *repoPath, prune.VerificationOptions{ReviewID: *reviewID, ReceiptsDir: *receipts, Now: nil})
 	if err != nil {
 		return writePruneError(stderr, err)
 	}
@@ -1113,6 +1146,9 @@ func pruneFlagError(err error, help string, stdout, stderr io.Writer) int {
 }
 
 func writePruneError(stderr io.Writer, err error) int {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return 130
+	}
 	fmt.Fprintf(stderr, "error: %s\n", err)
 	switch {
 	case errors.Is(err, prune.ErrIncompleteInventory):
@@ -1255,4 +1291,24 @@ func cleanFlagError(err error) string {
 		message = "-" + message
 	}
 	return strings.Replace(message, "for flag -", "for flag --", 1)
+}
+
+const versionHelp = `Usage: ssb version
+       ssb --version
+
+Print the build version and full source commit.
+`
+
+func runVersion(args []string, stdout, stderr io.Writer) int {
+	if args[0] == "version" && len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
+		fmt.Fprint(stdout, versionHelp)
+		return 0
+	}
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "error: version doesn't accept arguments")
+		fmt.Fprint(stderr, versionHelp)
+		return 2
+	}
+	fmt.Fprintf(stdout, "ssb %s (commit %s)\n", buildinfo.Version, buildinfo.Commit)
+	return 0
 }
