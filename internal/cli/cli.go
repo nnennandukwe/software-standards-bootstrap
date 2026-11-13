@@ -164,10 +164,33 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 }
 
 func commandErrorExitCode(err error, fallback int) int {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if isOnlyCancellation(err) {
 		return 130
 	}
 	return fallback
+}
+
+// A cleanup failure joined with cancellation must keep its failure diagnostic.
+func isOnlyCancellation(err error) bool {
+	if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, cause := range joined.Unwrap() {
+			// Git adds this classification marker alongside the cancel cause.
+			if cause == nil || cause == workspace.ErrGitOperation {
+				continue
+			}
+			if !isOnlyCancellation(cause) {
+				return false
+			}
+		}
+		return true
+	}
+	if cause := errors.Unwrap(err); cause != nil {
+		return isOnlyCancellation(cause)
+	}
+	return true
 }
 
 func dispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -304,7 +327,7 @@ func runADR(ctx context.Context, args []string, stdout, stderr io.Writer) (exitC
 }
 
 func writeADRError(stderr io.Writer, err error) int {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if isOnlyCancellation(err) {
 		return 130
 	}
 	fmt.Fprintf(stderr, "error: %s\n", err)
@@ -1167,7 +1190,7 @@ func pruneFlagError(err error, help string, stdout, stderr io.Writer) int {
 }
 
 func writePruneError(stderr io.Writer, err error) int {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if isOnlyCancellation(err) {
 		return 130
 	}
 	fmt.Fprintf(stderr, "error: %s\n", err)

@@ -225,3 +225,65 @@ func (ctx *cancelAtRecoveryBoundaryContext) Err() error {
 	}
 	return err
 }
+
+func TestCancellationJoinedWithLockFailureKeepsDiagnostics(t *testing.T) {
+	root, _ := evidenceRepository(t)
+	reviewRoot := filepath.Join(root, ".software-standards", "reviews", "review-one")
+	if err := os.MkdirAll(reviewRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	parent, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	ctx := cancelDuringReviewLoadContext{
+		Context: parent, cancel: cancel, lock: filepath.Join(reviewRoot, ".transition.lock"),
+	}
+	var output, diagnostics bytes.Buffer
+	code := cli.RunContext(&ctx, []string{
+		"prune", "approve", "--repo", root, "--review", "review-one", "--approve", "action-one",
+	}, &output, &diagnostics)
+	if !ctx.triggered || ctx.failure != nil {
+		t.Fatalf("load cancellation setup: triggered=%t, error=%v", ctx.triggered, ctx.failure)
+	}
+	if code != 3 || output.Len() != 0 ||
+		!strings.Contains(diagnostics.String(), "context canceled") ||
+		!strings.Contains(diagnostics.String(), "remove review transition lock") {
+		t.Fatalf("cancellation with failed cleanup: exit=%d stdout=%q stderr=%q", code, &output, &diagnostics)
+	}
+	if _, err := os.Stat(filepath.Join(reviewRoot, "events.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("canceled approval changed events: %v", err)
+	}
+	if err := os.Remove(filepath.Join(ctx.lock, "retained-file")); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	diagnostics.Reset()
+	if code := cli.Run([]string{
+		"prune", "recover", "--repo", root, "--review", "review-one", "--clear-stale-lock",
+	}, &output, &diagnostics); code != 0 {
+		t.Fatalf("cleanup recovery: exit=%d stdout=%q stderr=%q", code, &output, &diagnostics)
+	}
+}
+
+type cancelDuringReviewLoadContext struct {
+	context.Context
+	cancel    context.CancelFunc
+	lock      string
+	triggered bool
+	failure   error
+}
+
+func (ctx *cancelDuringReviewLoadContext) Err() error {
+	pc, _, _, ok := runtime.Caller(1)
+	if ok && !ctx.triggered && strings.HasSuffix(runtime.FuncForPC(pc).Name(), "/internal/prune.loadReviewFromStore") {
+		ctx.triggered = true
+		ctx.cancel()
+		ctx.failure = os.Remove(ctx.lock)
+		if ctx.failure == nil {
+			ctx.failure = os.Mkdir(ctx.lock, 0o700)
+		}
+		if ctx.failure == nil {
+			ctx.failure = os.WriteFile(filepath.Join(ctx.lock, "retained-file"), []byte("recovery evidence\n"), 0o600)
+		}
+	}
+	return ctx.Context.Err()
+}
