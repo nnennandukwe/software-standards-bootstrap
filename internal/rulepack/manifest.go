@@ -18,7 +18,7 @@ func validateManifestLayoutPack(
 	ctx context.Context,
 	repo *workspace.Repository,
 	retained bool,
-	verifiedInventory *inventoryVerification,
+	snapshot *continuationSnapshot,
 ) (Pack, []Diagnostic, error) {
 	const (
 		manifestPath  = ".software-standards/manifest.yaml"
@@ -71,6 +71,9 @@ func validateManifestLayoutPack(
 	diagnostics = append(diagnostics, manifestDiagnostics...)
 	if len(manifestBytes) == 0 {
 		return pack, diagnostics, nil
+	}
+	if snapshot != nil && snapshot.manifestSHA256 != digest(manifestBytes) {
+		return Pack{}, nil, fmt.Errorf("%w: manifest changed during continuation validation; preserve edits and rerun ssb resume", workspace.ErrPrecondition)
 	}
 	if err := yaml.Load(
 		manifestBytes,
@@ -191,9 +194,9 @@ func validateManifestLayoutPack(
 			pack.Manifest.BaselineCommit,
 			pack.Inventory,
 		)...)
-		if verifiedInventory == nil ||
-			verifiedInventory.baselineCommit != evidenceRepo.Baseline() ||
-			verifiedInventory.rawSHA256 != digest(inventoryBytes) {
+		if snapshot == nil ||
+			snapshot.baselineCommit != evidenceRepo.Baseline() ||
+			snapshot.inventorySHA256 != digest(inventoryBytes) {
 			inventoryDiagnostics, inventoryErr := validateReportInventory(
 				ctx,
 				evidenceRepo,

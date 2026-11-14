@@ -28,13 +28,13 @@ type Continuation struct {
 	Diagnostics       []Diagnostic    `json:"diagnostics"`
 }
 
-// inventoryVerification is created only after the complete pinned inventory
-// check. It avoids a second Git scan within this assessment, while validation
-// still checks raw identity, metadata, and manifest binding. Public validation
-// never receives this proof, and the assessment rechecks retained bytes.
-type inventoryVerification struct {
-	baselineCommit string
-	rawSHA256      string
+// continuationSnapshot binds one assessment to its captured manifest and
+// already-verified inventory bytes. Public validation never receives a
+// snapshot and always performs its own complete checks.
+type continuationSnapshot struct {
+	baselineCommit  string
+	inventorySHA256 string
+	manifestSHA256  string
 }
 
 // AssessContinuation verifies retained generation output without creating,
@@ -90,6 +90,9 @@ func AssessContinuation(ctx context.Context, repo *workspace.Repository) (result
 				returnErr = fmt.Errorf("%w: manifest changed during continuation assessment; rerun ssb resume", workspace.ErrPrecondition)
 			}
 		}
+		if result.ProposalReusable {
+			returnErr = verifyContinuationArtifactSet(repo.Root(), pack.Manifest)
+		}
 	}()
 	inventoryBytes, diagnostics, err := continuationFile(repo.Root(), inventoryPath, inventory.DefaultLimits().MaxCandidateBytes)
 	if err != nil {
@@ -100,7 +103,8 @@ func AssessContinuation(ctx context.Context, repo *workspace.Repository) (result
 		result.Guidance = []string{"Preserve the interrupted pack. A complete inventory is required before generation work can be reused; see SSB's generation recovery guide."}
 		return result, pack, nil
 	}
-	result.Files = append(result.Files, FileReference{Path: inventoryPath, SHA256: digest(inventoryBytes)})
+	inventoryIdentity := FileReference{Path: inventoryPath, SHA256: digest(inventoryBytes)}
+	result.Files = append(result.Files, inventoryIdentity)
 	var recorded ReportInventory
 	if err := decodeStrictJSON(inventoryBytes, &recorded); err != nil {
 		result.Diagnostics = append(result.Diagnostics, diagnostic(inventoryPath, "inventory", err.Error(), "preserve this file and recover a complete unedited inspection response for the pinned baseline"))
@@ -151,6 +155,10 @@ func AssessContinuation(ctx context.Context, repo *workspace.Repository) (result
 		result.Guidance = []string{"The retained proposal belongs to another baseline. Its semantic work can't be reused without a new review; preserve every source."}
 		return result, pack, nil
 	}
+	if manifest.Inventory != inventoryIdentity {
+		result.Diagnostics = append(result.Diagnostics, diagnostic(manifestPath, "inventory", "manifest inventory reference differs from the captured verified inventory", "bind the canonical inventory path and its raw-byte SHA-256 through explicit pack review; preserve the unedited inventory"))
+		return result, pack, nil
+	}
 	// Capture only canonical paths; malformed paths are diagnosed by Validate.
 	references := []FileReference{}
 	if manifest.Report.Path == ".software-standards/report.md" {
@@ -165,11 +173,11 @@ func AssessContinuation(ctx context.Context, repo *workspace.Repository) (result
 		}
 	}
 	for _, reference := range references {
-		content, fileDiagnostics, err := continuationFile(repo.Root(), reference.Path, inventory.DefaultLimits().MaxFileBytes)
+		content, fileDiagnostics, err := readDigestBoundFile(repo.Root(), reference, "retained source", inventory.DefaultLimits().MaxFileBytes)
 		if err != nil {
 			return result, pack, err
 		}
-		if len(fileDiagnostics) == 0 {
+		if len(content) != 0 {
 			result.Files = append(result.Files, FileReference{Path: reference.Path, SHA256: digest(content)})
 		}
 		result.Diagnostics = append(result.Diagnostics, fileDiagnostics...)
@@ -177,9 +185,10 @@ func AssessContinuation(ctx context.Context, repo *workspace.Repository) (result
 	if len(result.Diagnostics) != 0 {
 		return result, pack, nil
 	}
-	pack, result.Diagnostics, err = validateActionablePack(ctx, repo, false, &inventoryVerification{
-		baselineCommit: repo.Baseline(),
-		rawSHA256:      digest(inventoryBytes),
+	pack, result.Diagnostics, err = validateActionablePack(ctx, repo, false, &continuationSnapshot{
+		baselineCommit:  repo.Baseline(),
+		inventorySHA256: inventoryIdentity.SHA256,
+		manifestSHA256:  digest(manifestBytes),
 	})
 	if err != nil {
 		return result, pack, err
@@ -192,6 +201,29 @@ func AssessContinuation(ctx context.Context, repo *workspace.Repository) (result
 	result.Repeat = []string{"rendering", "developer_review"}
 	result.Guidance = []string{"Reuse the validated proposal and verified inventory. Run ssb render --repo PATH --dry-run, then ssb render --repo PATH. Review the complete uncommitted result before the developer's adoption decision."}
 	return result, pack, nil
+}
+
+func verifyContinuationArtifactSet(root string, manifest Manifest) error {
+	listed := make(map[string]AcceptedArtifact, len(manifest.Artifacts))
+	for _, artifact := range manifest.Artifacts {
+		listed[artifact.Path] = artifact
+	}
+	unlisted, diagnostics, err := unlistedNativeArtifacts(root, listed)
+	if err != nil {
+		return err
+	}
+	changed := len(unlisted) != 0 || len(diagnostics) != 0
+	if manifest.Orientation.IsZero() {
+		_, err := os.Lstat(filepath.Join(root, filepath.FromSlash(orientationPath)))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect optional orientation during continuation: %w", err)
+		}
+		changed = changed || err == nil
+	}
+	if changed {
+		return fmt.Errorf("%w: proposal artifact set changed during continuation assessment; preserve manual work and rerun ssb resume", workspace.ErrPrecondition)
+	}
+	return nil
 }
 
 func continuationFile(root, relative string, maxBytes int64) ([]byte, []Diagnostic, error) {

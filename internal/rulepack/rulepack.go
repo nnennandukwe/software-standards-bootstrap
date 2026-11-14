@@ -29,7 +29,7 @@ func validateActionablePack(
 	ctx context.Context,
 	repo *workspace.Repository,
 	retained bool,
-	verifiedInventory *inventoryVerification,
+	snapshot *continuationSnapshot,
 ) (pack Pack, diagnostics []Diagnostic, returnErr error) {
 	if err := ctx.Err(); err != nil {
 		return Pack{}, nil, err
@@ -43,7 +43,7 @@ func validateActionablePack(
 	_, err := os.Lstat(manifestPath)
 	switch {
 	case err == nil:
-		return validateManifestLayoutPack(ctx, repo, retained, verifiedInventory)
+		return validateManifestLayoutPack(ctx, repo, retained, snapshot)
 	case errors.Is(err, os.ErrNotExist):
 		return validateEmbeddedLayoutPack(ctx, repo, retained)
 	default:

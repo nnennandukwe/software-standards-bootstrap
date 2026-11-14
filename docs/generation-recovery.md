@@ -39,8 +39,9 @@ stop generation continuation.
 Projection drift returns `blocked`, sets `proposal_reusable` to false, and names
 `projection_recovery` before validation and rendering in the repeat stages.
 Preserve canonical sources and manual edits while reconciling the reported
-derived files through explicit review. Rerun assessment afterward. A source that's missing or nonregular when captured
-also stops the assessment. A later file appearance requires a fresh assessment.
+derived files through explicit review. Rerun assessment afterward. A source
+that's missing, nonregular, or mismatched with its manifest digest when captured
+also stops the assessment. A later correction requires a fresh assessment.
 
 ## Correct a validation problem
 
@@ -109,6 +110,11 @@ same command: assessment has no durable writes to recover. If rendering stops,
 follow its existing recovery diagnostics and reassess before retrying. Every
 new validation or rendering invocation rechecks its own input. Concurrent
 changes detected during assessment reject the result and preserve those changes.
+The final check includes unlisted native files, invalid proposal directories,
+and an optional orientation file that appears without a manifest reference.
+The manifest must bind the captured inventory and source bytes before full
+validation. Validation must also use the captured manifest bytes; temporarily
+replacing inputs and restoring their old bytes can't authorize reuse.
 
 A successful projection remains a proposal until developer review and the
 adoption decision through the developer-created pull request and merge. Stop

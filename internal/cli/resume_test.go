@@ -16,6 +16,7 @@ import (
 
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/cli"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/rulepack"
+	"go.yaml.in/yaml/v4"
 )
 
 func TestResumeInterruptedGeneration(t *testing.T) {
@@ -719,5 +720,178 @@ func TestResumeProjectionTextGivesResumeRecovery(t *testing.T) {
 	writeFile(t, filepath.Join(repo, "AGENTS.md"), rendered)
 	if retry := resumeResult(t, repo, 0); retry.State != "complete" {
 		t.Fatalf("projection recovery: %#v", retry)
+	}
+}
+
+func TestResumeRejectsLateChangesToTheProposalSet(t *testing.T) {
+	for _, kind := range []string{"unlisted rule", "nested proposal directory", "unbound orientation"} {
+		t.Run(kind, func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			writeValidManifestLayoutPack(t, repo, baseline)
+			var afterMutation map[string]string
+			ctx := &resumeBoundaryContext{Context: t.Context(), action: func() {
+				switch kind {
+				case "unlisted rule":
+					writeFile(t, filepath.Join(repo, ".software-standards/rules/late-proposal.md"), "# Late manual proposal\n\nPreserve this unfinished candidate.\n")
+				case "nested proposal directory":
+					if err := os.Mkdir(filepath.Join(repo, ".software-standards/rules/unfinished"), 0o755); err != nil {
+						t.Fatal(err)
+					}
+				case "unbound orientation":
+					writeFile(t, filepath.Join(repo, ".software-standards/orientation.yaml"), "schema: ssb.dev/orientation/v1\n")
+				}
+				afterMutation = resumeSnapshot(t, repo)
+			}}
+			var output, diagnostics bytes.Buffer
+			code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+			if !ctx.triggered.Load() || code != 2 || output.Len() != 0 || !strings.Contains(diagnostics.String(), "proposal artifact set changed during continuation assessment") {
+				t.Fatalf("late proposal set passed: triggered=%t code=%d stdout=%q stderr=%q", ctx.triggered.Load(), code, output.String(), diagnostics.String())
+			}
+			assertResumeSnapshot(t, repo, afterMutation)
+			runResumeCommand(t, []string{"validate", "--repo", repo}, 1)
+			if retry := resumeResult(t, repo, 1); retry.ProposalReusable {
+				t.Fatalf("unreconciled candidate reused: %#v", retry)
+			}
+		})
+	}
+}
+
+func TestResumeBindsValidationToTheCapturedManifest(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+	path := filepath.Join(repo, ".software-standards/manifest.yaml")
+	valid := readText(t, path)
+	invalid := strings.Replace(valid, "confidence: high", "confidence: low", 1)
+	writeFile(t, path, invalid)
+	before := resumeSnapshot(t, repo)
+	ctx := &validationSwapContext{Context: t.Context(), beforeValidation: func() { writeFile(t, path, valid) }, afterValidation: func() { writeFile(t, path, invalid) }}
+	var output, diagnostics bytes.Buffer
+	code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+	if !ctx.started.Load() || !ctx.finished.Load() || code != 2 || output.Len() != 0 || !strings.Contains(diagnostics.String(), "manifest changed during continuation validation") {
+		t.Fatalf("validation used another manifest: started=%t finished=%t code=%d stdout=%q stderr=%q", ctx.started.Load(), ctx.finished.Load(), code, output.String(), diagnostics.String())
+	}
+	assertResumeSnapshot(t, repo, before)
+	runResumeCommand(t, []string{"validate", "--repo", repo}, 1)
+}
+
+func TestResumeBindsCapturedSourcesBeforeValidation(t *testing.T) {
+	for _, relative := range []string{".software-standards/report.md", ".software-standards/rules/verify-before-merge.md"} {
+		t.Run(relative, func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			writeValidManifestLayoutPack(t, repo, baseline)
+			path := filepath.Join(repo, filepath.FromSlash(relative))
+			valid := readText(t, path)
+			invalid := valid + "\nDeveloper's unfinished edits.\n"
+			writeFile(t, path, invalid)
+			before := resumeSnapshot(t, repo)
+			ctx := &validationSwapContext{Context: t.Context(), beforeValidation: func() { writeFile(t, path, valid) }, afterValidation: func() { writeFile(t, path, invalid) }}
+			var output, diagnostics bytes.Buffer
+			code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+			var result rulepack.Continuation
+			if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+				t.Fatalf("exit=%d stderr=%q output=%q: %v", code, diagnostics.String(), output.String(), err)
+			}
+			if code != 1 || result.ProposalReusable || result.State != "needs_correction" {
+				t.Fatalf("temporary source restoration authorized reuse: started=%t finished=%t exit=%d result=%#v", ctx.started.Load(), ctx.finished.Load(), code, result)
+			}
+			found := false
+			for _, reference := range result.Files {
+				if reference.Path == relative && reference.SHA256 == fileSHA256(t, path) {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal("correction response lost the retained source identity")
+			}
+			assertResumeSnapshot(t, repo, before)
+			runResumeCommand(t, []string{"validate", "--repo", repo}, 1)
+			writeFile(t, path, valid)
+			if retry := resumeResult(t, repo, 0); retry.State != "ready_to_render" {
+				t.Fatalf("explicit source recovery failed: %#v", retry)
+			}
+		})
+	}
+}
+
+func TestResumeBindsManifestToTheCapturedInventory(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+	path := filepath.Join(repo, ".software-standards/inventory.json")
+	original := readText(t, path)
+	alternate := original + "\n"
+	manifestPath := filepath.Join(repo, ".software-standards/manifest.yaml")
+	validManifest := readText(t, manifestPath)
+	writeFile(t, manifestPath, strings.Replace(validManifest, excerptHash(original), excerptHash(alternate), 1))
+	before := resumeSnapshot(t, repo)
+	ctx := &validationSwapContext{Context: t.Context(), beforeValidation: func() { writeFile(t, path, alternate) }, afterValidation: func() { writeFile(t, path, original) }}
+	var output, diagnostics bytes.Buffer
+	code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+	var result rulepack.Continuation
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatalf("exit=%d stderr=%q output=%q: %v", code, diagnostics.String(), output.String(), err)
+	}
+	if code != 1 || result.ProposalReusable || result.State != "needs_correction" {
+		t.Fatalf("temporary inventory replacement authorized reuse: started=%t finished=%t exit=%d result=%#v", ctx.started.Load(), ctx.finished.Load(), code, result)
+	}
+	assertResumeSnapshot(t, repo, before)
+	runResumeCommand(t, []string{"validate", "--repo", repo}, 1)
+	writeFile(t, manifestPath, validManifest)
+	if retry := resumeResult(t, repo, 0); retry.State != "ready_to_render" {
+		t.Fatalf("explicit inventory binding recovery failed: %#v", retry)
+	}
+}
+
+// Simulate an external writer that temporarily corrects validation input and
+// restores its earlier bytes before assessment's final identity check.
+type validationSwapContext struct {
+	context.Context
+	beforeValidation func()
+	afterValidation  func()
+	started          atomic.Bool
+	finished         atomic.Bool
+}
+
+func (ctx *validationSwapContext) Err() error {
+	programCounter, _, _, ok := runtime.Caller(1)
+	if ok {
+		name := runtime.FuncForPC(programCounter).Name()
+		if strings.HasSuffix(name, "/internal/rulepack.validateActionablePack") && ctx.started.CompareAndSwap(false, true) {
+			ctx.beforeValidation()
+		}
+		if strings.Contains(name, "/internal/rulepack.validateActionablePack.func") && ctx.finished.CompareAndSwap(false, true) {
+			ctx.afterValidation()
+		}
+	}
+	return ctx.Context.Err()
+}
+
+func TestResumePreservesUnsortedRootCoreBytes(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+	path := filepath.Join(repo, ".software-standards/manifest.yaml")
+	var manifest rulepack.Manifest
+	if err := yaml.Load([]byte(readText(t, path)), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Artifacts[0].Scopes = []string{"**/*"}
+	second := manifest.Artifacts[0]
+	second.ID = "another-retained-rule"
+	second.Path = ".software-standards/rules/another-retained-rule.md"
+	secondPath := filepath.Join(repo, filepath.FromSlash(second.Path))
+	writeFile(t, secondPath, "# Another retained rule\n\nRun the retained verification before merging.\n")
+	second.SHA256 = fileSHA256(t, secondPath)
+	manifest.Artifacts = append(manifest.Artifacts, second)
+	manifest.RootCore = []string{"verify-before-merge", "another-retained-rule"}
+	raw, err := yaml.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, string(raw))
+	result := resumeResult(t, repo, 0)
+	if result.State != "ready_to_render" || !result.ProposalReusable {
+		t.Fatalf("valid unsorted root core rejected: %#v", result)
+	}
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, raw) {
+		t.Fatalf("assessment rewrote manifest order: %q %v", got, err)
 	}
 }
