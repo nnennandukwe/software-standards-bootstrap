@@ -27,8 +27,12 @@ A missing manifest leaves semantic completion unproven. Partial files remain
 review material: preserve them, compare candidates with pinned Git blobs, and
 finish only missing work. Creating a new file must still stop if that target
 exists. Retained files require explicit review before editing; a continuation
-request doesn't authorize discarding manual changes. Existing files outside
-the manifest also block full proposal validation until explicitly reconciled.
+request doesn't authorize discarding manual changes. Unlisted files in the
+pack's rules, verification, or automation directories block full proposal
+validation until explicitly reconciled. `.agents/skills` is shared with
+developer workflows and installed tooling. Assessment names unindexed skill
+paths for explicit ownership and completion review before reuse. Manifest
+validation covers indexed skills; other skills stay outside its reuse claim.
 
 A tracked manifest or report returns `existing_pack`. This protects committed
 packs, including adopted packs, from being mistaken for interrupted generation.
@@ -110,6 +114,8 @@ same command: assessment has no durable writes to recover. If rendering stops,
 follow its existing recovery diagnostics and reassess before retrying. Every
 new validation or rendering invocation rechecks its own input. Concurrent
 changes detected during assessment reject the result and preserve those changes.
+Captured inputs are checked again after the projection dry run, so changes
+during that check also require a fresh assessment.
 The final check includes unlisted native files, invalid proposal directories,
 and an optional orientation file that appears without a manifest reference.
 The manifest must bind the captured inventory and source bytes before full

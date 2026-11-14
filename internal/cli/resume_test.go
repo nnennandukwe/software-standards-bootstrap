@@ -895,3 +895,112 @@ func TestResumePreservesUnsortedRootCoreBytes(t *testing.T) {
 		t.Fatalf("assessment rewrote manifest order: %q %v", got, err)
 	}
 }
+
+func TestResumeRechecksInputsAfterProjection(t *testing.T) {
+	for _, target := range []string{"source", "HEAD", "unlisted native file"} {
+		t.Run(target, func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			writeValidManifestLayoutPack(t, repo, baseline)
+			runResumeCommand(t, []string{"render", "--repo", repo}, 0)
+			var afterMutation map[string]string
+			ctx := &resumeBoundaryContext{Context: t.Context(), boundary: "/internal/render.Apply", action: func() {
+				switch target {
+				case "source":
+					path := filepath.Join(repo, ".software-standards/rules/verify-before-merge.md")
+					writeFile(t, path, readText(t, path)+"\nDeveloper's concurrent edit.\n")
+				case "HEAD":
+					writeFile(t, filepath.Join(repo, "new.md"), "New baseline.\n")
+					git(t, repo, "add", "new.md")
+					git(t, repo, "commit", "-m", "concurrent baseline")
+				default:
+					writeFile(t, filepath.Join(repo, ".software-standards/rules/unfinished.md"), "# Unfinished proposal\n")
+				}
+				afterMutation = resumeSnapshot(t, repo)
+			}}
+			var output, diagnostics bytes.Buffer
+			code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+			if !ctx.triggered.Load() || code != 2 || output.Len() != 0 || !strings.Contains(diagnostics.String(), "changed during continuation assessment") {
+				t.Fatalf("projection reused stale input: triggered=%t exit=%d stdout=%q stderr=%q", ctx.triggered.Load(), code, output.String(), diagnostics.String())
+			}
+			assertResumeSnapshot(t, repo, afterMutation)
+		})
+	}
+}
+
+func TestResumeProjectionDiagnosticsUseRepositoryContext(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+	writeFile(t, filepath.Join(repo, ".software-standards/routing"), "Developer's file at the routing target.\n")
+	before := resumeSnapshot(t, repo)
+	result := resumeResult(t, repo, 1)
+	if len(result.Diagnostics) != 1 || result.Diagnostics[0].Path != "." || result.Diagnostics[0].Field != "projection" || !strings.Contains(result.Diagnostics[0].Message, "routing target") || strings.Contains(result.Diagnostics[0].Message, "AGENTS.md") || !strings.Contains(result.Diagnostics[0].Recovery, ".software-standards/routing") {
+		t.Fatalf("routing error attributed to root instructions: %#v", result.Diagnostics)
+	}
+	assertResumeSnapshot(t, repo, before)
+}
+
+func TestResumeIdentifiesUnindexedRepositorySkillsForReview(t *testing.T) {
+	for _, tracked := range []bool{false, true} {
+		t.Run(fmt.Sprintf("tracked=%t", tracked), func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			path := ".agents/skills/developer-workflow/SKILL.md"
+			writeFile(t, filepath.Join(repo, path), "# Developer's workflow\n\nRetain this manual procedure.\n")
+			if tracked {
+				git(t, repo, "add", path)
+				git(t, repo, "commit", "-m", "developer workflow")
+				baseline = strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
+			}
+			writeValidManifestLayoutPack(t, repo, baseline)
+			before := resumeSnapshot(t, repo)
+			result := resumeResult(t, repo, 0)
+			guidance := strings.Join(result.Guidance, " ")
+			if !result.ProposalReusable || !strings.Contains(guidance, path) || !strings.Contains(strings.ToLower(guidance), "unindexed repository skill") || !strings.Contains(guidance, "explicit review") {
+				t.Fatalf("unindexed skills weren't identified for review: %#v", result)
+			}
+			for _, reference := range result.Files {
+				if reference.Path == path {
+					t.Fatal("unindexed skill advertised as validated retained work")
+				}
+			}
+			assertResumeSnapshot(t, repo, before)
+			runResumeCommand(t, []string{"validate", "--repo", repo}, 0)
+			runResumeCommand(t, []string{"render", "--repo", repo}, 0)
+			if complete := resumeResult(t, repo, 0); complete.State != "complete" || !strings.Contains(strings.Join(complete.Guidance, " "), path) {
+				t.Fatalf("complete projection lost skill review guidance: %#v", complete)
+			}
+		})
+	}
+}
+
+func TestResumeReviewsPartialAndLinkedSkillPathsWithoutFollowingLinks(t *testing.T) {
+	for _, target := range []string{"partial", "linked skill", "linked directory", "parent file"} {
+		t.Run(target, func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			writeValidManifestLayoutPack(t, repo, baseline)
+			relative := ".agents/skills/unfinished"
+			if target == "parent file" {
+				relative = ".agents"
+				writeFile(t, filepath.Join(repo, relative), "Developer's existing file.\n")
+			} else if target == "partial" {
+				writeFile(t, filepath.Join(repo, relative, "notes.md"), "Developer's partial work.\n")
+			} else {
+				if target == "linked directory" {
+					relative = ".agents/skills"
+				}
+				absolute := filepath.Join(repo, filepath.FromSlash(relative))
+				if err := os.MkdirAll(filepath.Dir(absolute), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(t.TempDir(), "missing-target"), absolute); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+			}
+			before := resumeSnapshot(t, repo)
+			result := resumeResult(t, repo, 0)
+			if !result.ProposalReusable || !strings.Contains(strings.Join(result.Guidance, " "), relative) {
+				t.Fatalf("shared skill path wasn't retained for review: %#v", result)
+			}
+			assertResumeSnapshot(t, repo, before)
+		})
+	}
+}

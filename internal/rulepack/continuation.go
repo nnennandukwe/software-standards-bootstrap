@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"go.yaml.in/yaml/v4"
 
@@ -70,28 +71,14 @@ func AssessContinuation(ctx context.Context, repo *workspace.Repository) (result
 		if returnErr != nil {
 			return
 		}
-		if err := continuationBaseline(ctx, repo); err != nil {
+		if err := verifyContinuation(ctx, repo, result, pack); err != nil {
 			returnErr = err
 			return
-		}
-		for _, reference := range result.Files {
-			_, diagnostics, err := readDigestBoundFile(repo.Root(), reference, "retained file", inventory.DefaultLimits().MaxCandidateBytes)
-			if err != nil {
-				returnErr = err
-				return
-			}
-			if len(diagnostics) != 0 {
-				returnErr = fmt.Errorf("%w: retained files changed during continuation assessment; preserve edits and rerun ssb resume", workspace.ErrPrecondition)
-				return
-			}
 		}
 		if manifestMissing {
 			if _, err := os.Lstat(filepath.Join(repo.Root(), manifestPath)); !errors.Is(err, os.ErrNotExist) {
 				returnErr = fmt.Errorf("%w: manifest changed during continuation assessment; rerun ssb resume", workspace.ErrPrecondition)
 			}
-		}
-		if result.ProposalReusable {
-			returnErr = verifyContinuationArtifactSet(repo.Root(), pack.Manifest)
 		}
 	}()
 	inventoryBytes, diagnostics, err := continuationFile(repo.Root(), inventoryPath, inventory.DefaultLimits().MaxCandidateBytes)
@@ -201,6 +188,86 @@ func AssessContinuation(ctx context.Context, repo *workspace.Repository) (result
 	result.Repeat = []string{"rendering", "developer_review"}
 	result.Guidance = []string{"Reuse the validated proposal and verified inventory. Run ssb render --repo PATH --dry-run, then ssb render --repo PATH. Review the complete uncommitted result before the developer's adoption decision."}
 	return result, pack, nil
+}
+
+// RecheckContinuation checks captured inputs after projection assessment and
+// identifies shared repository skills that still need explicit review. It
+// neither validates unindexed skills nor grants permission to write them.
+func RecheckContinuation(ctx context.Context, repo *workspace.Repository, result Continuation, pack Pack) (Continuation, error) {
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
+	paths, err := unindexedRepositorySkills(repo.Root(), pack.Manifest)
+	if err != nil {
+		return result, err
+	}
+	if len(paths) != 0 {
+		result.Guidance = append(result.Guidance, "Unindexed repository skill paths need explicit review of ownership and completion before reuse: "+strings.Join(paths, ", ")+".")
+	}
+	return result, verifyContinuation(ctx, repo, result, pack)
+}
+
+func verifyContinuation(ctx context.Context, repo *workspace.Repository, result Continuation, pack Pack) error {
+	if err := continuationBaseline(ctx, repo); err != nil {
+		return err
+	}
+	for _, reference := range result.Files {
+		_, diagnostics, err := readDigestBoundFile(repo.Root(), reference, "retained file", inventory.DefaultLimits().MaxCandidateBytes)
+		if err != nil {
+			return err
+		}
+		if len(diagnostics) != 0 {
+			return fmt.Errorf("%w: retained files changed during continuation assessment; preserve edits and rerun ssb resume", workspace.ErrPrecondition)
+		}
+	}
+	if result.ProposalReusable {
+		return verifyContinuationArtifactSet(repo.Root(), pack.Manifest)
+	}
+	return nil
+}
+
+func unindexedRepositorySkills(root string, manifest Manifest) ([]string, error) {
+	const directory = ".agents/skills"
+	for _, relative := range []string{".agents", directory} {
+		info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(relative)))
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("inspect repository skills: %w", err)
+		}
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return []string{relative}, nil
+		}
+	}
+	entries, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(directory)))
+	if err != nil {
+		return nil, fmt.Errorf("read repository skills: %w", err)
+	}
+	listed := make(map[string]bool)
+	for _, artifact := range manifest.Artifacts {
+		if artifact.Kind == "skill" {
+			listed[artifact.Path] = true
+		}
+	}
+	paths := []string{}
+	for _, entry := range entries {
+		relative := directory + "/" + entry.Name()
+		if entry.Type()&os.ModeSymlink != 0 {
+			paths = append(paths, relative)
+			continue
+		}
+		if !entry.IsDir() || listed[relative+"/SKILL.md"] {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(relative), "SKILL.md")); err == nil {
+			relative += "/SKILL.md"
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("inspect repository skill %s: %w", relative, err)
+		}
+		paths = append(paths, relative)
+	}
+	return paths, nil
 }
 
 func verifyContinuationArtifactSet(root string, manifest Manifest) error {

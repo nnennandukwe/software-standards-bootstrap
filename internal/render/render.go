@@ -31,7 +31,7 @@ const (
 var (
 	ErrDrift        = errors.New("managed AGENTS.md section drifted")
 	ErrMarkers      = errors.New("managed AGENTS.md markers are malformed")
-	ErrUnsafeTarget = errors.New("unsafe AGENTS.md target")
+	ErrUnsafeTarget = errors.New("unsafe projection target")
 )
 
 // Result describes the proposed or written projection.

@@ -39,20 +39,24 @@ func runResume(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		return writeResumeError(stderr, err)
 	}
 	if result.ProposalReusable {
-		projection, err := render.Apply(ctx, repo, pack, true)
+		projection, projectionErr := render.Apply(ctx, repo, pack, true)
+		if projectionErr != nil && !errors.Is(projectionErr, render.ErrDrift) && !errors.Is(projectionErr, render.ErrMarkers) && !errors.Is(projectionErr, render.ErrUnsafeTarget) {
+			return writeResumeError(stderr, projectionErr)
+		}
+		result, err = rulepack.RecheckContinuation(ctx, repo, result, pack)
 		if err != nil {
-			if !errors.Is(err, render.ErrDrift) && !errors.Is(err, render.ErrMarkers) && !errors.Is(err, render.ErrUnsafeTarget) {
-				return writeResumeError(stderr, err)
-			}
+			return writeResumeError(stderr, err)
+		}
+		if projectionErr != nil {
 			result.State = "blocked"
 			result.ProposalReusable = false
 			result.Repeat = []string{"projection_recovery", "validation", "rendering", "developer_review"}
-			result.Guidance = []string{"Projection checks blocked continuation. Preserve canonical sources and manual edits; reconcile the reported derived files through explicit review, then rerun ssb resume. Inventory verification remains reusable."}
-			result.Diagnostics = append(result.Diagnostics, rulepack.Diagnostic{Path: "AGENTS.md", Field: "projection", Message: err.Error(), Recovery: "preserve manual edits; restore derived surfaces through explicit review, then rerun ssb resume"})
+			result.Guidance[0] = "Projection checks blocked continuation. Preserve canonical sources and manual edits; reconcile the reported derived files through explicit review, then rerun ssb resume. Inventory verification remains reusable."
+			result.Diagnostics = append(result.Diagnostics, rulepack.Diagnostic{Path: ".", Field: "projection", Message: projectionErr.Error(), Recovery: "preserve manual edits; review AGENTS.md and .software-standards/routing, reconcile the reported projection through explicit review, then rerun ssb resume"})
 		} else if !projection.Changed {
 			result.State = "complete"
 			result.Repeat = []string{"developer_review"}
-			result.Guidance = []string{"The proposal validates and its projection is current. Review the complete uncommitted result; generation completion isn't adoption."}
+			result.Guidance[0] = "The proposal validates and its projection is current. Review the complete uncommitted result; generation completion isn't adoption."
 		}
 	}
 	if *format == "json" {
