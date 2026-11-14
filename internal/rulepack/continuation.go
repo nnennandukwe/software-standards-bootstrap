@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"go.yaml.in/yaml/v4"
@@ -81,6 +83,27 @@ func AssessContinuation(ctx context.Context, repo *workspace.Repository) (result
 			}
 		}
 	}()
+	if _, err := os.Lstat(filepath.Join(repo.Root(), manifestPath)); errors.Is(err, os.ErrNotExist) {
+		manifestMissing = true
+		const reportPath = ".software-standards/report.md"
+		content, diagnostics, err := continuationFile(repo.Root(), reportPath, inventory.DefaultLimits().MaxFileBytes, true)
+		if err != nil {
+			return result, pack, err
+		}
+		if len(diagnostics) == 0 {
+			header, _, splitErr := splitFrontmatter(content)
+			var metadata struct {
+				Schema string `yaml:"schema"`
+			}
+			if splitErr == nil && yaml.Load(header, &metadata, yaml.WithUniqueKeys()) == nil && metadata.Schema == ReportSchema {
+				result.Files = append(result.Files, FileReference{Path: reportPath, SHA256: digest(content)})
+				result.Repeat = []string{"validation", "rendering", "developer_review"}
+				result.Guidance = []string{"This retained report declares an embedded-layout pack. Preserve its sources and use its existing maintenance workflow: ssb validate --repo PATH, then ssb render --repo PATH after review. Generation continuation doesn't migrate this layout or require a new manifest."}
+				result.Diagnostics = []Diagnostic{diagnostic(reportPath, "layout", "embedded-layout generation continuation is outside the manifest workflow", "preserve the pack and use its existing validation and rendering workflow; don't create a manifest as recovery")}
+				return result, pack, nil
+			}
+		}
+	}
 	inventoryBytes, diagnostics, err := continuationFile(repo.Root(), inventoryPath, inventory.DefaultLimits().MaxCandidateBytes, false)
 	if err != nil {
 		return result, pack, err
@@ -209,7 +232,7 @@ func RecheckContinuation(ctx context.Context, repo *workspace.Repository, result
 	if err := verifyContinuation(ctx, repo, result, pack); err != nil {
 		return result, err
 	}
-	paths, err := unindexedRepositorySkills(repo.Root(), pack.Manifest)
+	paths, err := unindexedRepositorySkills(ctx, repo.Root(), pack.Manifest, inventory.DefaultLimits())
 	if err != nil {
 		return result, err
 	}
@@ -267,7 +290,7 @@ func verifyContinuation(ctx context.Context, repo *workspace.Repository, result 
 	return nil
 }
 
-func unindexedRepositorySkills(root string, manifest Manifest) ([]string, error) {
+func unindexedRepositorySkills(ctx context.Context, root string, manifest Manifest, limits inventory.Limits) ([]string, error) {
 	const directory = ".agents/skills"
 	for _, relative := range []string{".agents", directory} {
 		info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(relative)))
@@ -281,10 +304,11 @@ func unindexedRepositorySkills(root string, manifest Manifest) ([]string, error)
 			return []string{relative}, nil
 		}
 	}
-	entries, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(directory)))
+	store, err := os.Open(filepath.Join(root, filepath.FromSlash(directory)))
 	if err != nil {
 		return nil, fmt.Errorf("read repository skills: %w", err)
 	}
+	defer store.Close()
 	listed := make(map[string]bool)
 	for _, artifact := range manifest.Artifacts {
 		if artifact.Kind == "skill" {
@@ -292,37 +316,70 @@ func unindexedRepositorySkills(root string, manifest Manifest) ([]string, error)
 		}
 	}
 	paths := []string{}
-	for _, entry := range entries {
-		relative := directory + "/" + entry.Name()
-		if entry.Type()&os.ModeSymlink != 0 {
-			paths = append(paths, relative)
-			continue
+	var entriesSeen int
+	var pathBytes int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
-		if !entry.IsDir() {
-			paths = append(paths, relative)
-			continue
+		entries, readErr := store.ReadDir(256)
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			return nil, fmt.Errorf("read repository skills: %w", readErr)
 		}
-		if listed[relative+"/SKILL.md"] {
-			children, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(relative)))
-			if err != nil {
-				return nil, fmt.Errorf("inspect skill support paths %s: %w", relative, err)
+		entriesSeen += len(entries)
+		if entriesSeen > limits.MaxCandidateFiles {
+			return nil, fmt.Errorf("%w: shared skill review exceeds the entry limit; preserve workflows and review the namespace before retrying", workspace.ErrPrecondition)
+		}
+		for _, entry := range entries {
+			if err := ctx.Err(); err != nil {
+				return nil, err
 			}
-			for _, child := range children {
-				if child.Name() != "SKILL.md" {
-					paths = append(paths, relative)
-					break
+			relative := directory + "/" + entry.Name()
+			if entry.Type()&os.ModeSymlink == 0 && entry.IsDir() {
+				if listed[relative+"/SKILL.md"] {
+					support, err := repositorySkillHasSupport(filepath.Join(root, filepath.FromSlash(relative)))
+					if err != nil {
+						return nil, fmt.Errorf("inspect skill support paths %s: %w", relative, err)
+					}
+					if !support {
+						continue
+					}
+				} else if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(relative), "SKILL.md")); err == nil {
+					relative += "/SKILL.md"
+				} else if !errors.Is(err, os.ErrNotExist) {
+					return nil, fmt.Errorf("inspect repository skill %s: %w", relative, err)
 				}
 			}
-			continue
+			pathBytes += int64(len(fmt.Sprintf("%q", relative)))
+			if pathBytes > limits.MaxFileBytes {
+				return nil, fmt.Errorf("%w: shared skill review exceeds the path-name byte limit; preserve workflows and review the namespace before retrying", workspace.ErrPrecondition)
+			}
+			paths = append(paths, relative)
 		}
-		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(relative), "SKILL.md")); err == nil {
-			relative += "/SKILL.md"
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("inspect repository skill %s: %w", relative, err)
+		if errors.Is(readErr, io.EOF) {
+			break
 		}
-		paths = append(paths, relative)
 	}
+	sort.Strings(paths)
 	return paths, nil
+}
+
+func repositorySkillHasSupport(directory string) (bool, error) {
+	store, err := os.Open(directory)
+	if err != nil {
+		return false, err
+	}
+	defer store.Close()
+	entries, err := store.ReadDir(2)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, err
+	}
+	for _, entry := range entries {
+		if entry.Name() != "SKILL.md" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func verifyContinuationArtifactSet(root string, manifest Manifest) error {

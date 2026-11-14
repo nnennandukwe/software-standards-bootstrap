@@ -111,7 +111,10 @@ identifies the correction work; it isn't permission to render. `needs_proposal`
 exits `0` to report an operable continuation, while `proposal_reusable` remains
 false. Never silently repair a source, refresh all digests, remove an existing
 pack, run recipe commands, or treat completion as adoption. Embedded-layout
-packs retain their existing maintenance workflow.
+packs retain their existing maintenance workflow. A report declaring the
+embedded schema stops this mode and points to existing validation/rendering;
+don’t create a manifest as recovery. Shared-skill discovery also stops if its
+entry or path-name budgets are exceeded; preserve those workflows for review.
 
 ### Existing-pack consumption mode
 

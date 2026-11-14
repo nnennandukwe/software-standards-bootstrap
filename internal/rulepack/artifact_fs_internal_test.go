@@ -2,10 +2,15 @@ package rulepack
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/inventory"
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/workspace"
 )
 
 func TestRegularFileReadStaysBoundedWhileFileGrows(t *testing.T) {
@@ -46,5 +51,37 @@ func TestRegularFileReadStaysBoundedWhileFileGrows(t *testing.T) {
 			t.Fatalf("runtime reader exceeded its ceiling: read=%d limit=%d", len(data), limit)
 		}
 		runtime.Gosched()
+	}
+}
+
+func TestSharedSkillDiscoveryStopsAtItsBudgets(t *testing.T) {
+	for _, budget := range []string{"entries", "names"} {
+		t.Run(budget, func(t *testing.T) {
+			root := t.TempDir()
+			directory := filepath.Join(root, ".agents/skills")
+			if err := os.MkdirAll(directory, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"one", "two", "three"} {
+				if err := os.WriteFile(filepath.Join(directory, name), []byte("manual work"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			limits := inventory.DefaultLimits()
+			if budget == "entries" {
+				limits.MaxCandidateFiles = 2
+			} else {
+				limits.MaxFileBytes = 8
+			}
+			paths, err := unindexedRepositorySkills(context.Background(), root, Manifest{}, limits)
+			if !errors.Is(err, workspace.ErrPrecondition) || len(paths) != 0 {
+				t.Fatalf("shared skill budget wasn't enforced: paths=%q error=%v", paths, err)
+			}
+			for _, name := range []string{"one", "two", "three"} {
+				if content, err := os.ReadFile(filepath.Join(directory, name)); err != nil || string(content) != "manual work" {
+					t.Fatalf("discovery changed manual work: %q %v", content, err)
+				}
+			}
+		})
 	}
 }

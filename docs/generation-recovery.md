@@ -46,7 +46,10 @@ also require ownership and completion review; those files stay outside the
 validated proposal. Assessment lists directory names without reading support
 file bodies or following their links.
 Skill paths are reported whenever inventory is reusable, including before a
-manifest exists or while its syntax needs correction.
+manifest exists or while its syntax needs correction. Discovery reads bounded
+batches and stops above 40,000 top-level entries or 1 MiB of quoted path names.
+It checks cancellation between entries and reads at most two names inside an
+indexed skill directory to determine whether support files need review.
 
 A tracked manifest or report returns `existing_pack`. This protects committed
 packs, including adopted packs, from being mistaken for interrupted generation.

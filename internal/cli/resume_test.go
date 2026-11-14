@@ -1663,3 +1663,29 @@ func TestResumeRoutingCompletionUsesReadablePathsAndContents(t *testing.T) {
 		})
 	}
 }
+
+func TestResumeKeepsUncommittedEmbeddedPacksOnTheirExistingWorkflow(t *testing.T) {
+	for _, standalone := range []bool{false, true} {
+		t.Run(fmt.Sprintf("standalone-inventory=%t", standalone), func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			inventory, _ := runResumeCommand(t, []string{"inspect", "--repo", repo, "--format", "json"}, 0)
+			writeValidPack(t, repo, baseline)
+			if standalone {
+				writeFile(t, filepath.Join(repo, ".software-standards/inventory.json"), inventory)
+			}
+			runResumeCommand(t, []string{"validate", "--repo", repo}, 0)
+			before := resumeSnapshot(t, repo)
+			result := resumeResult(t, repo, 1)
+			guidance := strings.Join(result.Guidance, " ")
+			if result.State != "blocked" || result.InventoryReusable || result.ProposalReusable || !strings.Contains(guidance, "embedded-layout") || !strings.Contains(guidance, "ssb validate") || !strings.Contains(guidance, "ssb render") || strings.Contains(guidance, "Write manifest.yaml") {
+				t.Fatalf("embedded pack directed into manifest generation: %#v", result)
+			}
+			assertResumeSnapshot(t, repo, before)
+			runResumeCommand(t, []string{"validate", "--repo", repo}, 0)
+			runResumeCommand(t, []string{"render", "--repo", repo}, 0)
+			if _, err := os.Lstat(filepath.Join(repo, ".software-standards/manifest.yaml")); !os.IsNotExist(err) {
+				t.Fatalf("embedded maintenance created a manifest: %v", err)
+			}
+		})
+	}
+}
