@@ -1004,3 +1004,36 @@ func TestResumeReviewsPartialAndLinkedSkillPathsWithoutFollowingLinks(t *testing
 		})
 	}
 }
+
+func TestResumeRejectsRootRenameWithUntrackedReplacement(t *testing.T) {
+	for _, phase := range []string{"initial", "projection"} {
+		t.Run(phase, func(t *testing.T) {
+			repo, _ := evidenceRepository(t)
+			agents := filepath.Join(repo, "AGENTS.md")
+			writeFile(t, agents, "# Developer's baseline instructions\n")
+			git(t, repo, "add", "AGENTS.md")
+			git(t, repo, "commit", "-m", "baseline instructions")
+			baseline := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
+			writeValidManifestLayoutPack(t, repo, baseline)
+			runResumeCommand(t, []string{"render", "--repo", repo}, 0)
+			var afterMutation map[string]string
+			mutate := func() {
+				git(t, repo, "mv", "AGENTS.md", "renamed-instructions.md")
+				writeFile(t, agents, "# Developer's new untracked instructions\n")
+				afterMutation = resumeSnapshot(t, repo)
+			}
+			var ctx context.Context = t.Context()
+			if phase == "initial" {
+				mutate()
+			} else {
+				ctx = &resumeBoundaryContext{Context: t.Context(), boundary: "/internal/render.Apply", action: mutate}
+			}
+			var output, diagnostics bytes.Buffer
+			code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+			if code != 2 || output.Len() != 0 || !strings.Contains(diagnostics.String(), "tracked baseline file") {
+				t.Fatalf("untracked replacement hid root rename: exit=%d stdout=%q stderr=%q", code, output.String(), diagnostics.String())
+			}
+			assertResumeSnapshot(t, repo, afterMutation)
+		})
+	}
+}

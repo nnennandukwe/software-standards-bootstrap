@@ -317,6 +317,7 @@ func continuationBaseline(ctx context.Context, repo *workspace.Repository) error
 	if err != nil {
 		return err
 	}
+	rootTracked := false
 	for _, record := range bytes.Split(visibility, []byte{0}) {
 		if len(record) == 0 {
 			continue
@@ -324,12 +325,15 @@ func continuationBaseline(ctx context.Context, repo *workspace.Repository) error
 		if len(record) < 3 || record[1] != ' ' {
 			return errors.New("read index visibility: malformed Git file record")
 		}
+		relative := string(record[2:])
+		if relative == "AGENTS.md" {
+			rootTracked = record[0] == 'H' || record[0] == 'h' || record[0] == 'S' || record[0] == 's'
+		}
 		// Lowercase tags indicate assume-unchanged; S indicates skip-worktree.
 		if record[0] != 'S' && (record[0] < 'a' || record[0] > 'z') {
 			continue
 		}
-		relative := string(record[2:])
-		if editableRootInstructions(repo.Root(), relative) {
+		if editableRootInstructions(repo.Root(), relative, rootTracked) {
 			continue
 		}
 		_, exists, err := repo.EntryAtBaseline(ctx, relative)
@@ -345,7 +349,7 @@ func continuationBaseline(ctx context.Context, repo *workspace.Repository) error
 		return err
 	}
 	for _, relative := range bytes.Split(changed, []byte{0}) {
-		if len(relative) == 0 || editableRootInstructions(repo.Root(), string(relative)) {
+		if len(relative) == 0 || editableRootInstructions(repo.Root(), string(relative), rootTracked) {
 			continue
 		}
 		_, exists, err := repo.EntryAtBaseline(ctx, string(relative))
@@ -360,9 +364,9 @@ func continuationBaseline(ctx context.Context, repo *workspace.Repository) error
 }
 
 // Existing regular root instructions can retain developer edits around the
-// managed projection. Missing or nonregular tracked root files aren't exempt.
-func editableRootInstructions(root, relative string) bool {
-	if relative != "AGENTS.md" {
+// managed projection while their index entry stays tracked without conflicts.
+func editableRootInstructions(root, relative string, rootTracked bool) bool {
+	if relative != "AGENTS.md" || !rootTracked {
 		return false
 	}
 	info, err := os.Lstat(filepath.Join(root, "AGENTS.md"))

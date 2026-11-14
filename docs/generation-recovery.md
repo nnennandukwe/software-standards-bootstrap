@@ -98,7 +98,9 @@ clears these flags or restores files automatically. Resolve remaining visible
 source edits before reassessment. Manual text surrounding
 the managed `AGENTS.md` section in an existing regular root file is preserved by the existing renderer; edited
 managed content or routing files trigger drift diagnostics. A missing or nonregular
-tracked root file also blocks continuation.
+tracked root file also blocks continuation. The manual-edit exception requires
+a tracked index entry without merge conflicts at `AGENTS.md`; an untracked
+replacement can't hide a staged root-file rename.
 
 Preserve the entire interrupted pack and manual work. If the original baseline
 and complete inspection response are available, restore them deliberately and
