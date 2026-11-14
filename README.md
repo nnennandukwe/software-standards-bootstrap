@@ -316,6 +316,21 @@ and generate evidence-backed actionable artifacts and AGENTS.md guidance.
 
 The agent runs the inventory, analyzes repository evidence, writes the proposal, validates it, renders `AGENTS.md`, and reports every changed or untracked path.
 
+If generation stops after writing inventory or proposal files, ask the agent:
+
+```text
+Use the software-standards-bootstrap skill to continue interrupted generation.
+Preserve the retained proposal and my manual edits.
+```
+
+Start with `ssb resume --repo . --format text`. It reports reusable stages,
+retained raw-byte digests, required work, and diagnostics without writing files.
+A source-only validation correction needs affected source edits, deliberate
+manifest digest updates, validation, and rendering. The verified inventory and
+unaffected semantic work remain reusable. Follow the
+[generation recovery guide](docs/generation-recovery.md) for incomplete output,
+changed baselines, and validation failures.
+
 ### 3. Review and rerender
 
 Review the manifest, inventory, human report, every canonical artifact, the
@@ -347,6 +362,7 @@ The developer-created pull request and its merge are the adoption decision.
 
 ```text
 ssb inspect  [--repo PATH] [--format text|json] [resource limits]
+ssb resume   [--repo PATH] [--format text|json]
 ssb validate [--repo PATH] [--format text|json]
 ssb render   [--repo PATH] [--review ID] [--dry-run]
 ssb adr      [--repo PATH] [--review ID] [--adr-dir PATH] [--dry-run]
@@ -356,6 +372,8 @@ ssb --version
 ```
 
 - `inspect` creates a safe inventory of one committed repository snapshot.
+- `resume` assesses interrupted manifest-layout generation without writing files;
+  it reports which stages can be reused and which work must repeat.
 - `validate` checks the detected pack layout, all four artifact schemas,
   optional orientation, inventory, evidence, digests, confidence, utility,
   scopes, verification-v1/v2 compatibility, and relationships.
@@ -399,7 +417,7 @@ values. Verification steps always expose normalized `working_directory`,
 including `.` for `verification/v1`. Invalid output omits `pack`.
 
 - `0`: success
-- `1`: actionable-pack or prune-proposal validation failure
+- `1`: pack/proposal validation failure or blocked generation continuation
 - `2`: usage or repository precondition failure
 - `3`: unexpected internal failure
 - `4`: inventory coverage incomplete

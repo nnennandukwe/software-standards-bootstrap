@@ -379,3 +379,21 @@ func normalizedText(t *testing.T, path string) string {
 	t.Helper()
 	return strings.Join(strings.Fields(readText(t, path)), " ")
 }
+
+func TestAgentSkillAndRecoveryGuideDefineContinuationGates(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, relative := range []string{"skills/software-standards-bootstrap/SKILL.md", "docs/generation-recovery.md"} {
+		content := normalizedText(t, filepath.Join(root, filepath.FromSlash(relative)))
+		for _, required := range []string{"ssb resume --repo .", "needs_proposal", "needs_correction", "ready_to_render", "complete", "blocked", "existing_pack", "manual edit", "semantic", "digest", "adoption"} {
+			if !strings.Contains(content, required) {
+				t.Errorf("%s missing continuation gate %q", relative, required)
+			}
+		}
+	}
+	skill := normalizedText(t, filepath.Join(root, "skills/software-standards-bootstrap/SKILL.md"))
+	for _, required := range []string{"continuation mode first", "inventory-only run", "Write `manifest.yaml` last", "Stop on nonzero exit status", "Don't repeat repository inspection or semantic generation for a source-only validation correction", "Never silently repair a source"} {
+		if !strings.Contains(skill, required) {
+			t.Errorf("Agent Skill missing continuation safety contract %q", required)
+		}
+	}
+}

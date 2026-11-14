@@ -14,7 +14,7 @@ import (
 // Validate parses the current editable pack and verifies all evidence against
 // the repository's pinned HEAD commit. Validation never writes files.
 func Validate(ctx context.Context, repo *workspace.Repository) (Pack, []Diagnostic, error) {
-	return validateActionablePack(ctx, repo, false)
+	return validateActionablePack(ctx, repo, false, nil)
 }
 
 // ValidateRetainedPack parses an adopted pack and verifies artifact evidence
@@ -22,13 +22,14 @@ func Validate(ctx context.Context, repo *workspace.Repository) (Pack, []Diagnost
 // review-aware post-application rendering and ADR creation; ordinary editable
 // pack validation remains pinned to the repository's current HEAD.
 func ValidateRetainedPack(ctx context.Context, repo *workspace.Repository) (Pack, []Diagnostic, error) {
-	return validateActionablePack(ctx, repo, true)
+	return validateActionablePack(ctx, repo, true, nil)
 }
 
 func validateActionablePack(
 	ctx context.Context,
 	repo *workspace.Repository,
 	retained bool,
+	snapshot *continuationSnapshot,
 ) (pack Pack, diagnostics []Diagnostic, returnErr error) {
 	if err := ctx.Err(); err != nil {
 		return Pack{}, nil, err
@@ -42,8 +43,11 @@ func validateActionablePack(
 	_, err := os.Lstat(manifestPath)
 	switch {
 	case err == nil:
-		return validateManifestLayoutPack(ctx, repo, retained)
+		return validateManifestLayoutPack(ctx, repo, retained, snapshot)
 	case errors.Is(err, os.ErrNotExist):
+		if snapshot != nil {
+			return Pack{}, nil, fmt.Errorf("%w: manifest changed during continuation validation; preserve edits and rerun ssb resume", workspace.ErrPrecondition)
+		}
 		return validateEmbeddedLayoutPack(ctx, repo, retained)
 	default:
 		return Pack{}, nil, fmt.Errorf("inspect .software-standards/manifest.yaml: %w", err)

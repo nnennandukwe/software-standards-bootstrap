@@ -4,6 +4,7 @@ const helpText = `Software Standards Bootstrap
 
 Usage:
   ssb inspect  [--repo PATH] [--format text|json] [resource limits]
+  ssb resume   [--repo PATH] [--format text|json]
   ssb validate [--repo PATH] [--format text|json]
   ssb render   [--repo PATH] [--review ID] [--dry-run]
   ssb adr      [--repo PATH] [--review ID] [--adr-dir PATH] [--dry-run]
@@ -13,7 +14,7 @@ Usage:
 
 Exit codes:
   0  success
-  1  actionable-pack or prune-proposal validation failure
+  1  pack/proposal validation failure or blocked generation continuation
   2  usage or repository precondition failure
   3  unexpected internal failure
   4  inventory coverage incomplete
@@ -23,6 +24,15 @@ Independent failures keep their exit code and recovery diagnostics.
 `
 
 const (
+	resumeHelp = `Usage: ssb resume [--repo PATH] [--format text|json]
+
+Assess interrupted manifest-layout generation without writing files.
+Report reusable inventory and proposal stages, retained raw-byte digests,
+required work, and recovery diagnostics. A successful assessment isn't adoption.
+
+  --repo PATH              target Git repository (default ".")
+  --format text|json       continuation output format (default "text")
+`
 	inspectHelp = `Usage: ssb inspect [--repo PATH] [--format text|json] [--max-candidate-files N] [--max-candidate-bytes N] [--allow-partial]
 
   --repo PATH                 target Git repository (default ".")

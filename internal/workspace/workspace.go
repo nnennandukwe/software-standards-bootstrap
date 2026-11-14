@@ -169,7 +169,7 @@ func rejectExistingPack(root string) error {
 	if _, err := os.Lstat(packPath); err == nil {
 		return &PreconditionError{
 			Problem:  "an existing .software-standards pack would be overwritten",
-			Recovery: "edit or remove the existing pack before starting a new inspection",
+			Recovery: "run ssb resume for interrupted generation; edit or remove the existing pack deliberately before starting a new inspection",
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("inspect existing pack: %w", err)
@@ -486,6 +486,7 @@ func (r *Repository) ReadBaselineFile(ctx context.Context, filePath string) ([]b
 }
 
 // EntryAtBaseline resolves one literal repository-relative path.
+// runGitInput enforces GIT_LITERAL_PATHSPECS=1 for every Git invocation.
 func (r *Repository) EntryAtBaseline(ctx context.Context, filePath string) (BaselineEntry, bool, error) {
 	if filePath == "" || path.IsAbs(filePath) || path.Clean(filePath) != filePath ||
 		filePath == "." || filePath == ".." || strings.HasPrefix(filePath, "../") {

@@ -237,7 +237,7 @@ func validateEmbeddedLayoutPack(
 
 	diagnostics = append(diagnostics, validateRelationships(reportPath, pack.Report.Artifacts, entriesByID)...)
 
-	unlisted, scanDiagnostics, scanErr := unlistedNativeArtifacts(repo.Root(), entriesByPath)
+	unlisted, scanDiagnostics, scanErr := unlistedNativeArtifacts(ctx, repo.Root(), entriesByPath)
 	if scanErr != nil {
 		return Pack{}, nil, scanErr
 	}

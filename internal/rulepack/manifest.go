@@ -18,6 +18,7 @@ func validateManifestLayoutPack(
 	ctx context.Context,
 	repo *workspace.Repository,
 	retained bool,
+	snapshot *continuationSnapshot,
 ) (Pack, []Diagnostic, error) {
 	const (
 		manifestPath  = ".software-standards/manifest.yaml"
@@ -70,6 +71,9 @@ func validateManifestLayoutPack(
 	diagnostics = append(diagnostics, manifestDiagnostics...)
 	if len(manifestBytes) == 0 {
 		return pack, diagnostics, nil
+	}
+	if snapshot != nil && snapshot.manifestSHA256 != digest(manifestBytes) {
+		return Pack{}, nil, fmt.Errorf("%w: manifest changed during continuation validation; preserve edits and rerun ssb resume", workspace.ErrPrecondition)
 	}
 	if err := yaml.Load(
 		manifestBytes,
@@ -190,16 +194,20 @@ func validateManifestLayoutPack(
 			pack.Manifest.BaselineCommit,
 			pack.Inventory,
 		)...)
-		inventoryDiagnostics, inventoryErr := validateReportInventory(
-			ctx,
-			evidenceRepo,
-			pack.Inventory,
-			inventoryPath,
-		)
-		if inventoryErr != nil {
-			return Pack{}, nil, inventoryErr
+		if snapshot == nil ||
+			snapshot.baselineCommit != evidenceRepo.Baseline() ||
+			snapshot.inventorySHA256 != digest(inventoryBytes) {
+			inventoryDiagnostics, inventoryErr := validateReportInventory(
+				ctx,
+				evidenceRepo,
+				pack.Inventory,
+				inventoryPath,
+			)
+			if inventoryErr != nil {
+				return Pack{}, nil, inventoryErr
+			}
+			diagnostics = append(diagnostics, inventoryDiagnostics...)
 		}
-		diagnostics = append(diagnostics, inventoryDiagnostics...)
 	}
 	if pack.Manifest.Orientation.Path == orientationPath {
 		orientation, orientationDiagnostics, orientationErr := loadOrientation(
@@ -308,7 +316,7 @@ func validateManifestLayoutPack(
 		diagnostics = append(diagnostics, validateOrientationRelationships(orientationPath, pack.Orientation, entriesByID)...)
 	}
 	diagnostics = append(diagnostics, validateRootCore(manifestPath, pack.Manifest.RootCore, entriesByID)...)
-	unlisted, scanDiagnostics, scanErr := unlistedNativeArtifacts(repo.Root(), entriesByPath)
+	unlisted, scanDiagnostics, scanErr := unlistedNativeArtifacts(ctx, repo.Root(), entriesByPath)
 	if scanErr != nil {
 		return Pack{}, nil, scanErr
 	}
