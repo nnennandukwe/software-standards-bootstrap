@@ -206,6 +206,9 @@ func RecheckContinuation(ctx context.Context, repo *workspace.Repository, result
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
+	if err := verifyContinuation(ctx, repo, result, pack); err != nil {
+		return result, err
+	}
 	paths, err := unindexedRepositorySkills(repo.Root(), pack.Manifest)
 	if err != nil {
 		return result, err
@@ -216,7 +219,7 @@ func RecheckContinuation(ctx context.Context, repo *workspace.Repository, result
 		}
 		result.Guidance = append(result.Guidance, "Unindexed repository skill paths need explicit review of ownership and completion before reuse: "+strings.Join(paths, ", ")+".")
 	}
-	return result, verifyContinuation(ctx, repo, result, pack)
+	return result, ctx.Err()
 }
 
 func verifyContinuation(ctx context.Context, repo *workspace.Repository, result Continuation, pack Pack) error {

@@ -3,6 +3,7 @@ package rulepack
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -102,9 +103,34 @@ func readRegularFileLimited(absolute, relative string, maxBytes int64) ([]byte, 
 			"reduce the artifact to the documented size ceiling and rerun ssb validate",
 		)}, nil
 	}
-	data, err := os.ReadFile(absolute)
+	file, err := os.Open(absolute)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read %s: %w", relative, err)
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil {
+		return nil, nil, fmt.Errorf("inspect opened %s: %w", relative, err)
+	}
+	if !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+		return nil, []Diagnostic{diagnostic(relative, "file", "retained file changed before reading", "preserve edits and retry after the file is stable")}, nil
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err != nil {
+		return nil, nil, fmt.Errorf("read %s: %w", relative, err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, []Diagnostic{diagnostic(
+			relative, "file", fmt.Sprintf("%s is larger than %d bytes", relative, maxBytes),
+			"reduce the artifact to the documented size ceiling and rerun ssb validate",
+		)}, nil
+	}
+	current, err := os.Lstat(absolute)
+	if err != nil || !current.Mode().IsRegular() || !os.SameFile(opened, current) {
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, nil, fmt.Errorf("recheck %s: %w", relative, err)
+		}
+		return nil, []Diagnostic{diagnostic(relative, "file", "retained file changed while reading", "preserve edits and retry after the file is stable")}, nil
 	}
 	return data, nil, nil
 }

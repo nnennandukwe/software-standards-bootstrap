@@ -434,6 +434,7 @@ type resumeBoundaryContext struct {
 	context.Context
 	action    func()
 	boundary  string
+	within    string
 	once      sync.Once
 	triggered atomic.Bool
 }
@@ -446,15 +447,19 @@ func (ctx *resumeBoundaryContext) Err() error {
 	programCounters := make([]uintptr, 12)
 	count := runtime.Callers(2, programCounters)
 	frames := runtime.CallersFrames(programCounters[:count])
+	matched, within := false, ctx.within == ""
 	for {
 		frame, more := frames.Next()
 		if strings.Contains(frame.Function, boundary) {
-			ctx.once.Do(func() { ctx.triggered.Store(true); ctx.action() })
-			break
+			matched = true
 		}
+		within = within || strings.Contains(frame.Function, ctx.within)
 		if !more {
 			break
 		}
+	}
+	if matched && within {
+		ctx.once.Do(func() { ctx.triggered.Store(true); ctx.action() })
 	}
 	return ctx.Context.Err()
 }
@@ -1469,9 +1474,20 @@ func TestResumeNamesSupportingFilesBesideIndexedSkills(t *testing.T) {
 		t.Fatalf("indexed entrypoint alone needs no extra ownership review: %#v", result)
 	}
 	support := ".agents/skills/review-change/references/manual.md"
-	writeFile(t, filepath.Join(repo, filepath.FromSlash(support)), "Developer's supporting notes.\n")
-	before := resumeSnapshot(t, repo)
-	result := resumeResult(t, repo, 0)
+	var before map[string]string
+	ctx := &resumeBoundaryContext{Context: t.Context(), boundary: "/internal/rulepack.verifyContinuation", within: "/internal/rulepack.RecheckContinuation", action: func() {
+		writeFile(t, filepath.Join(repo, filepath.FromSlash(support)), "Developer's supporting notes.\n")
+		before = resumeSnapshot(t, repo)
+	}}
+	var output, diagnostics bytes.Buffer
+	code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+	var result rulepack.Continuation
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !ctx.triggered.Load() || code != 0 || diagnostics.Len() != 0 {
+		t.Fatalf("skill support recheck failed: exit=%d stderr=%q", code, diagnostics.String())
+	}
 	if !result.ProposalReusable || !strings.Contains(strings.Join(result.Guidance, " "), ".agents/skills/review-change") {
 		t.Fatalf("supporting files omitted from ownership review: %#v", result)
 	}
