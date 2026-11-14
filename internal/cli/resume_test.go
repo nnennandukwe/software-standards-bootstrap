@@ -1047,6 +1047,7 @@ func TestResumeRejectsRootTypeChangesAcrossBaselineIndexAndWorktree(t *testing.T
 	for _, target := range []string{"baseline symlink", "baseline gitlink", "index symlink"} {
 		t.Run(target, func(t *testing.T) {
 			repo, baseline := evidenceRepository(t)
+			git(t, repo, "config", "core.autocrlf", "true")
 			agents := filepath.Join(repo, "AGENTS.md")
 			switch target {
 			case "baseline symlink":

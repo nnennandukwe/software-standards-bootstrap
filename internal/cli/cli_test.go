@@ -1736,9 +1736,11 @@ func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	command := append([]string{"-c", "user.name=SSB Test", "-c", "user.email=ssb@example.invalid", "-C", dir}, args...)
 	cmd := exec.Command("git", command...)
-	out, err := cmd.CombinedOutput()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, out)
+		t.Fatalf("git %s failed: %v\n%s%s", strings.Join(args, " "), err, out, stderr.String())
 	}
 	return string(out)
 }
