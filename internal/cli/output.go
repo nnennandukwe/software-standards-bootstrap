@@ -57,7 +57,12 @@ func writeProjectionWarnings(stderr io.Writer, warnings []render.SizeWarning) {
 }
 
 func writeValidationDiagnostics(stderr io.Writer, diagnostics []rulepack.Diagnostic) {
-	fmt.Fprintf(stderr, "Actionable pack invalid: %d problem(s)\n", len(diagnostics))
+	writeDiagnostics(stderr, diagnostics, "Actionable pack invalid",
+		"Next: edit the reported source files and rerun ssb validate --repo PATH.")
+}
+
+func writeDiagnostics(stderr io.Writer, diagnostics []rulepack.Diagnostic, heading, nextAction string) {
+	fmt.Fprintf(stderr, "%s: %d problem(s)\n", heading, len(diagnostics))
 	for _, item := range diagnostics {
 		location := item.Path
 		if item.Line > 0 {
@@ -76,7 +81,7 @@ func writeValidationDiagnostics(stderr io.Writer, diagnostics []rulepack.Diagnos
 			fmt.Fprintf(stderr, "  fix: %s\n", item.Recovery)
 		}
 	}
-	fmt.Fprintln(stderr, "Next: edit the reported source files and rerun ssb validate --repo PATH.")
+	fmt.Fprintln(stderr, nextAction)
 }
 
 func writeTextInventory(out io.Writer, report inventory.Report) {

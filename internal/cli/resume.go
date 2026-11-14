@@ -73,7 +73,8 @@ func runResume(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			fmt.Fprintln(stdout, guidance)
 		}
 		if len(result.Diagnostics) != 0 {
-			writeValidationDiagnostics(stderr, result.Diagnostics)
+			writeDiagnostics(stderr, result.Diagnostics, "Generation continuation blocked",
+				"Next: preserve retained work, follow the reported recovery steps, and rerun ssb resume --repo PATH.")
 		}
 	}
 	if len(result.Diagnostics) != 0 || result.State == "blocked" || result.State == "needs_correction" || result.State == "existing_pack" {

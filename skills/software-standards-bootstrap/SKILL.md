@@ -64,7 +64,9 @@ pack.
 1. For `blocked`, stop. Preserve every retained file and manual edit. Incomplete
    or inconsistent inventory and changed baselines require deliberate recovery
    before inspection or semantic work can be reused. Never relabel old
-   evidence with a new commit. For `existing_pack`, stop generation and use
+   evidence with a new commit. The developer must resolve tracked renames and
+   hidden index flags before continuation; never clear flags or restore files
+   automatically. For `existing_pack`, stop generation and use
    consumption or explicitly requested maintenance; tracked files don't prove
    adoption.
 2. For `needs_proposal`, reuse only the verified inventory as completed work.

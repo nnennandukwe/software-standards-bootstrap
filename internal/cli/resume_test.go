@@ -346,6 +346,7 @@ func resumeSnapshot(t *testing.T, repo string) map[string]string {
 		t.Fatal(err)
 	}
 	snapshot["git-status"] = git(t, repo, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	snapshot["git-index-flags"] = git(t, repo, "ls-files", "-v", "-z")
 	return snapshot
 }
 
@@ -375,7 +376,7 @@ func TestResumeInterruptedAssessmentCanBeRetried(t *testing.T) {
 }
 
 func TestResumeDetectsConcurrentChangesAndPreservesThem(t *testing.T) {
-	for _, target := range []string{"inventory", "manifest", "report", "rule", "new manifest", "HEAD"} {
+	for _, target := range []string{"inventory", "manifest", "report", "rule", "new manifest", "HEAD", "index flags", "staged rename"} {
 		t.Run(target, func(t *testing.T) {
 			repo, baseline := evidenceRepository(t)
 			writeValidManifestLayoutPack(t, repo, baseline)
@@ -386,6 +387,12 @@ func TestResumeDetectsConcurrentChangesAndPreservesThem(t *testing.T) {
 			var afterMutation map[string]string
 			ctx := &resumeBoundaryContext{Context: t.Context(), action: func() {
 				switch target {
+				case "index flags":
+					git(t, repo, "update-index", "--assume-unchanged", "main.go")
+					writeFile(t, filepath.Join(repo, "main.go"), "package main\n\n// Concurrent hidden edit.\nfunc main() {}\n")
+				case "staged rename":
+					git(t, repo, "config", "diff.renames", "true")
+					git(t, repo, "mv", "main.go", "renamed-main.go")
 				case "HEAD":
 					writeFile(t, filepath.Join(repo, "new.md"), "concurrent change\n")
 					git(t, repo, "add", "new.md")
@@ -400,7 +407,14 @@ func TestResumeDetectsConcurrentChangesAndPreservesThem(t *testing.T) {
 			}}
 			var output, diagnostics bytes.Buffer
 			code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
-			if !ctx.triggered.Load() || code != 2 || output.Len() != 0 || !strings.Contains(diagnostics.String(), "changed during continuation assessment") {
+			expectedReason := "changed during continuation assessment"
+			if target == "index flags" {
+				expectedReason = "index visibility flags"
+			}
+			if target == "staged rename" {
+				expectedReason = "tracked baseline file"
+			}
+			if !ctx.triggered.Load() || code != 2 || output.Len() != 0 || !strings.Contains(diagnostics.String(), expectedReason) {
 				t.Fatalf("concurrent resume: triggered=%t exit=%d stdout=%q stderr=%q", ctx.triggered.Load(), code, output.String(), diagnostics.String())
 			}
 			assertResumeSnapshot(t, repo, afterMutation)
@@ -639,4 +653,71 @@ func TestResumeInventoryProofCannotOutliveRawBytes(t *testing.T) {
 		t.Fatalf("changed raw inventory reused: triggered=%t code=%d stdout=%q stderr=%q", ctx.triggered.Load(), code, output.String(), diagnostics.String())
 	}
 	assertResumeSnapshot(t, repo, afterMutation)
+}
+
+func TestResumeRejectsStagedBaselineRenames(t *testing.T) {
+	for _, relative := range []string{"main.go", "AGENTS.md"} {
+		t.Run(relative, func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			if relative == "AGENTS.md" {
+				writeFile(t, filepath.Join(repo, relative), "# Manual baseline instructions\n")
+				git(t, repo, "add", relative)
+				git(t, repo, "commit", "-m", "manual root baseline")
+				baseline = strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
+			}
+			writeValidManifestLayoutPack(t, repo, baseline)
+			git(t, repo, "config", "diff.renames", "true")
+			git(t, repo, "mv", relative, "renamed-file")
+			before := resumeSnapshot(t, repo)
+			output, diagnostics := runResumeCommand(t, []string{"resume", "--repo", repo, "--format", "json"}, 2)
+			if output != "" || !strings.Contains(diagnostics, "tracked baseline file") {
+				t.Fatalf("rename recovery: stdout=%q stderr=%q", output, diagnostics)
+			}
+			assertResumeSnapshot(t, repo, before)
+		})
+	}
+}
+
+func TestResumeRejectsHiddenBaselineIndexFlags(t *testing.T) {
+	for _, flag := range []string{"assume-unchanged", "skip-worktree"} {
+		t.Run(flag, func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			writeValidManifestLayoutPack(t, repo, baseline)
+			path := filepath.Join(repo, "main.go")
+			original := readText(t, path)
+			git(t, repo, "update-index", "--"+flag, "main.go")
+			writeFile(t, path, original+"\n// Hidden manual edit.\n")
+			before := resumeSnapshot(t, repo)
+			output, diagnostics := runResumeCommand(t, []string{"resume", "--repo", repo, "--format", "json"}, 2)
+			if output != "" || !strings.Contains(diagnostics, "index visibility flags") || !strings.Contains(diagnostics, "preserve edits") {
+				t.Fatalf("hidden index recovery: stdout=%q stderr=%q", output, diagnostics)
+			}
+			assertResumeSnapshot(t, repo, before)
+			git(t, repo, "update-index", "--no-"+flag, "main.go")
+			runResumeCommand(t, []string{"resume", "--repo", repo}, 2)
+			writeFile(t, path, original)
+			if retry := resumeResult(t, repo, 0); retry.State != "ready_to_render" {
+				t.Fatalf("visible baseline retry: %#v", retry)
+			}
+		})
+	}
+}
+
+func TestResumeProjectionTextGivesResumeRecovery(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+	runResumeCommand(t, []string{"render", "--repo", repo}, 0)
+	rendered := readText(t, filepath.Join(repo, "AGENTS.md"))
+	replaceResumeText(t, filepath.Join(repo, "AGENTS.md"), "Software Standards Bootstrap", "Manual projection edit")
+	before := resumeSnapshot(t, repo)
+	runResumeCommand(t, []string{"validate", "--repo", repo}, 0)
+	_, diagnostics := runResumeCommand(t, []string{"resume", "--repo", repo}, 1)
+	if strings.Contains(diagnostics, "edit the reported source files") || !strings.HasSuffix(diagnostics, "rerun ssb resume --repo PATH.\n") {
+		t.Fatalf("projection rejection gave source-only recovery: %q", diagnostics)
+	}
+	assertResumeSnapshot(t, repo, before)
+	writeFile(t, filepath.Join(repo, "AGENTS.md"), rendered)
+	if retry := resumeResult(t, repo, 0); retry.State != "complete" {
+		t.Fatalf("projection recovery: %#v", retry)
+	}
 }

@@ -82,9 +82,18 @@ assessment reconstructs inventory once, then rechecks retained byte identities.
 Separate validation and rendering commands check their inputs again. A changed
 HEAD blocks reuse
 of old inventory; a manifest with another baseline blocks proposal reuse.
-Tracked baseline-source edits also block continuation. Manual text surrounding
-the managed `AGENTS.md` section is preserved by the existing renderer; edited
-managed content or routing files trigger drift diagnostics.
+Tracked baseline-source edits and renames also block continuation. Git's
+`assume-unchanged` and `skip-worktree` index flags can hide edits, so a flagged
+baseline source blocks assessment even when ordinary status looks clean.
+Preserve its bytes and review the flags with `git ls-files -v --`. After
+reviewing the file, the developer can restore visibility with
+`git update-index --no-assume-unchanged -- <path>` or
+`git update-index --no-skip-worktree -- <path>`, as applicable. Assessment never
+clears these flags or restores files automatically. Resolve remaining visible
+source edits before reassessment. Manual text surrounding
+the managed `AGENTS.md` section in an existing regular root file is preserved by the existing renderer; edited
+managed content or routing files trigger drift diagnostics. A missing or nonregular
+tracked root file also blocks continuation.
 
 Preserve the entire interrupted pack and manual work. If the original baseline
 and complete inspection response are available, restore them deliberately and

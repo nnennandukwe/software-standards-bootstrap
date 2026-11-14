@@ -214,12 +214,39 @@ func continuationBaseline(ctx context.Context, repo *workspace.Repository) error
 	if current.Baseline() != repo.Baseline() {
 		return fmt.Errorf("%w: HEAD changed during continuation assessment; preserve the pack and rerun ssb resume", workspace.ErrPrecondition)
 	}
-	changed, err := repo.Git(ctx, "diff", "--no-ext-diff", "--no-textconv", "--ignore-submodules=untracked", "--name-only", "-z", "HEAD", "--")
+	visibility, err := repo.Git(ctx, "ls-files", "-v", "-z", "--")
+	if err != nil {
+		return err
+	}
+	for _, record := range bytes.Split(visibility, []byte{0}) {
+		if len(record) == 0 {
+			continue
+		}
+		if len(record) < 3 || record[1] != ' ' {
+			return errors.New("read index visibility: malformed Git file record")
+		}
+		// Lowercase tags indicate assume-unchanged; S indicates skip-worktree.
+		if record[0] != 'S' && (record[0] < 'a' || record[0] > 'z') {
+			continue
+		}
+		relative := string(record[2:])
+		if editableRootInstructions(repo.Root(), relative) {
+			continue
+		}
+		_, exists, err := repo.EntryAtBaseline(ctx, relative)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return fmt.Errorf("%w: index visibility flags hide tracked baseline file %q; preserve edits and review assume-unchanged or skip-worktree flags before ssb resume", workspace.ErrPrecondition, relative)
+		}
+	}
+	changed, err := repo.Git(ctx, "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--ignore-submodules=untracked", "--name-only", "-z", "HEAD", "--")
 	if err != nil {
 		return err
 	}
 	for _, relative := range bytes.Split(changed, []byte{0}) {
-		if len(relative) == 0 || string(relative) == "AGENTS.md" {
+		if len(relative) == 0 || editableRootInstructions(repo.Root(), string(relative)) {
 			continue
 		}
 		_, exists, err := repo.EntryAtBaseline(ctx, string(relative))
@@ -231,4 +258,14 @@ func continuationBaseline(ctx context.Context, repo *workspace.Repository) error
 		}
 	}
 	return nil
+}
+
+// Existing regular root instructions can retain developer edits around the
+// managed projection. Missing or nonregular tracked root files aren't exempt.
+func editableRootInstructions(root, relative string) bool {
+	if relative != "AGENTS.md" {
+		return false
+	}
+	info, err := os.Lstat(filepath.Join(root, "AGENTS.md"))
+	return err == nil && info.Mode().IsRegular()
 }
