@@ -236,12 +236,16 @@ func RecheckContinuation(ctx context.Context, repo *workspace.Repository, result
 	if err != nil {
 		return result, err
 	}
+	if err := verifyContinuation(ctx, repo, result, pack); err != nil {
+		return result, err
+	}
 	if len(paths) != 0 {
 		for index := range paths {
 			paths[index] = fmt.Sprintf("%q", paths[index])
 		}
 		result.Guidance = append(result.Guidance, "Unindexed repository skill paths need explicit review of ownership and completion before reuse: "+strings.Join(paths, ", ")+".")
 	}
+	result.Guidance = append(result.Guidance, "Review any shared .agents/skills work and later changes before reuse. Named paths are point-in-time observations; unindexed support files aren't validated.")
 	return result, ctx.Err()
 }
 
@@ -291,9 +295,15 @@ func verifyContinuation(ctx context.Context, repo *workspace.Repository, result 
 }
 
 func unindexedRepositorySkills(ctx context.Context, root string, manifest Manifest, limits inventory.Limits) ([]string, error) {
+	anchor, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	defer anchor.Close()
 	const directory = ".agents/skills"
+	var expected os.FileInfo
 	for _, relative := range []string{".agents", directory} {
-		info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(relative)))
+		info, err := anchor.Lstat(filepath.FromSlash(relative))
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
@@ -303,12 +313,23 @@ func unindexedRepositorySkills(ctx context.Context, root string, manifest Manife
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return []string{relative}, nil
 		}
+		expected = info
 	}
-	store, err := os.Open(filepath.Join(root, filepath.FromSlash(directory)))
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	store, err := anchor.Open(filepath.FromSlash(directory))
 	if err != nil {
 		return nil, fmt.Errorf("read repository skills: %w", err)
 	}
 	defer store.Close()
+	opened, err := store.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("inspect opened skill directory: %w", err)
+	}
+	if !opened.IsDir() || !os.SameFile(expected, opened) {
+		return nil, fmt.Errorf("%w: shared skill directory changed during discovery; preserve workflows and rerun ssb resume", workspace.ErrPrecondition)
+	}
 	listed := make(map[string]bool)
 	for _, artifact := range manifest.Artifacts {
 		if artifact.Kind == "skill" {
@@ -337,14 +358,14 @@ func unindexedRepositorySkills(ctx context.Context, root string, manifest Manife
 			relative := directory + "/" + entry.Name()
 			if entry.Type()&os.ModeSymlink == 0 && entry.IsDir() {
 				if listed[relative+"/SKILL.md"] {
-					support, err := repositorySkillHasSupport(filepath.Join(root, filepath.FromSlash(relative)))
+					support, err := repositorySkillHasSupport(ctx, anchor, relative)
 					if err != nil {
 						return nil, fmt.Errorf("inspect skill support paths %s: %w", relative, err)
 					}
 					if !support {
 						continue
 					}
-				} else if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(relative), "SKILL.md")); err == nil {
+				} else if _, err := anchor.Lstat(filepath.FromSlash(relative + "/SKILL.md")); err == nil {
 					relative += "/SKILL.md"
 				} else if !errors.Is(err, os.ErrNotExist) {
 					return nil, fmt.Errorf("inspect repository skill %s: %w", relative, err)
@@ -364,12 +385,29 @@ func unindexedRepositorySkills(ctx context.Context, root string, manifest Manife
 	return paths, nil
 }
 
-func repositorySkillHasSupport(directory string) (bool, error) {
-	store, err := os.Open(directory)
+func repositorySkillHasSupport(ctx context.Context, anchor *os.Root, directory string) (bool, error) {
+	expected, err := anchor.Lstat(filepath.FromSlash(directory))
+	if err != nil {
+		return false, err
+	}
+	if !expected.IsDir() || expected.Mode()&os.ModeSymlink != 0 {
+		return false, fmt.Errorf("%w: indexed skill directory changed during discovery", workspace.ErrPrecondition)
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	store, err := anchor.Open(filepath.FromSlash(directory))
 	if err != nil {
 		return false, err
 	}
 	defer store.Close()
+	opened, err := store.Stat()
+	if err != nil {
+		return false, err
+	}
+	if !opened.IsDir() || !os.SameFile(expected, opened) {
+		return false, fmt.Errorf("%w: indexed skill directory changed during discovery", workspace.ErrPrecondition)
+	}
 	entries, err := store.ReadDir(2)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return false, err

@@ -1689,3 +1689,50 @@ func TestResumeKeepsUncommittedEmbeddedPacksOnTheirExistingWorkflow(t *testing.T
 		})
 	}
 }
+
+func TestResumeDoesntExposeNamesThroughSwappedSkillDirectories(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+	path := filepath.Join(repo, ".agents/skills")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(outside, "outside-only.txt"), "Outside fixture.\n")
+	var afterMutation map[string]string
+	ctx := &resumeBoundaryContext{Context: t.Context(), boundary: "/internal/rulepack.unindexedRepositorySkills", action: func() {
+		if err := os.Rename(path, path+"-held"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, path); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		afterMutation = resumeSnapshot(t, repo)
+	}}
+	var output, diagnostics bytes.Buffer
+	code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+	if !ctx.triggered.Load() || code == 0 || output.Len() != 0 || strings.Contains(output.String()+diagnostics.String(), "outside-only.txt") {
+		t.Fatalf("skill discovery exposed outside names: exit=%d stdout=%q stderr=%q", code, output.String(), diagnostics.String())
+	}
+	assertResumeSnapshot(t, repo, afterMutation)
+}
+
+func TestResumeRechecksCanonicalInputsAfterSkillDiscovery(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+	if err := os.MkdirAll(filepath.Join(repo, ".agents/skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(repo, ".software-standards/rules/verify-before-merge.md")
+	var afterMutation map[string]string
+	ctx := &resumeBoundaryContext{Context: t.Context(), boundary: "/internal/rulepack.unindexedRepositorySkills", action: func() {
+		writeFile(t, path, readText(t, path)+"\nDeveloper's concurrent source edit.\n")
+		afterMutation = resumeSnapshot(t, repo)
+	}}
+	var output, diagnostics bytes.Buffer
+	code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+	if !ctx.triggered.Load() || code != 2 || output.Len() != 0 || !strings.Contains(diagnostics.String(), "retained files changed") {
+		t.Fatalf("skill discovery hid changed canonical input: exit=%d stdout=%q stderr=%q", code, output.String(), diagnostics.String())
+	}
+	assertResumeSnapshot(t, repo, afterMutation)
+}

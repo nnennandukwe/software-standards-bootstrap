@@ -85,3 +85,49 @@ func TestSharedSkillDiscoveryStopsAtItsBudgets(t *testing.T) {
 		})
 	}
 }
+
+type skillOpenContext struct {
+	context.Context
+	action func()
+}
+
+func (ctx *skillOpenContext) Err() error {
+	if ctx.action != nil {
+		action := ctx.action
+		ctx.action = nil
+		action()
+	}
+	return ctx.Context.Err()
+}
+
+func TestIndexedSkillSupportProbeStaysInsideItsRoot(t *testing.T) {
+	root := t.TempDir()
+	relative := ".agents/skills/indexed"
+	directory := filepath.Join(root, relative)
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "SKILL.md"), []byte("Indexed entrypoint"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "outside-only.txt"), []byte("Outside fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	anchor, err := os.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer anchor.Close()
+	ctx := &skillOpenContext{Context: context.Background(), action: func() {
+		if err := os.Rename(directory, directory+"-held"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, directory); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+	}}
+	if support, err := repositorySkillHasSupport(ctx, anchor, relative); err == nil || support {
+		t.Fatalf("support probe followed outside link: support=%t err=%v", support, err)
+	}
+}

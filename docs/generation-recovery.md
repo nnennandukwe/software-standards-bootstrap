@@ -50,6 +50,10 @@ manifest exists or while its syntax needs correction. Discovery reads bounded
 batches and stops above 40,000 top-level entries or 1 MiB of quoted path names.
 It checks cancellation between entries and reads at most two names inside an
 indexed skill directory to determine whether support files need review.
+Discovery stays within the repository tree and checks opened-directory
+identity. Canonical inputs are rechecked after discovery. Named skill paths
+are observations, so review all shared skill work and later changes before
+reuse; unindexed support files aren’t validated.
 
 A tracked manifest or report returns `existing_pack`. This protects committed
 packs, including adopted packs, from being mistaken for interrupted generation.
