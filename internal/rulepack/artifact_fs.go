@@ -58,6 +58,22 @@ func readDigestBoundFile(
 }
 
 func readRequiredRegularFileLimited(absolute, relative string, maxBytes int64) ([]byte, []Diagnostic, error) {
+	data, diagnostics, err := readRegularFileLimited(absolute, relative, maxBytes)
+	if err != nil || len(diagnostics) != 0 {
+		return data, diagnostics, err
+	}
+	if len(data) == 0 {
+		return data, []Diagnostic{diagnostic(
+			relative,
+			"file",
+			relative+" must not be empty",
+			"write the required artifact and rerun ssb validate",
+		)}, nil
+	}
+	return data, nil, nil
+}
+
+func readRegularFileLimited(absolute, relative string, maxBytes int64) ([]byte, []Diagnostic, error) {
 	info, err := os.Lstat(absolute)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, []Diagnostic{diagnostic(
@@ -89,14 +105,6 @@ func readRequiredRegularFileLimited(absolute, relative string, maxBytes int64) (
 	data, err := os.ReadFile(absolute)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read %s: %w", relative, err)
-	}
-	if len(data) == 0 {
-		return data, []Diagnostic{diagnostic(
-			relative,
-			"file",
-			relative+" must not be empty",
-			"write the required artifact and rerun ssb validate",
-		)}, nil
 	}
 	return data, nil, nil
 }

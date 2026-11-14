@@ -9,6 +9,11 @@ ssb resume --repo . --format text
 `resume` reads existing files and Git objects. It reports the current baseline,
 reusable stages, exact raw-byte identities, work to repeat, and diagnostics.
 It preserves canonical sources, manual edits, projections, Git state, and ADRs.
+Before a manifest exists, retained identities also cover observed partial
+native sources, the report, and optional orientation, including empty files.
+These hashes identify review material; the state and reuse flags identify
+completed work. Unsafe paths or source-size limits require correction while
+preserving the partial pack.
 Use `--format json` for the same assessment as a schema 1 response. Rerun the
 assessment after edits or another interruption. It's a point-in-time report;
 validation and rendering still enforce their own checks before publication.
@@ -33,6 +38,8 @@ validation until explicitly reconciled. `.agents/skills` is shared with
 developer workflows and installed tooling. Assessment names unindexed skill
 paths for explicit ownership and completion review before reuse. Manifest
 validation covers indexed skills; other skills stay outside its reuse claim.
+Skill paths are reported whenever inventory is reusable, including before a
+manifest exists or while its syntax needs correction.
 
 A tracked manifest or report returns `existing_pack`. This protects committed
 packs, including adopted packs, from being mistaken for interrupted generation.
@@ -125,6 +132,8 @@ new validation or rendering invocation rechecks its own input. Concurrent
 changes detected during assessment reject the result and preserve those changes.
 Captured inputs are checked again after the projection dry run, so changes
 during that check also require a fresh assessment.
+The dry run's observed root and routing targets are rechecked before its result
+is reported; later target edits also require a fresh assessment.
 The final check includes unlisted native files, invalid proposal directories,
 and an optional orientation file that appears without a manifest reference.
 The manifest must bind the captured inventory and source bytes before full

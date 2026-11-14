@@ -61,6 +61,12 @@ agent's repository analysis. Its result is a point-in-time observation; rerun
 it after changes or another interruption. It never writes files or approves a
 pack.
 
+Before a manifest exists, `retained_files` also identifies observed partial
+native sources, the report, and optional orientation. Treat those hashes as
+review references; only the verified inventory is completed work in
+`needs_proposal`. Review named shared skill paths even when the manifest is
+missing or malformed.
+
 1. For `blocked`, stop. Preserve every retained file and manual edit. Incomplete
    or inconsistent inventory and changed baselines require deliberate recovery
    before inspection or semantic work can be reused. Never relabel old

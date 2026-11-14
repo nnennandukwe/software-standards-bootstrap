@@ -486,6 +486,7 @@ func (r *Repository) ReadBaselineFile(ctx context.Context, filePath string) ([]b
 }
 
 // EntryAtBaseline resolves one literal repository-relative path.
+// runGitInput enforces GIT_LITERAL_PATHSPECS=1 for every Git invocation.
 func (r *Repository) EntryAtBaseline(ctx context.Context, filePath string) (BaselineEntry, bool, error) {
 	if filePath == "" || path.IsAbs(filePath) || path.Clean(filePath) != filePath ||
 		filePath == "." || filePath == ".." || strings.HasPrefix(filePath, "../") {

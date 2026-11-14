@@ -81,7 +81,7 @@ func AssessContinuation(ctx context.Context, repo *workspace.Repository) (result
 			}
 		}
 	}()
-	inventoryBytes, diagnostics, err := continuationFile(repo.Root(), inventoryPath, inventory.DefaultLimits().MaxCandidateBytes)
+	inventoryBytes, diagnostics, err := continuationFile(repo.Root(), inventoryPath, inventory.DefaultLimits().MaxCandidateBytes, false)
 	if err != nil {
 		return result, pack, err
 	}
@@ -115,11 +115,20 @@ func AssessContinuation(ctx context.Context, repo *workspace.Repository) (result
 		manifestMissing = true
 		result.State = "needs_proposal"
 		result.Guidance = []string{"Reuse the verified inventory. Preserve partial proposal files and manual edits; review retained candidates against pinned blobs and finish only missing work. Semantic completion can't be established without the final manifest. Write manifest.yaml last, then rerun ssb resume."}
+		partialFiles, partialDiagnostics, err := partialContinuationFiles(ctx, repo.Root())
+		if err != nil {
+			return result, pack, err
+		}
+		result.Files = append(result.Files, partialFiles...)
+		result.Diagnostics = append(result.Diagnostics, partialDiagnostics...)
+		if len(partialDiagnostics) != 0 {
+			result.State = "needs_correction"
+		}
 		return result, pack, nil
 	} else if err != nil {
 		return result, pack, fmt.Errorf("inspect continuation manifest: %w", err)
 	}
-	manifestBytes, diagnostics, err := continuationFile(repo.Root(), manifestPath, inventory.DefaultLimits().MaxFileBytes)
+	manifestBytes, diagnostics, err := continuationFile(repo.Root(), manifestPath, inventory.DefaultLimits().MaxFileBytes, false)
 	if err != nil {
 		return result, pack, err
 	}
@@ -212,11 +221,11 @@ func verifyContinuation(ctx context.Context, repo *workspace.Repository, result 
 		return err
 	}
 	for _, reference := range result.Files {
-		_, diagnostics, err := readDigestBoundFile(repo.Root(), reference, "retained file", inventory.DefaultLimits().MaxCandidateBytes)
+		content, diagnostics, err := continuationFile(repo.Root(), reference.Path, inventory.DefaultLimits().MaxCandidateBytes, true)
 		if err != nil {
 			return err
 		}
-		if len(diagnostics) != 0 {
+		if len(diagnostics) != 0 || digest(content) != reference.SHA256 {
 			return fmt.Errorf("%w: retained files changed during continuation assessment; preserve edits and rerun ssb resume", workspace.ErrPrecondition)
 		}
 	}
@@ -293,13 +302,61 @@ func verifyContinuationArtifactSet(root string, manifest Manifest) error {
 	return nil
 }
 
-func continuationFile(root, relative string, maxBytes int64) ([]byte, []Diagnostic, error) {
+func partialContinuationFiles(ctx context.Context, root string) ([]FileReference, []Diagnostic, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	paths, diagnostics, err := unlistedNativeArtifacts(root, map[string]AcceptedArtifact{})
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, relative := range []string{".software-standards/report.md", orientationPath} {
+		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(relative))); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return nil, nil, fmt.Errorf("inspect partial source %s: %w", relative, err)
+		}
+		paths = append(paths, relative)
+	}
+	limits := inventory.DefaultLimits()
+	if len(paths) > limits.MaxCandidateFiles {
+		return nil, append(diagnostics, diagnostic(".software-standards", "files", "partial sources exceed the candidate-file limit", "preserve the partial pack and review its contents before continuation")), nil
+	}
+	files := make([]FileReference, 0, len(paths))
+	var totalBytes int64
+	for _, relative := range paths {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		content, fileDiagnostics, err := continuationFile(root, relative, limits.MaxFileBytes, true)
+		if err != nil {
+			return nil, nil, err
+		}
+		diagnostics = append(diagnostics, fileDiagnostics...)
+		if len(fileDiagnostics) != 0 {
+			continue
+		}
+		totalBytes += int64(len(content))
+		if totalBytes > limits.MaxCandidateBytes {
+			diagnostics = append(diagnostics, diagnostic(relative, "files", "partial sources exceed the candidate-byte limit", "preserve the partial pack and review its contents before continuation"))
+			break
+		}
+		files = append(files, FileReference{Path: relative, SHA256: digest(content)})
+	}
+	return files, diagnostics, nil
+}
+
+func continuationFile(root, relative string, maxBytes int64, allowEmpty bool) ([]byte, []Diagnostic, error) {
 	if component, found, err := findSymlinkComponent(root, relative); err != nil {
 		return nil, nil, err
 	} else if found {
 		return nil, []Diagnostic{diagnostic(relative, "file", "retained path contains symlink component "+component, "preserve the target and restore a regular repository-local file before continuation")}, nil
 	}
-	return readRequiredRegularFileLimited(filepath.Join(root, filepath.FromSlash(relative)), relative, maxBytes)
+	absolute := filepath.Join(root, filepath.FromSlash(relative))
+	if allowEmpty {
+		return readRegularFileLimited(absolute, relative, maxBytes)
+	}
+	return readRequiredRegularFileLimited(absolute, relative, maxBytes)
 }
 
 func continuationBaseline(ctx context.Context, repo *workspace.Repository) error {

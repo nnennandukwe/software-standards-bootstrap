@@ -188,7 +188,11 @@ func TestResumeInventoryOnlyAndPartialProposal(t *testing.T) {
 				writeFile(t, filepath.Join(repo, ".software-standards/rules/verify-before-merge.md"), "# Incomplete manual proposal\n")
 			}
 			result := resumeResult(t, repo, 0)
-			if result.State != "needs_proposal" || !result.InventoryReusable || result.ProposalReusable || len(result.Files) != 1 {
+			expectedFiles := 1
+			if proposal {
+				expectedFiles = 3
+			}
+			if result.State != "needs_proposal" || !result.InventoryReusable || result.ProposalReusable || len(result.Files) != expectedFiles {
 				t.Fatalf("unfinished semantic work treated as complete: %#v", result)
 			}
 		})
@@ -1149,4 +1153,190 @@ func TestResumePreservesStagedManualRootTextEdits(t *testing.T) {
 		t.Fatalf("manual staged root text was blocked: %#v", result)
 	}
 	assertResumeSnapshot(t, repo, before)
+}
+
+func TestResumeReportsPartialSourceIdentitiesWithoutACompletionClaim(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+	removeResumeFile(t, repo, ".software-standards/manifest.yaml")
+	writeFile(t, filepath.Join(repo, ".software-standards/rules/verify-before-merge.md"), "# Developer's unfinished proposal\n")
+	writeFile(t, filepath.Join(repo, ".software-standards/orientation.yaml"), "partial: [\n")
+	before := resumeSnapshot(t, repo)
+	result := resumeResult(t, repo, 0)
+	if result.State != "needs_proposal" || !result.InventoryReusable || result.ProposalReusable || len(result.Files) != 4 {
+		t.Fatalf("partial source identities missing or treated as complete: %#v", result)
+	}
+	for _, reference := range result.Files {
+		if reference.SHA256 != fileSHA256(t, filepath.Join(repo, filepath.FromSlash(reference.Path))) {
+			t.Fatalf("partial identity differs from retained bytes: %#v", reference)
+		}
+	}
+	assertResumeSnapshot(t, repo, before)
+}
+
+func TestResumeNamesSharedSkillsBeforeProposalCompletion(t *testing.T) {
+	for _, missing := range []bool{true, false} {
+		t.Run(fmt.Sprintf("missing=%t", missing), func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			writeValidManifestLayoutPack(t, repo, baseline)
+			code := 1
+			if missing {
+				removeResumeFile(t, repo, ".software-standards/manifest.yaml")
+				code = 0
+			} else {
+				writeFile(t, filepath.Join(repo, ".software-standards/manifest.yaml"), "unfinished: [\n")
+			}
+			path := ".agents/skills/developer-workflow/SKILL.md"
+			writeFile(t, filepath.Join(repo, path), "# Developer's retained workflow\n")
+			before := resumeSnapshot(t, repo)
+			result := resumeResult(t, repo, code)
+			if !result.InventoryReusable || result.ProposalReusable || !strings.Contains(strings.Join(result.Guidance, " "), path) {
+				t.Fatalf("partial proposal omitted shared-skill review guidance: %#v", result)
+			}
+			for _, reference := range result.Files {
+				if reference.Path == path {
+					t.Fatal("unindexed shared skill was included in pack identities")
+				}
+			}
+			assertResumeSnapshot(t, repo, before)
+		})
+	}
+}
+
+func TestResumeRejectsProjectionChangesDuringFinalInputRecheck(t *testing.T) {
+	for _, relative := range []string{"AGENTS.md", ".software-standards/routing/catalog.md"} {
+		t.Run(relative, func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			writeValidManifestLayoutPack(t, repo, baseline)
+			runResumeCommand(t, []string{"render", "--repo", repo}, 0)
+			path := filepath.Join(repo, filepath.FromSlash(relative))
+			original := readText(t, path)
+			var afterMutation map[string]string
+			ctx := &resumeBoundaryContext{Context: t.Context(), boundary: "/internal/rulepack.RecheckContinuation", action: func() {
+				writeFile(t, path, original+"\nDeveloper's concurrent projection edit.\n")
+				afterMutation = resumeSnapshot(t, repo)
+			}}
+			var output, diagnostics bytes.Buffer
+			code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+			if !ctx.triggered.Load() || code != 2 || output.Len() != 0 || !strings.Contains(diagnostics.String(), "projection changed during continuation assessment") {
+				t.Fatalf("late projection change reported complete: triggered=%t exit=%d stdout=%q stderr=%q", ctx.triggered.Load(), code, output.String(), diagnostics.String())
+			}
+			assertResumeSnapshot(t, repo, afterMutation)
+			writeFile(t, path, original)
+			if retry := resumeResult(t, repo, 0); retry.State != "complete" {
+				t.Fatalf("reviewed projection restoration failed: %#v", retry)
+			}
+		})
+	}
+}
+
+func TestResumeTreatsChangedFileNamesLiterally(t *testing.T) {
+	for _, test := range []struct {
+		relative string
+		staged   bool
+	}{
+		{relative: ":(literal)secret"},
+		{relative: ":(literal)secret", staged: true},
+		{relative: "bracket[one].go"},
+		{relative: "bracket[one].go", staged: true},
+	} {
+		t.Run(fmt.Sprintf("%s/staged=%t", test.relative, test.staged), func(t *testing.T) {
+			relative := test.relative
+			repo, _ := evidenceRepository(t)
+			path := filepath.Join(repo, relative)
+			if err := os.WriteFile(path, []byte("Developer's baseline file.\n"), 0o644); err != nil {
+				t.Skipf("filesystem can't represent fixture filename: %v", err)
+			}
+			git(t, repo, "--literal-pathspecs", "add", "--", relative)
+			git(t, repo, "commit", "-m", "literal filename baseline")
+			baseline := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
+			writeValidManifestLayoutPack(t, repo, baseline)
+			writeFile(t, path, "Developer's edited file.\n")
+			if test.staged {
+				git(t, repo, "--literal-pathspecs", "add", "--", relative)
+				writeFile(t, path, "Developer's baseline file.\n")
+			}
+			before := resumeSnapshot(t, repo)
+			output, diagnostics := runResumeCommand(t, []string{"resume", "--repo", repo, "--format", "json"}, 2)
+			if output != "" || !strings.Contains(diagnostics, "tracked baseline file") {
+				t.Fatalf("literal filename bypassed source protection: stdout=%q stderr=%q", output, diagnostics)
+			}
+			assertResumeSnapshot(t, repo, before)
+		})
+	}
+}
+
+func TestResumePartialSourcesPreserveEmptyBytesAndRejectUnsafeReads(t *testing.T) {
+	for _, target := range []string{"empty", "symlink", "oversized"} {
+		t.Run(target, func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			writeValidManifestLayoutPack(t, repo, baseline)
+			removeResumeFile(t, repo, ".software-standards/manifest.yaml")
+			relative := ".software-standards/rules/verify-before-merge.md"
+			path := filepath.Join(repo, filepath.FromSlash(relative))
+			original := readText(t, path)
+			code := 1
+			switch target {
+			case "empty":
+				writeFile(t, path, "")
+				code = 0
+			case "symlink":
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(t.TempDir(), "missing-target"), path); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+			default:
+				writeFile(t, path, strings.Repeat("x", (1<<20)+1))
+			}
+			before := resumeSnapshot(t, repo)
+			result := resumeResult(t, repo, code)
+			if !result.InventoryReusable || result.ProposalReusable || code == 1 && len(result.Diagnostics) == 0 {
+				t.Fatalf("partial source trust checks failed: %#v", result)
+			}
+			if target == "empty" {
+				found := false
+				for _, reference := range result.Files {
+					if reference.Path == relative && reference.SHA256 == excerptHash("") {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatal("empty partial source lost its raw-byte identity")
+				}
+			}
+			assertResumeSnapshot(t, repo, before)
+			if target == "symlink" {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writeFile(t, path, original)
+			if retry := resumeResult(t, repo, 0); retry.State != "needs_proposal" || retry.ProposalReusable {
+				t.Fatalf("partial source recovery changed completion claim: %#v", retry)
+			}
+		})
+	}
+}
+
+func TestResumeRechecksPartialSourceIdentities(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+	removeResumeFile(t, repo, ".software-standards/manifest.yaml")
+	path := filepath.Join(repo, ".software-standards/rules/verify-before-merge.md")
+	var afterMutation map[string]string
+	ctx := &resumeBoundaryContext{Context: t.Context(), action: func() {
+		writeFile(t, path, "# Developer's concurrent partial edit\n")
+		afterMutation = resumeSnapshot(t, repo)
+	}}
+	var output, diagnostics bytes.Buffer
+	code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+	if !ctx.triggered.Load() || code != 2 || output.Len() != 0 || !strings.Contains(diagnostics.String(), "retained files changed") {
+		t.Fatalf("partial source identity changed unnoticed: triggered=%t exit=%d stdout=%q stderr=%q", ctx.triggered.Load(), code, output.String(), diagnostics.String())
+	}
+	assertResumeSnapshot(t, repo, afterMutation)
+	if retry := resumeResult(t, repo, 0); retry.State != "needs_proposal" || retry.ProposalReusable {
+		t.Fatalf("fresh partial-source review failed: %#v", retry)
+	}
 }

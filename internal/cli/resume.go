@@ -38,14 +38,26 @@ func runResume(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	if err != nil {
 		return writeResumeError(stderr, err)
 	}
+	var projection *render.Result
+	var projectionErr error
 	if result.ProposalReusable {
-		projection, projectionErr := render.Apply(ctx, repo, pack, true)
+		value, applyErr := render.Apply(ctx, repo, pack, true)
+		projection, projectionErr = &value, applyErr
 		if projectionErr != nil && !errors.Is(projectionErr, render.ErrDrift) && !errors.Is(projectionErr, render.ErrMarkers) && !errors.Is(projectionErr, render.ErrUnsafeTarget) {
 			return writeResumeError(stderr, projectionErr)
 		}
+	}
+	if result.InventoryReusable {
 		result, err = rulepack.RecheckContinuation(ctx, repo, result, pack)
 		if err != nil {
 			return writeResumeError(stderr, err)
+		}
+	}
+	if projection != nil {
+		if projectionErr == nil {
+			if err := projection.VerifyUnchanged(ctx, repo); err != nil {
+				return writeResumeError(stderr, err)
+			}
 		}
 		if projectionErr != nil {
 			result.State = "blocked"
