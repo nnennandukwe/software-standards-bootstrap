@@ -211,6 +211,9 @@ func RecheckContinuation(ctx context.Context, repo *workspace.Repository, result
 		return result, err
 	}
 	if len(paths) != 0 {
+		for index := range paths {
+			paths[index] = fmt.Sprintf("%q", paths[index])
+		}
 		result.Guidance = append(result.Guidance, "Unindexed repository skill paths need explicit review of ownership and completion before reuse: "+strings.Join(paths, ", ")+".")
 	}
 	return result, verifyContinuation(ctx, repo, result, pack)

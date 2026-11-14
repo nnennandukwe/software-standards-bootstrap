@@ -1551,3 +1551,99 @@ func TestResumeReportsRoutingReadFailuresAsIOErrors(t *testing.T) {
 		t.Fatalf("routing read recovery failed: %#v", retry)
 	}
 }
+
+func TestResumeEscapesRepositoryNamesInTerminalOutput(t *testing.T) {
+	for _, target := range []string{"skill", "partial source", "diagnostic"} {
+		t.Run(target, func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			writeValidManifestLayoutPack(t, repo, baseline)
+			name := "manual\nNext: injected\x1b[2J"
+			relative := ".agents/skills/" + name + "/SKILL.md"
+			want := 0
+			if target != "skill" {
+				removeResumeFile(t, repo, ".software-standards/manifest.yaml")
+				relative = ".software-standards/rules/" + name
+				if target == "partial source" {
+					relative += ".md"
+				} else {
+					want = 1
+				}
+			}
+			path := filepath.Join(repo, filepath.FromSlash(relative))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Skipf("filesystem can't represent control characters: %v", err)
+			}
+			if err := os.WriteFile(path, []byte("Developer's manual work.\n"), 0o644); err != nil {
+				t.Skipf("filesystem can't represent control characters: %v", err)
+			}
+			before := resumeSnapshot(t, repo)
+			output, diagnostics := runResumeCommand(t, []string{"resume", "--repo", repo}, want)
+			text := output + diagnostics
+			if strings.Contains(text, name) || strings.ContainsRune(text, '\x1b') || !strings.Contains(text, `manual\nNext: injected\x1b[2J`) {
+				t.Fatalf("repository name altered terminal structure: stdout=%q stderr=%q", output, diagnostics)
+			}
+			assertResumeSnapshot(t, repo, before)
+			if target == "partial source" {
+				result := resumeResult(t, repo, 0)
+				found := false
+				for _, reference := range result.Files {
+					found = found || reference.Path == relative
+				}
+				if !found {
+					t.Fatal("JSON lost the actual retained filename")
+				}
+			}
+		})
+	}
+}
+
+func TestResumeRoutingCompletionUsesReadablePathsAndContents(t *testing.T) {
+	for _, relative := range []string{".software-standards/routing/catalog.md", ".software-standards/routing"} {
+		t.Run(relative, func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			writeValidManifestLayoutPack(t, repo, baseline)
+			runResumeCommand(t, []string{"render", "--repo", repo}, 0)
+			path := filepath.Join(repo, filepath.FromSlash(relative))
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mode := os.FileMode(0o600)
+			if info.IsDir() {
+				mode = 0o700
+			}
+			t.Cleanup(func() { _ = os.Chmod(path, info.Mode().Perm()) })
+			if err := os.Chmod(path, mode); err != nil {
+				t.Skipf("permission control unavailable: %v", err)
+			}
+			if current, err := os.Stat(path); err != nil || current.Mode().Perm() != mode {
+				t.Skip("filesystem doesn't preserve requested permission bits")
+			}
+			before := resumeSnapshot(t, repo)
+			if result := resumeResult(t, repo, 0); result.State != "complete" {
+				t.Fatalf("readable routing modes changed content completion: %#v", result)
+			}
+			assertResumeSnapshot(t, repo, before)
+			if err := os.Chmod(path, info.Mode().Perm()); err != nil {
+				t.Fatal(err)
+			}
+			var afterMutation map[string]string
+			ctx := &resumeBoundaryContext{Context: t.Context(), boundary: "/internal/rulepack.RecheckContinuation", action: func() {
+				if err := os.Chmod(path, mode); err != nil {
+					t.Fatal(err)
+				}
+				afterMutation = resumeSnapshot(t, repo)
+			}}
+			var output, diagnostics bytes.Buffer
+			code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+			var result rulepack.Continuation
+			if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if !ctx.triggered.Load() || code != 0 || result.State != "complete" || diagnostics.Len() != 0 {
+				t.Fatalf("routing mode policy changed during assessment: exit=%d result=%#v stderr=%q", code, result, diagnostics.String())
+			}
+			assertResumeSnapshot(t, repo, afterMutation)
+		})
+	}
+}

@@ -16,6 +16,8 @@ retry so their identities can be captured. Rechecks keep the same per-file
 read ceiling as initial capture. These hashes identify review material; the
 state and reuse flags identify completed work. Unsafe paths or source-size limits require correction while
 preserving the partial pack.
+Text output escapes nonprinting filename characters so repository names can’t
+create terminal instructions. JSON retained-file entries keep the actual paths.
 Use `--format json` for the same assessment as a schema 1 response. Rerun the
 assessment after edits or another interruption. It's a point-in-time report;
 validation and rendering still enforce their own checks before publication.
@@ -113,7 +115,9 @@ reviewing the file, the developer can restore visibility with
 clears these flags or restores files automatically. Resolve remaining visible
 source edits before reassessment. Manual text surrounding
 the managed `AGENTS.md` section in an existing regular root file is preserved by the existing renderer; edited
-managed content or routing files trigger drift diagnostics. A missing or nonregular
+managed content or routing files trigger drift diagnostics. Routing completion
+follows the renderer’s readable-path and content checks; it doesn’t certify
+permissions or access policy. A missing or nonregular
 tracked root file also blocks continuation. The manual-edit exception requires
 regular-file entries in both pinned `HEAD` and the index, without merge
 conflicts, plus a regular working-tree file at `AGENTS.md`. An untracked

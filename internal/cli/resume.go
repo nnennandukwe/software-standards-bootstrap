@@ -7,6 +7,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
+	"unicode"
 
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/render"
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/rulepack"
@@ -23,7 +26,7 @@ func runResume(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			fmt.Fprint(stdout, resumeHelp)
 			return 0
 		}
-		fmt.Fprintf(stderr, "error: %s\nnext: ssb resume --help\n", cleanFlagError(err))
+		fmt.Fprintf(stderr, "error: %s\nnext: ssb resume --help\n", escapeResumeText(cleanFlagError(err)))
 		return 2
 	}
 	if flags.NArg() != 0 || (*format != "text" && *format != "json") {
@@ -80,16 +83,24 @@ func runResume(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	} else {
 		fmt.Fprintf(stdout, "Generation continuation: %s; baseline %s\nInventory reusable: %t; proposal reusable: %t\n", result.State, result.BaselineCommit, result.InventoryReusable, result.ProposalReusable)
 		for _, reference := range result.Files {
-			fmt.Fprintf(stdout, "Retained: %s %s\n", reference.Path, reference.SHA256)
+			fmt.Fprintf(stdout, "Retained: %s %s\n", escapeResumeText(reference.Path), reference.SHA256)
 		}
 		for _, stage := range result.Repeat {
 			fmt.Fprintf(stdout, "Repeat: %s\n", stage)
 		}
 		for _, guidance := range result.Guidance {
-			fmt.Fprintln(stdout, guidance)
+			fmt.Fprintln(stdout, escapeResumeText(guidance))
 		}
 		if len(result.Diagnostics) != 0 {
-			writeDiagnostics(stderr, result.Diagnostics, "Generation continuation blocked",
+			diagnostics := append([]rulepack.Diagnostic(nil), result.Diagnostics...)
+			for index := range diagnostics {
+				item := &diagnostics[index]
+				item.Path = escapeResumeText(item.Path)
+				item.Field = escapeResumeText(item.Field)
+				item.Message = escapeResumeText(item.Message)
+				item.Recovery = escapeResumeText(item.Recovery)
+			}
+			writeDiagnostics(stderr, diagnostics, "Generation continuation blocked",
 				"Next: preserve retained work, follow the reported recovery steps, and rerun ssb resume --repo PATH.")
 		}
 	}
@@ -100,9 +111,22 @@ func runResume(ctx context.Context, args []string, stdout, stderr io.Writer) int
 }
 
 func writeResumeError(stderr io.Writer, err error) int {
-	fmt.Fprintf(stderr, "error: continuation assessment failed: %s\nnext: preserve the pack and rerun ssb resume --repo PATH after resolving the reported problem.\n", err)
+	fmt.Fprintf(stderr, "error: continuation assessment failed: %s\nnext: preserve the pack and rerun ssb resume --repo PATH after resolving the reported problem.\n", escapeResumeText(err.Error()))
 	if errors.Is(err, workspace.ErrPrecondition) {
 		return 2
 	}
 	return commandErrorExitCode(err, 3)
+}
+
+func escapeResumeText(value string) string {
+	var output strings.Builder
+	for _, character := range value {
+		if unicode.IsPrint(character) {
+			output.WriteRune(character)
+			continue
+		}
+		quoted := strconv.QuoteRune(character)
+		output.WriteString(quoted[1 : len(quoted)-1])
+	}
+	return output.String()
 }
