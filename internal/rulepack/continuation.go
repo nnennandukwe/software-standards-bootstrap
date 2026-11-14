@@ -214,7 +214,7 @@ func continuationBaseline(ctx context.Context, repo *workspace.Repository) error
 	if current.Baseline() != repo.Baseline() {
 		return fmt.Errorf("%w: HEAD changed during continuation assessment; preserve the pack and rerun ssb resume", workspace.ErrPrecondition)
 	}
-	changed, err := repo.Git(ctx, "diff", "--no-ext-diff", "--no-textconv", "--ignore-submodules=untracked", "--name-only", "-z", "HEAD", "--")
+	changed, err := repo.Git(ctx, "diff", "--no-ext-diff", "--no-textconv", "--ignore-submodules=untracked", "--no-renames", "--name-only", "-z", "HEAD", "--")
 	if err != nil {
 		return err
 	}
