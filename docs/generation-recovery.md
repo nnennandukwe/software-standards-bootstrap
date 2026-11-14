@@ -11,8 +11,10 @@ reusable stages, exact raw-byte identities, work to repeat, and diagnostics.
 It preserves canonical sources, manual edits, projections, Git state, and ADRs.
 Before a manifest exists, retained identities also cover observed partial
 native sources, the report, and optional orientation, including empty files.
-These hashes identify review material; the state and reuse flags identify
-completed work. Unsafe paths or source-size limits require correction while
+New partial source paths appearing during an operable assessment require a
+retry so their identities can be captured. Rechecks keep the same per-file
+read ceiling as initial capture. These hashes identify review material; the
+state and reuse flags identify completed work. Unsafe paths or source-size limits require correction while
 preserving the partial pack.
 Use `--format json` for the same assessment as a schema 1 response. Rerun the
 assessment after edits or another interruption. It's a point-in-time report;
@@ -37,7 +39,10 @@ pack's rules, verification, or automation directories block full proposal
 validation until explicitly reconciled. `.agents/skills` is shared with
 developer workflows and installed tooling. Assessment names unindexed skill
 paths for explicit ownership and completion review before reuse. Manifest
-validation covers indexed skills; other skills stay outside its reuse claim.
+validation covers indexed skill entrypoints. Directories with supporting files
+also require ownership and completion review; those files stay outside the
+validated proposal. Assessment lists directory names without reading support
+file bodies or following their links.
 Skill paths are reported whenever inventory is reusable, including before a
 manifest exists or while its syntax needs correction.
 
@@ -99,6 +104,8 @@ changes are checked separately, including when working-tree bytes match
 `HEAD` again. Git's
 `assume-unchanged` and `skip-worktree` index flags can hide edits, so a flagged
 baseline source blocks assessment even when ordinary status looks clean.
+This includes `AGENTS.md`; its manual-text exception requires visible index
+state.
 Preserve its bytes and review the flags with `git ls-files -v --`. After
 reviewing the file, the developer can restore visibility with
 `git update-index --no-assume-unchanged -- <path>` or

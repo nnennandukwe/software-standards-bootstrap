@@ -102,8 +102,10 @@ A projection-blocked response sets `proposal_reusable` to false and requires
 reviewed `projection_recovery` before validation or rendering can proceed.
 Review unindexed repository skill paths named in `guidance` before reusing
 them. `.agents/skills` can contain developer workflows and installed tooling;
-only manifest-indexed skills are included in the validated proposal. Preserve
-all other skill paths while reviewing their ownership and completion.
+only manifest-indexed skill entrypoints are included in the validated proposal.
+Directories with supporting files are also named for review; those files
+aren’t validated by the entrypoint’s digest. Preserve all other skill paths
+while reviewing their ownership and completion.
 A `needs_correction` response exits `1` and
 identifies the correction work; it isn't permission to render. `needs_proposal`
 exits `0` to report an operable continuation, while `proposal_reusable` remains

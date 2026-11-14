@@ -220,8 +220,13 @@ func verifyContinuation(ctx context.Context, repo *workspace.Repository, result 
 	if err := continuationBaseline(ctx, repo); err != nil {
 		return err
 	}
+	limits := inventory.DefaultLimits()
 	for _, reference := range result.Files {
-		content, diagnostics, err := continuationFile(repo.Root(), reference.Path, inventory.DefaultLimits().MaxCandidateBytes, true)
+		maxBytes := limits.MaxFileBytes
+		if reference.Path == ".software-standards/inventory.json" {
+			maxBytes = limits.MaxCandidateBytes
+		}
+		content, diagnostics, err := continuationFile(repo.Root(), reference.Path, maxBytes, true)
 		if err != nil {
 			return err
 		}
@@ -231,6 +236,27 @@ func verifyContinuation(ctx context.Context, repo *workspace.Repository, result 
 	}
 	if result.ProposalReusable {
 		return verifyContinuationArtifactSet(repo.Root(), pack.Manifest)
+	}
+	if result.State == "needs_proposal" {
+		paths, diagnostics, err := partialContinuationPaths(repo.Root())
+		if err != nil {
+			return err
+		}
+		known := make(map[string]bool, len(result.Files))
+		for _, reference := range result.Files {
+			known[reference.Path] = true
+		}
+		changed := len(diagnostics) != 0
+		for _, relative := range paths {
+			changed = changed || !known[relative]
+		}
+		_, err = os.Lstat(filepath.Join(repo.Root(), ".software-standards/manifest.yaml"))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect continuation manifest: %w", err)
+		}
+		if changed || err == nil {
+			return fmt.Errorf("%w: partial proposal artifact set changed during continuation assessment; preserve manual work and rerun ssb resume", workspace.ErrPrecondition)
+		}
 	}
 	return nil
 }
@@ -266,7 +292,21 @@ func unindexedRepositorySkills(root string, manifest Manifest) ([]string, error)
 			paths = append(paths, relative)
 			continue
 		}
-		if !entry.IsDir() || listed[relative+"/SKILL.md"] {
+		if !entry.IsDir() {
+			paths = append(paths, relative)
+			continue
+		}
+		if listed[relative+"/SKILL.md"] {
+			children, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(relative)))
+			if err != nil {
+				return nil, fmt.Errorf("inspect skill support paths %s: %w", relative, err)
+			}
+			for _, child := range children {
+				if child.Name() != "SKILL.md" {
+					paths = append(paths, relative)
+					break
+				}
+			}
 			continue
 		}
 		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(relative), "SKILL.md")); err == nil {
@@ -302,10 +342,7 @@ func verifyContinuationArtifactSet(root string, manifest Manifest) error {
 	return nil
 }
 
-func partialContinuationFiles(ctx context.Context, root string) ([]FileReference, []Diagnostic, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, nil, err
-	}
+func partialContinuationPaths(root string) ([]string, []Diagnostic, error) {
 	paths, diagnostics, err := unlistedNativeArtifacts(root, map[string]AcceptedArtifact{})
 	if err != nil {
 		return nil, nil, err
@@ -317,6 +354,17 @@ func partialContinuationFiles(ctx context.Context, root string) ([]FileReference
 			return nil, nil, fmt.Errorf("inspect partial source %s: %w", relative, err)
 		}
 		paths = append(paths, relative)
+	}
+	return paths, diagnostics, nil
+}
+
+func partialContinuationFiles(ctx context.Context, root string) ([]FileReference, []Diagnostic, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	paths, diagnostics, err := partialContinuationPaths(root)
+	if err != nil {
+		return nil, nil, err
 	}
 	limits := inventory.DefaultLimits()
 	if len(paths) > limits.MaxCandidateFiles {
@@ -400,9 +448,6 @@ func continuationBaseline(ctx context.Context, repo *workspace.Repository) error
 		}
 		// Lowercase tags indicate assume-unchanged; S indicates skip-worktree.
 		if record[0] != 'S' && (record[0] < 'a' || record[0] > 'z') {
-			continue
-		}
-		if editableRootInstructions(repo.Root(), relative, rootRegularInGit) {
 			continue
 		}
 		_, exists, err := repo.EntryAtBaseline(ctx, relative)

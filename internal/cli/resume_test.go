@@ -1375,3 +1375,179 @@ func TestResumeCannotSwitchValidationLayoutsAfterCapturingAManifest(t *testing.T
 	assertResumeSnapshot(t, repo, before)
 	runResumeCommand(t, []string{"validate", "--repo", repo}, 1)
 }
+
+func TestResumeRejectsHiddenRootIndexFlags(t *testing.T) {
+	for _, flag := range []string{"assume-unchanged", "skip-worktree"} {
+		for _, phase := range []string{"initial", "projection"} {
+			t.Run(flag+"/"+phase, func(t *testing.T) {
+				repo, _ := evidenceRepository(t)
+				writeFile(t, filepath.Join(repo, "AGENTS.md"), "# Developer's instructions\n")
+				git(t, repo, "add", "AGENTS.md")
+				git(t, repo, "commit", "-m", "root instructions")
+				baseline := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
+				writeValidManifestLayoutPack(t, repo, baseline)
+				var afterMutation map[string]string
+				mutate := func() {
+					git(t, repo, "update-index", "--"+flag, "AGENTS.md")
+					writeFile(t, filepath.Join(repo, "AGENTS.md"), "# Developer's hidden manual edit\n")
+					afterMutation = resumeSnapshot(t, repo)
+				}
+				var ctx context.Context = t.Context()
+				if phase == "initial" {
+					mutate()
+				} else {
+					ctx = &resumeBoundaryContext{Context: t.Context(), boundary: "/internal/render.Apply", action: mutate}
+				}
+				var output, diagnostics bytes.Buffer
+				code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+				if code != 2 || output.Len() != 0 || !strings.Contains(diagnostics.String(), "index visibility flags") {
+					t.Fatalf("root flag wasn't rejected: exit=%d stdout=%q stderr=%q", code, output.String(), diagnostics.String())
+				}
+				assertResumeSnapshot(t, repo, afterMutation)
+				git(t, repo, "update-index", "--no-"+flag, "AGENTS.md")
+				if retry := resumeResult(t, repo, 0); !retry.ProposalReusable {
+					t.Fatalf("visible manual root edit blocked retry: %#v", retry)
+				}
+			})
+		}
+	}
+}
+
+func TestResumeRejectsNewPartialSourcesDuringAssessment(t *testing.T) {
+	for _, relative := range []string{".software-standards/rules/late.md", ".software-standards/report.md", ".software-standards/orientation.yaml"} {
+		t.Run(relative, func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			writeValidManifestLayoutPack(t, repo, baseline)
+			removeResumeFile(t, repo, ".software-standards/manifest.yaml")
+			if relative == ".software-standards/report.md" {
+				removeResumeFile(t, repo, relative)
+			}
+			var afterMutation map[string]string
+			ctx := &resumeBoundaryContext{Context: t.Context(), action: func() {
+				writeFile(t, filepath.Join(repo, filepath.FromSlash(relative)), "# Developer's late partial work\n")
+				afterMutation = resumeSnapshot(t, repo)
+			}}
+			var output, diagnostics bytes.Buffer
+			code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+			if !ctx.triggered.Load() || code != 2 || output.Len() != 0 || !strings.Contains(diagnostics.String(), "artifact set changed") {
+				t.Fatalf("late partial file omitted: exit=%d stdout=%q stderr=%q", code, output.String(), diagnostics.String())
+			}
+			assertResumeSnapshot(t, repo, afterMutation)
+			retry := resumeResult(t, repo, 0)
+			found := false
+			for _, reference := range retry.Files {
+				found = found || reference.Path == relative
+			}
+			if retry.State != "needs_proposal" || !found {
+				t.Fatalf("retry omitted retained partial work: %#v", retry)
+			}
+		})
+	}
+}
+
+func TestResumeNamesSupportingFilesBesideIndexedSkills(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+	manifestPath := filepath.Join(repo, ".software-standards/manifest.yaml")
+	var manifest rulepack.Manifest
+	if err := yaml.Load([]byte(readText(t, manifestPath)), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	skill := manifest.Artifacts[0]
+	skill.ID, skill.Kind, skill.Path, skill.Directive = "review-change", "skill", ".agents/skills/review-change/SKILL.md", ""
+	skill.Lenses = []rulepack.Lens{{Kind: "task", Value: "verification"}}
+	writeFile(t, filepath.Join(repo, filepath.FromSlash(skill.Path)), "---\nname: review-change\ndescription: Review changes using the repository verification workflow.\nlicense: MIT\n---\n# Review change\n\n## Procedure\n\n1. Run the verification command.\n")
+	skill.SHA256 = fileSHA256(t, filepath.Join(repo, filepath.FromSlash(skill.Path)))
+	manifest.Artifacts = append(manifest.Artifacts, skill)
+	raw, err := yaml.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, manifestPath, string(raw))
+	runResumeCommand(t, []string{"validate", "--repo", repo}, 0)
+	if result := resumeResult(t, repo, 0); strings.Contains(strings.Join(result.Guidance, " "), ".agents/skills/review-change") {
+		t.Fatalf("indexed entrypoint alone needs no extra ownership review: %#v", result)
+	}
+	support := ".agents/skills/review-change/references/manual.md"
+	writeFile(t, filepath.Join(repo, filepath.FromSlash(support)), "Developer's supporting notes.\n")
+	before := resumeSnapshot(t, repo)
+	result := resumeResult(t, repo, 0)
+	if !result.ProposalReusable || !strings.Contains(strings.Join(result.Guidance, " "), ".agents/skills/review-change") {
+		t.Fatalf("supporting files omitted from ownership review: %#v", result)
+	}
+	for _, reference := range result.Files {
+		if reference.Path == support {
+			t.Fatal("supporting file advertised as validated pack content")
+		}
+	}
+	assertResumeSnapshot(t, repo, before)
+}
+
+func TestResumeRejectsOversizedChangedSourceBeforeReadingIt(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+	path := filepath.Join(repo, ".software-standards/rules/verify-before-merge.md")
+	probe := filepath.Join(t.TempDir(), "unreadable")
+	writeFile(t, probe, "permission probe")
+	if err := os.Chmod(probe, 0); err != nil {
+		t.Skipf("permission control unavailable: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(probe, 0o600) })
+	if _, err := os.ReadFile(probe); err == nil {
+		t.Skip("filesystem doesn't enforce read permissions")
+	}
+	var mutated bool
+	ctx := &resumeBoundaryContext{Context: t.Context(), action: func() {
+		writeFile(t, path, strings.Repeat("x", (1<<20)+1))
+		if err := os.Chmod(path, 0); err != nil {
+			t.Fatal(err)
+		}
+		mutated = true
+	}}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+	var output, diagnostics bytes.Buffer
+	code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+	if !mutated || code != 2 || output.Len() != 0 || !strings.Contains(diagnostics.String(), "retained files changed") {
+		t.Fatalf("oversized source was read during recheck: exit=%d stdout=%q stderr=%q", code, output.String(), diagnostics.String())
+	}
+	if info, err := os.Stat(path); err != nil || info.Size() != (1<<20)+1 || info.Mode().Perm() != 0 {
+		t.Fatalf("assessment changed oversized source: info=%v err=%v", info, err)
+	}
+}
+
+func TestResumeReportsRoutingReadFailuresAsIOErrors(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+	runResumeCommand(t, []string{"render", "--repo", repo}, 0)
+	path := filepath.Join(repo, ".software-standards/routing/catalog.md")
+	original := readText(t, path)
+	if err := os.Chmod(path, 0); err != nil {
+		t.Skipf("permission control unavailable: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+	if _, err := os.ReadFile(path); err == nil {
+		t.Skip("filesystem doesn't enforce read permissions")
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := &resumeBoundaryContext{Context: t.Context(), boundary: "/internal/rulepack.RecheckContinuation", action: func() {
+		if err := os.Chmod(path, 0); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	var output, diagnostics bytes.Buffer
+	code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+	if !ctx.triggered.Load() || code != 3 || output.Len() != 0 || !strings.Contains(diagnostics.String(), "permission denied") || !strings.Contains(diagnostics.String(), "catalog.md") || !strings.Contains(diagnostics.String(), "preserve the pack") {
+		t.Fatalf("routing I/O failure lost its cause or recovery: exit=%d stdout=%q stderr=%q", code, output.String(), diagnostics.String())
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if readText(t, path) != original {
+		t.Fatal("assessment changed unreadable routing content")
+	}
+	if retry := resumeResult(t, repo, 0); retry.State != "complete" {
+		t.Fatalf("routing read recovery failed: %#v", retry)
+	}
+}
