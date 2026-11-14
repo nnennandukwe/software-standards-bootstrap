@@ -313,11 +313,16 @@ func continuationBaseline(ctx context.Context, repo *workspace.Repository) error
 	if current.Baseline() != repo.Baseline() {
 		return fmt.Errorf("%w: HEAD changed during continuation assessment; preserve the pack and rerun ssb resume", workspace.ErrPrecondition)
 	}
-	visibility, err := repo.Git(ctx, "ls-files", "-v", "-z", "--")
+	rootEntry, rootExists, err := repo.EntryAtBaseline(ctx, "AGENTS.md")
 	if err != nil {
 		return err
 	}
-	rootTracked := false
+	rootBaselineRegular := rootExists && rootEntry.Kind == "blob" && (rootEntry.Mode == "100644" || rootEntry.Mode == "100755")
+	visibility, err := repo.Git(ctx, "ls-files", "-v", "--stage", "-z", "--")
+	if err != nil {
+		return err
+	}
+	rootRegularInGit := false
 	for _, record := range bytes.Split(visibility, []byte{0}) {
 		if len(record) == 0 {
 			continue
@@ -325,15 +330,22 @@ func continuationBaseline(ctx context.Context, repo *workspace.Repository) error
 		if len(record) < 3 || record[1] != ' ' {
 			return errors.New("read index visibility: malformed Git file record")
 		}
-		relative := string(record[2:])
+		metadata, pathBytes, hasPath := bytes.Cut(record[2:], []byte{'\t'})
+		fields := bytes.Fields(metadata)
+		if !hasPath || len(fields) != 3 {
+			return errors.New("read index visibility: malformed staged Git file record")
+		}
+		relative := string(pathBytes)
 		if relative == "AGENTS.md" {
-			rootTracked = record[0] == 'H' || record[0] == 'h' || record[0] == 'S' || record[0] == 's'
+			cached := record[0] == 'H' || record[0] == 'h' || record[0] == 'S' || record[0] == 's'
+			regular := string(fields[0]) == "100644" || string(fields[0]) == "100755"
+			rootRegularInGit = rootBaselineRegular && cached && regular && string(fields[2]) == "0"
 		}
 		// Lowercase tags indicate assume-unchanged; S indicates skip-worktree.
 		if record[0] != 'S' && (record[0] < 'a' || record[0] > 'z') {
 			continue
 		}
-		if editableRootInstructions(repo.Root(), relative, rootTracked) {
+		if editableRootInstructions(repo.Root(), relative, rootRegularInGit) {
 			continue
 		}
 		_, exists, err := repo.EntryAtBaseline(ctx, relative)
@@ -344,29 +356,62 @@ func continuationBaseline(ctx context.Context, repo *workspace.Repository) error
 			return fmt.Errorf("%w: index visibility flags hide tracked baseline file %q; preserve edits and review assume-unchanged or skip-worktree flags before ssb resume", workspace.ErrPrecondition, relative)
 		}
 	}
-	changed, err := repo.Git(ctx, "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--ignore-submodules=untracked", "--name-only", "-z", "HEAD", "--")
-	if err != nil {
-		return err
-	}
-	for _, relative := range bytes.Split(changed, []byte{0}) {
-		if len(relative) == 0 || editableRootInstructions(repo.Root(), string(relative), rootTracked) {
-			continue
+	if rootExists {
+		info, err := os.Lstat(filepath.Join(repo.Root(), "AGENTS.md"))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect root instructions: %w", err)
 		}
-		_, exists, err := repo.EntryAtBaseline(ctx, string(relative))
+		if err == nil && info.Mode().IsRegular() && !rootRegularInGit {
+			return fmt.Errorf("%w: tracked baseline file AGENTS.md lacks regular, conflict-free entries across HEAD and the index; preserve manual work and resolve the root entry before ssb resume", workspace.ErrPrecondition)
+		}
+	}
+	seen := make(map[string]bool)
+	for _, cached := range []bool{false, true} {
+		args := []string{"diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--ignore-submodules=untracked", "--name-status", "-z"}
+		if cached {
+			args = append(args, "--cached")
+		}
+		args = append(args, "HEAD", "--")
+		changed, err := repo.Git(ctx, args...)
 		if err != nil {
 			return err
 		}
-		if exists {
-			return fmt.Errorf("%w: tracked baseline file %q has edits; preserve them and restore a stable baseline before ssb resume", workspace.ErrPrecondition, relative)
+		if len(changed) == 0 {
+			continue
+		}
+		records := bytes.Split(bytes.TrimSuffix(changed, []byte{0}), []byte{0})
+		if len(records)%2 != 0 {
+			return errors.New("read baseline changes: malformed Git name-status record")
+		}
+		for index := 0; index < len(records); index += 2 {
+			kind, relative := string(records[index]), string(records[index+1])
+			if kind == "" || relative == "" {
+				return errors.New("read baseline changes: empty Git name-status field")
+			}
+			key := kind + "\x00" + relative
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			if kind == "M" && editableRootInstructions(repo.Root(), relative, rootRegularInGit) {
+				continue
+			}
+			_, exists, err := repo.EntryAtBaseline(ctx, relative)
+			if err != nil {
+				return err
+			}
+			if exists {
+				return fmt.Errorf("%w: tracked baseline file %q has edits; preserve them and restore a stable baseline before ssb resume", workspace.ErrPrecondition, relative)
+			}
 		}
 	}
 	return nil
 }
 
 // Existing regular root instructions can retain developer edits around the
-// managed projection while their index entry stays tracked without conflicts.
-func editableRootInstructions(root, relative string, rootTracked bool) bool {
-	if relative != "AGENTS.md" || !rootTracked {
+// managed projection when baseline, index, and worktree all hold regular files.
+func editableRootInstructions(root, relative string, rootRegularInGit bool) bool {
+	if relative != "AGENTS.md" || !rootRegularInGit {
 		return false
 	}
 	info, err := os.Lstat(filepath.Join(root, "AGENTS.md"))

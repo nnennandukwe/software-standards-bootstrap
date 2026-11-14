@@ -348,6 +348,7 @@ func resumeSnapshot(t *testing.T, repo string) map[string]string {
 	}
 	snapshot["git-status"] = git(t, repo, "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	snapshot["git-index-flags"] = git(t, repo, "ls-files", "-v", "-z")
+	snapshot["git-index-entries"] = git(t, repo, "ls-files", "--stage", "-z")
 	return snapshot
 }
 
@@ -1036,4 +1037,116 @@ func TestResumeRejectsRootRenameWithUntrackedReplacement(t *testing.T) {
 			assertResumeSnapshot(t, repo, afterMutation)
 		})
 	}
+}
+
+func TestResumeRejectsRootTypeChangesAcrossBaselineIndexAndWorktree(t *testing.T) {
+	for _, target := range []string{"baseline symlink", "baseline gitlink", "index symlink"} {
+		t.Run(target, func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			agents := filepath.Join(repo, "AGENTS.md")
+			switch target {
+			case "baseline symlink":
+				if err := os.Symlink("manual-instructions.md", agents); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+				git(t, repo, "add", "AGENTS.md")
+			case "baseline gitlink":
+				git(t, repo, "update-index", "--add", "--cacheinfo", "160000,"+baseline+",AGENTS.md")
+				if err := os.Mkdir(agents, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				writeFile(t, agents, "# Developer's baseline instructions\n")
+				git(t, repo, "add", "AGENTS.md")
+			}
+			git(t, repo, "commit", "-m", "baseline root entry")
+			baseline = strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
+			writeValidManifestLayoutPack(t, repo, baseline)
+			if target == "index symlink" {
+				writeFile(t, filepath.Join(repo, "manual-link-target"), "manual-instructions.md\n")
+				oid := strings.TrimSpace(git(t, repo, "hash-object", "-w", "manual-link-target"))
+				git(t, repo, "update-index", "--cacheinfo", "120000,"+oid+",AGENTS.md")
+			} else {
+				if target == "baseline symlink" || target == "baseline gitlink" {
+					if err := os.Remove(agents); err != nil {
+						t.Fatal(err)
+					}
+				}
+				writeFile(t, agents, "# Developer's replacement instructions\n")
+				oid := strings.TrimSpace(git(t, repo, "hash-object", "-w", "AGENTS.md"))
+				git(t, repo, "update-index", "--add", "--cacheinfo", "100644,"+oid+",AGENTS.md")
+			}
+			before := resumeSnapshot(t, repo)
+			output, diagnostics := runResumeCommand(t, []string{"resume", "--repo", repo, "--format", "json"}, 2)
+			if output != "" || !strings.Contains(diagnostics, "tracked baseline file") {
+				t.Fatalf("root type change bypassed baseline protection: stdout=%q stderr=%q", output, diagnostics)
+			}
+			assertResumeSnapshot(t, repo, before)
+		})
+	}
+}
+
+func TestResumeRejectsStagedSourcesWithRestoredWorktreeBytes(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+	path := filepath.Join(repo, "main.go")
+	original := readText(t, path)
+	writeFile(t, path, original+"\n// Developer's staged edit.\n")
+	git(t, repo, "add", "main.go")
+	writeFile(t, path, original)
+	before := resumeSnapshot(t, repo)
+	output, diagnostics := runResumeCommand(t, []string{"resume", "--repo", repo, "--format", "json"}, 2)
+	if output != "" || !strings.Contains(diagnostics, "tracked baseline file") {
+		t.Fatalf("staged source edit was hidden by restored worktree bytes: stdout=%q stderr=%q", output, diagnostics)
+	}
+	assertResumeSnapshot(t, repo, before)
+}
+
+func TestResumeRejectsRootInterpretationBypasses(t *testing.T) {
+	for _, target := range []string{"intent-to-add", "disabled symlinks"} {
+		t.Run(target, func(t *testing.T) {
+			repo, _ := evidenceRepository(t)
+			agents := filepath.Join(repo, "AGENTS.md")
+			if target == "disabled symlinks" {
+				writeFile(t, agents, "manual-instructions.md")
+				oid := strings.TrimSpace(git(t, repo, "hash-object", "-w", "AGENTS.md"))
+				git(t, repo, "update-index", "--add", "--cacheinfo", "120000,"+oid+",AGENTS.md")
+				git(t, repo, "config", "core.symlinks", "false")
+			} else {
+				writeFile(t, agents, "# Developer's baseline instructions\n")
+				git(t, repo, "add", "AGENTS.md")
+			}
+			git(t, repo, "commit", "-m", "baseline root entry")
+			baseline := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
+			writeValidManifestLayoutPack(t, repo, baseline)
+			if target == "intent-to-add" {
+				git(t, repo, "mv", "AGENTS.md", "renamed-instructions.md")
+				writeFile(t, agents, "# Developer's replacement instructions\n")
+				git(t, repo, "add", "--intent-to-add", "AGENTS.md")
+			}
+			before := resumeSnapshot(t, repo)
+			output, diagnostics := runResumeCommand(t, []string{"resume", "--repo", repo, "--format", "json"}, 2)
+			if output != "" || !strings.Contains(diagnostics, "tracked baseline file") {
+				t.Fatalf("root interpretation bypassed baseline protection: stdout=%q stderr=%q", output, diagnostics)
+			}
+			assertResumeSnapshot(t, repo, before)
+		})
+	}
+}
+
+func TestResumePreservesStagedManualRootTextEdits(t *testing.T) {
+	repo, _ := evidenceRepository(t)
+	agents := filepath.Join(repo, "AGENTS.md")
+	writeFile(t, agents, "# Developer's baseline instructions\n")
+	git(t, repo, "add", "AGENTS.md")
+	git(t, repo, "commit", "-m", "baseline root instructions")
+	baseline := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
+	writeValidManifestLayoutPack(t, repo, baseline)
+	writeFile(t, agents, "# Developer's staged instructions\n")
+	git(t, repo, "add", "AGENTS.md")
+	before := resumeSnapshot(t, repo)
+	if result := resumeResult(t, repo, 0); result.State != "ready_to_render" {
+		t.Fatalf("manual staged root text was blocked: %#v", result)
+	}
+	assertResumeSnapshot(t, repo, before)
 }

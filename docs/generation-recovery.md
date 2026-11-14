@@ -87,7 +87,9 @@ assessment reconstructs inventory once, then rechecks retained byte identities.
 Separate validation and rendering commands check their inputs again. A changed
 HEAD blocks reuse
 of old inventory; a manifest with another baseline blocks proposal reuse.
-Tracked baseline-source edits and renames also block continuation. Git's
+Tracked baseline-source edits and renames also block continuation. Staged
+changes are checked separately, including when working-tree bytes match
+`HEAD` again. Git's
 `assume-unchanged` and `skip-worktree` index flags can hide edits, so a flagged
 baseline source blocks assessment even when ordinary status looks clean.
 Preserve its bytes and review the flags with `git ls-files -v --`. After
@@ -99,8 +101,13 @@ source edits before reassessment. Manual text surrounding
 the managed `AGENTS.md` section in an existing regular root file is preserved by the existing renderer; edited
 managed content or routing files trigger drift diagnostics. A missing or nonregular
 tracked root file also blocks continuation. The manual-edit exception requires
-a tracked index entry without merge conflicts at `AGENTS.md`; an untracked
-replacement can't hide a staged root-file rename.
+regular-file entries in both pinned `HEAD` and the index, without merge
+conflicts, plus a regular working-tree file at `AGENTS.md`. An untracked
+replacement can't hide a staged root-file rename, and replacing a symlink or
+submodule with a regular file doesn't qualify as a manual text edit. Staged
+deletions remain blocked even if `git add --intent-to-add` records a placeholder
+for replacement text. A regular-file representation of a baseline symlink
+with `core.symlinks=false` also requires deliberate recovery.
 
 Preserve the entire interrupted pack and manual work. If the original baseline
 and complete inspection response are available, restore them deliberately and
