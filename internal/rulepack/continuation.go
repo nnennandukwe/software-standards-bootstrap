@@ -28,6 +28,15 @@ type Continuation struct {
 	Diagnostics       []Diagnostic    `json:"diagnostics"`
 }
 
+// inventoryVerification is created only after the complete pinned inventory
+// check. It avoids a second Git scan within this assessment, while validation
+// still checks raw identity, metadata, and manifest binding. Public validation
+// never receives this proof, and the assessment rechecks retained bytes.
+type inventoryVerification struct {
+	baselineCommit string
+	rawSHA256      string
+}
+
 // AssessContinuation verifies retained generation output without creating,
 // repairing, or adopting anything. The final manifest is the existing completion
 // boundary for semantic generation; incomplete sources remain review material.
@@ -163,8 +172,15 @@ func AssessContinuation(ctx context.Context, repo *workspace.Repository) (result
 		if len(fileDiagnostics) == 0 {
 			result.Files = append(result.Files, FileReference{Path: reference.Path, SHA256: digest(content)})
 		}
+		result.Diagnostics = append(result.Diagnostics, fileDiagnostics...)
 	}
-	pack, result.Diagnostics, err = Validate(ctx, repo)
+	if len(result.Diagnostics) != 0 {
+		return result, pack, nil
+	}
+	pack, result.Diagnostics, err = validateActionablePack(ctx, repo, false, &inventoryVerification{
+		baselineCommit: repo.Baseline(),
+		rawSHA256:      digest(inventoryBytes),
+	})
 	if err != nil {
 		return result, pack, err
 	}

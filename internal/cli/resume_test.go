@@ -413,17 +413,22 @@ func TestResumeDetectsConcurrentChangesAndPreservesThem(t *testing.T) {
 type resumeBoundaryContext struct {
 	context.Context
 	action    func()
+	boundary  string
 	once      sync.Once
 	triggered atomic.Bool
 }
 
 func (ctx *resumeBoundaryContext) Err() error {
+	boundary := ctx.boundary
+	if boundary == "" {
+		boundary = "/internal/rulepack.AssessContinuation.func"
+	}
 	programCounters := make([]uintptr, 12)
 	count := runtime.Callers(2, programCounters)
 	frames := runtime.CallersFrames(programCounters[:count])
 	for {
 		frame, more := frames.Next()
-		if strings.Contains(frame.Function, "/internal/rulepack.AssessContinuation.func") {
+		if strings.Contains(frame.Function, boundary) {
 			ctx.once.Do(func() { ctx.triggered.Store(true); ctx.action() })
 			break
 		}
@@ -502,4 +507,136 @@ func TestResumeProjectionRejectionsStopBeforeRendering(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResumeUnreadableSourcesCannotBecomeReusableDuringAssessment(t *testing.T) {
+	for _, relative := range []string{".software-standards/report.md", ".software-standards/rules/verify-before-merge.md"} {
+		for _, nonregular := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/nonregular=%t", relative, nonregular), func(t *testing.T) {
+				repo, baseline := evidenceRepository(t)
+				writeValidManifestLayoutPack(t, repo, baseline)
+				path := filepath.Join(repo, filepath.FromSlash(relative))
+				original, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if nonregular {
+					if err := os.Mkdir(path, 0o755); err != nil {
+						t.Fatal(err)
+					}
+				}
+				before := resumeSnapshot(t, repo)
+				var afterMutation map[string]string
+				restore := func() {
+					if nonregular {
+						if err := os.Remove(path); err != nil {
+							t.Fatal(err)
+						}
+					}
+					writeFile(t, path, string(original))
+				}
+				ctx := &resumeBoundaryContext{Context: t.Context(), boundary: "/internal/rulepack.validateActionablePack", action: func() { restore(); afterMutation = resumeSnapshot(t, repo) }}
+				var output, diagnostics bytes.Buffer
+				code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+				var result rulepack.Continuation
+				if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+					t.Fatalf("exit=%d stderr=%q output=%q: %v", code, diagnostics.String(), output.String(), err)
+				}
+				if code != 1 || result.ProposalReusable || result.State != "needs_correction" {
+					t.Fatalf("late source passed assessment: exit=%d result=%#v", code, result)
+				}
+				if ctx.triggered.Load() {
+					assertResumeSnapshot(t, repo, afterMutation)
+				} else {
+					// Rejecting the initial capture before validation also closes this race.
+					assertResumeSnapshot(t, repo, before)
+					restore()
+				}
+				if retry := resumeResult(t, repo, 0); retry.State != "ready_to_render" {
+					t.Fatalf("restored source retry: %#v", retry)
+				}
+			})
+		}
+	}
+}
+
+func TestResumeVisitsTheBaselineInventoryOnce(t *testing.T) {
+	for _, command := range []string{"resume", "validate"} {
+		t.Run(command, func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			writeValidManifestLayoutPack(t, repo, baseline)
+			ctx := &inventoryVisitContext{Context: t.Context()}
+			var output, diagnostics bytes.Buffer
+			code := cli.RunContext(ctx, []string{command, "--repo", repo, "--format", "json"}, &output, &diagnostics)
+			if code != 0 || ctx.visits.Load() != 2 {
+				t.Fatalf("%s visited the two-entry pinned inventory %d times: exit=%d stderr=%q", command, ctx.visits.Load(), code, diagnostics.String())
+			}
+		})
+	}
+}
+
+// Count actual inventory candidate visits on this command's context. The fixture
+// has two baseline entries; a repeated scan visits those same entries again.
+type inventoryVisitContext struct {
+	context.Context
+	visits atomic.Int32
+}
+
+func (ctx *inventoryVisitContext) Err() error {
+	programCounter, _, _, ok := runtime.Caller(1)
+	if ok && strings.HasSuffix(runtime.FuncForPC(programCounter).Name(), "/internal/inventory.scan") {
+		ctx.visits.Add(1)
+	}
+	return ctx.Context.Err()
+}
+
+func TestResumeLateSourceAfterRejectedCaptureStillNeedsFreshAssessment(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+	path := filepath.Join(repo, ".software-standards/rules/verify-before-merge.md")
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	var afterMutation map[string]string
+	ctx := &resumeBoundaryContext{Context: t.Context(), action: func() {
+		writeFile(t, path, string(original))
+		afterMutation = resumeSnapshot(t, repo)
+	}}
+	var output, diagnostics bytes.Buffer
+	code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+	var result rulepack.Continuation
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !ctx.triggered.Load() || code != 1 || result.ProposalReusable || len(result.Diagnostics) == 0 {
+		t.Fatalf("late source bypassed rejected capture: triggered=%t code=%d result=%#v", ctx.triggered.Load(), code, result)
+	}
+	assertResumeSnapshot(t, repo, afterMutation)
+	if retry := resumeResult(t, repo, 0); retry.State != "ready_to_render" {
+		t.Fatalf("fresh assessment: %#v", retry)
+	}
+}
+
+func TestResumeInventoryProofCannotOutliveRawBytes(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+	path := filepath.Join(repo, ".software-standards/inventory.json")
+	var afterMutation map[string]string
+	ctx := &resumeBoundaryContext{Context: t.Context(), boundary: "/internal/rulepack.validateActionablePack", action: func() {
+		writeFile(t, path, readText(t, path)+"\n")
+		afterMutation = resumeSnapshot(t, repo)
+	}}
+	var output, diagnostics bytes.Buffer
+	code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+	if !ctx.triggered.Load() || code != 2 || output.Len() != 0 || !strings.Contains(diagnostics.String(), "changed during continuation assessment") {
+		t.Fatalf("changed raw inventory reused: triggered=%t code=%d stdout=%q stderr=%q", ctx.triggered.Load(), code, output.String(), diagnostics.String())
+	}
+	assertResumeSnapshot(t, repo, afterMutation)
 }

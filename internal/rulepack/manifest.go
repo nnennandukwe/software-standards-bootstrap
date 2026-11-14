@@ -18,6 +18,7 @@ func validateManifestLayoutPack(
 	ctx context.Context,
 	repo *workspace.Repository,
 	retained bool,
+	verifiedInventory *inventoryVerification,
 ) (Pack, []Diagnostic, error) {
 	const (
 		manifestPath  = ".software-standards/manifest.yaml"
@@ -190,16 +191,20 @@ func validateManifestLayoutPack(
 			pack.Manifest.BaselineCommit,
 			pack.Inventory,
 		)...)
-		inventoryDiagnostics, inventoryErr := validateReportInventory(
-			ctx,
-			evidenceRepo,
-			pack.Inventory,
-			inventoryPath,
-		)
-		if inventoryErr != nil {
-			return Pack{}, nil, inventoryErr
+		if verifiedInventory == nil ||
+			verifiedInventory.baselineCommit != evidenceRepo.Baseline() ||
+			verifiedInventory.rawSHA256 != digest(inventoryBytes) {
+			inventoryDiagnostics, inventoryErr := validateReportInventory(
+				ctx,
+				evidenceRepo,
+				pack.Inventory,
+				inventoryPath,
+			)
+			if inventoryErr != nil {
+				return Pack{}, nil, inventoryErr
+			}
+			diagnostics = append(diagnostics, inventoryDiagnostics...)
 		}
-		diagnostics = append(diagnostics, inventoryDiagnostics...)
 	}
 	if pack.Manifest.Orientation.Path == orientationPath {
 		orientation, orientationDiagnostics, orientationErr := loadOrientation(

@@ -39,7 +39,8 @@ stop generation continuation.
 Projection drift returns `blocked`, sets `proposal_reusable` to false, and names
 `projection_recovery` before validation and rendering in the repeat stages.
 Preserve canonical sources and manual edits while reconciling the reported
-derived files through explicit review. Rerun assessment afterward.
+derived files through explicit review. Rerun assessment afterward. A source that's missing or nonregular when captured
+also stops the assessment. A later file appearance requires a fresh assessment.
 
 ## Correct a validation problem
 
@@ -76,7 +77,10 @@ derived; edit canonical sources rather than their generated projection.
 Incomplete, malformed, or inconsistent inventory can't support reuse. The CLI
 checks complete schema 2 accounting and reconstructs the deterministic Git
 inventory at the recorded limits. This verification uses Git blobs rather than
-repeating the agent's semantic repository analysis. A changed HEAD blocks reuse
+repeating the agent's semantic repository analysis. A normal completed-proposal
+assessment reconstructs inventory once, then rechecks retained byte identities.
+Separate validation and rendering commands check their inputs again. A changed
+HEAD blocks reuse
 of old inventory; a manifest with another baseline blocks proposal reuse.
 Tracked baseline-source edits also block continuation. Manual text surrounding
 the managed `AGENTS.md` section is preserved by the existing renderer; edited
