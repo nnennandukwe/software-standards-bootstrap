@@ -316,7 +316,7 @@ func validateManifestLayoutPack(
 		diagnostics = append(diagnostics, validateOrientationRelationships(orientationPath, pack.Orientation, entriesByID)...)
 	}
 	diagnostics = append(diagnostics, validateRootCore(manifestPath, pack.Manifest.RootCore, entriesByID)...)
-	unlisted, scanDiagnostics, scanErr := unlistedNativeArtifacts(repo.Root(), entriesByPath)
+	unlisted, scanDiagnostics, scanErr := unlistedNativeArtifacts(ctx, repo.Root(), entriesByPath)
 	if scanErr != nil {
 		return Pack{}, nil, scanErr
 	}

@@ -53,7 +53,10 @@ indexed skill directory to determine whether support files need review.
 Discovery stays within the repository tree and checks opened-directory
 identity. Canonical inputs are rechecked after discovery. Named skill paths
 are observations, so review all shared skill work and later changes before
-reuse; unindexed support files aren’t validated.
+reuse; unindexed support files aren’t validated. Native rule, verification, and
+automation discovery uses the same entry and path-name ceilings across its
+three directories. Over-budget discovery stops continuation with a
+diagnostic; no paths are removed.
 
 A tracked manifest or report returns `existing_pack`. This protects committed
 packs, including adopted packs, from being mistaken for interrupted generation.

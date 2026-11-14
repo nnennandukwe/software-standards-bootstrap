@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/inventory"
@@ -129,5 +130,65 @@ func TestIndexedSkillSupportProbeStaysInsideItsRoot(t *testing.T) {
 	}}
 	if support, err := repositorySkillHasSupport(ctx, anchor, relative); err == nil || support {
 		t.Fatalf("support probe followed outside link: support=%t err=%v", support, err)
+	}
+}
+
+func TestNativeArtifactDiscoveryEnforcesBudgetsBeforeCollectingEverything(t *testing.T) {
+	for _, budget := range []string{"entries", "names"} {
+		t.Run(budget, func(t *testing.T) {
+			root := t.TempDir()
+			directory := filepath.Join(root, ".software-standards/rules")
+			if err := os.MkdirAll(directory, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"one.md", "two.md", "other.tmp"} {
+				if err := os.WriteFile(filepath.Join(directory, name), []byte("manual work"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			limits := inventory.DefaultLimits()
+			if budget == "entries" {
+				limits.MaxCandidateFiles = 2
+			} else {
+				limits.MaxFileBytes = 8
+			}
+			paths, diagnostics, err := unlistedNativeArtifactsLimited(context.Background(), root, map[string]AcceptedArtifact{}, limits)
+			bounded := false
+			for _, d := range diagnostics {
+				bounded = bounded || strings.Contains(d.Message, "limit")
+			}
+			if err != nil || len(paths) != 0 || !bounded {
+				t.Fatalf("native discovery budget wasn't enforced: paths=%q diagnostics=%#v err=%v", paths, diagnostics, err)
+			}
+			for _, name := range []string{"one.md", "two.md", "other.tmp"} {
+				if content, err := os.ReadFile(filepath.Join(directory, name)); err != nil || string(content) != "manual work" {
+					t.Fatalf("discovery changed native work: %q %v", content, err)
+				}
+			}
+		})
+	}
+}
+
+func TestNativeArtifactDiscoveryDoesntFollowDirectorySwaps(t *testing.T) {
+	root := t.TempDir()
+	directory := filepath.Join(root, ".software-standards/rules")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "outside-only.md"), []byte("Outside fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := &skillOpenContext{Context: context.Background(), action: func() {
+		if err := os.Rename(directory, directory+"-held"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, directory); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+	}}
+	paths, diagnostics, err := unlistedNativeArtifactsLimited(ctx, root, map[string]AcceptedArtifact{}, inventory.DefaultLimits())
+	if err == nil {
+		t.Fatalf("native discovery followed an outside directory: paths=%q diagnostics=%#v", paths, diagnostics)
 	}
 }

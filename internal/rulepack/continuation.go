@@ -268,10 +268,10 @@ func verifyContinuation(ctx context.Context, repo *workspace.Repository, result 
 		}
 	}
 	if result.ProposalReusable {
-		return verifyContinuationArtifactSet(repo.Root(), pack.Manifest)
+		return verifyContinuationArtifactSet(ctx, repo.Root(), pack.Manifest)
 	}
 	if result.State == "needs_proposal" {
-		paths, diagnostics, err := partialContinuationPaths(repo.Root())
+		paths, diagnostics, err := partialContinuationPaths(ctx, repo.Root())
 		if err != nil {
 			return err
 		}
@@ -420,12 +420,12 @@ func repositorySkillHasSupport(ctx context.Context, anchor *os.Root, directory s
 	return false, nil
 }
 
-func verifyContinuationArtifactSet(root string, manifest Manifest) error {
+func verifyContinuationArtifactSet(ctx context.Context, root string, manifest Manifest) error {
 	listed := make(map[string]AcceptedArtifact, len(manifest.Artifacts))
 	for _, artifact := range manifest.Artifacts {
 		listed[artifact.Path] = artifact
 	}
-	unlisted, diagnostics, err := unlistedNativeArtifacts(root, listed)
+	unlisted, diagnostics, err := unlistedNativeArtifacts(ctx, root, listed)
 	if err != nil {
 		return err
 	}
@@ -443,8 +443,8 @@ func verifyContinuationArtifactSet(root string, manifest Manifest) error {
 	return nil
 }
 
-func partialContinuationPaths(root string) ([]string, []Diagnostic, error) {
-	paths, diagnostics, err := unlistedNativeArtifacts(root, map[string]AcceptedArtifact{})
+func partialContinuationPaths(ctx context.Context, root string) ([]string, []Diagnostic, error) {
+	paths, diagnostics, err := unlistedNativeArtifacts(ctx, root, map[string]AcceptedArtifact{})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -463,7 +463,7 @@ func partialContinuationFiles(ctx context.Context, root string) ([]FileReference
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	paths, diagnostics, err := partialContinuationPaths(root)
+	paths, diagnostics, err := partialContinuationPaths(ctx, root)
 	if err != nil {
 		return nil, nil, err
 	}

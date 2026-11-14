@@ -1,6 +1,7 @@
 package rulepack
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/nnennandukwe/software-standards-bootstrap/internal/inventory"
+	"github.com/nnennandukwe/software-standards-bootstrap/internal/workspace"
 )
 
 func readManifestArtifact(root string, manifest AcceptedArtifact) ([]byte, []Diagnostic, error) {
@@ -179,79 +181,112 @@ func findSymlinkComponent(root, relative string) (string, bool, error) {
 	return "", false, nil
 }
 
-func unlistedNativeArtifacts(
-	root string,
-	listed map[string]AcceptedArtifact,
-) ([]string, []Diagnostic, error) {
-	directories := []struct {
-		relative string
-		suffix   string
-	}{
+func unlistedNativeArtifacts(ctx context.Context, root string, listed map[string]AcceptedArtifact) ([]string, []Diagnostic, error) {
+	return unlistedNativeArtifactsLimited(ctx, root, listed, inventory.DefaultLimits())
+}
+
+func unlistedNativeArtifactsLimited(ctx context.Context, root string, listed map[string]AcceptedArtifact, limits inventory.Limits) ([]string, []Diagnostic, error) {
+	anchor, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer anchor.Close()
+	directories := []struct{ relative, suffix string }{
 		{relative: ".software-standards/rules", suffix: ".md"},
 		{relative: ".software-standards/verification", suffix: ".yaml"},
 		{relative: ".software-standards/automation", suffix: ".yaml"},
 	}
 	unlisted := make([]string, 0)
 	diagnostics := make([]Diagnostic, 0)
+	var entriesSeen int
+	var nameBytes int64
 	for _, directory := range directories {
-		absolute := filepath.Join(root, filepath.FromSlash(directory.relative))
-		info, err := os.Lstat(absolute)
+		expected, err := anchor.Lstat(filepath.FromSlash(directory.relative))
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("inspect artifact directory %s: %w", directory.relative, err)
 		}
-		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-			diagnostics = append(diagnostics, diagnostic(
-				directory.relative,
-				"file",
-				"artifact directory "+directory.relative+" must be a real directory, not a symlink",
-				"replace it with a directory inside the repository",
-			))
+		if expected.Mode()&os.ModeSymlink != 0 || !expected.IsDir() {
+			diagnostics = append(diagnostics, diagnostic(directory.relative, "file", "artifact directory "+directory.relative+" must be a real directory, not a symlink", "replace it with a directory inside the repository"))
 			continue
 		}
-		entries, err := os.ReadDir(absolute)
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		store, err := anchor.Open(filepath.FromSlash(directory.relative))
 		if err != nil {
 			return nil, nil, fmt.Errorf("read artifact directory %s: %w", directory.relative, err)
 		}
-		for _, entry := range entries {
-			relative := path.Join(directory.relative, entry.Name())
-			if entry.IsDir() {
-				diagnostics = append(diagnostics, diagnostic(
-					relative,
-					"file",
-					"native artifact directories must be flat",
-					"move the artifact to the top-level canonical directory or remove the nested directory",
-				))
-				continue
+		defer store.Close()
+		opened, err := store.Stat()
+		if err != nil {
+			return nil, nil, err
+		}
+		if !opened.IsDir() || !os.SameFile(expected, opened) {
+			return nil, nil, fmt.Errorf("%w: native artifact directory changed during discovery", workspace.ErrPrecondition)
+		}
+		diagnosticStart := len(diagnostics)
+		for {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, err
 			}
-			info, err := entry.Info()
-			if err != nil {
-				return nil, nil, fmt.Errorf("inspect artifact path %s: %w", relative, err)
+			entries, readErr := store.ReadDir(256)
+			if readErr != nil && !errors.Is(readErr, io.EOF) {
+				return nil, nil, fmt.Errorf("read artifact directory %s: %w", directory.relative, readErr)
 			}
-			if entry.Type()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-				diagnostics = append(diagnostics, diagnostic(
-					relative,
-					"file",
-					"native artifact paths must be real regular files",
-					"replace the path with a canonical regular artifact file or remove it",
-				))
-				continue
+			entriesSeen += len(entries)
+			if entriesSeen > limits.MaxCandidateFiles {
+				return nil, []Diagnostic{diagnostic(".software-standards", "files", "native discovery exceeds the candidate-file limit", "preserve the pack and review its entry count before continuation")}, nil
 			}
-			if !strings.HasSuffix(entry.Name(), directory.suffix) {
-				diagnostics = append(diagnostics, diagnostic(
-					relative,
-					"file",
-					relative+" is not a supported artifact path",
-					"use the canonical "+directory.suffix+" extension at the top level or remove the file",
-				))
-				continue
+			for _, entry := range entries {
+				if err := ctx.Err(); err != nil {
+					return nil, nil, err
+				}
+				relative := path.Join(directory.relative, entry.Name())
+				nameBytes += int64(len(fmt.Sprintf("%q", relative)))
+				if nameBytes > limits.MaxFileBytes {
+					return nil, []Diagnostic{diagnostic(".software-standards", "files", "native discovery exceeds the path-name byte limit", "preserve the pack and review its path names before continuation")}, nil
+				}
+				if entry.IsDir() {
+					diagnostics = append(diagnostics, diagnostic(relative, "file", "native artifact directories must be flat", "move the artifact to the top-level canonical directory or remove the nested directory"))
+					continue
+				}
+				info, err := anchor.Lstat(filepath.FromSlash(relative))
+				if err != nil {
+					return nil, nil, fmt.Errorf("inspect artifact path %s: %w", relative, err)
+				}
+				if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+					diagnostics = append(diagnostics, diagnostic(relative, "file", "native artifact paths must be real regular files", "replace the path with a canonical regular artifact file or remove it"))
+					continue
+				}
+				if !strings.HasSuffix(entry.Name(), directory.suffix) {
+					diagnostics = append(diagnostics, diagnostic(relative, "file", relative+" is not a supported artifact path", "use the canonical "+directory.suffix+" extension at the top level or remove the file"))
+					continue
+				}
+				if _, exists := listed[relative]; !exists {
+					unlisted = append(unlisted, relative)
+				}
 			}
-			if _, exists := listed[relative]; !exists {
-				unlisted = append(unlisted, relative)
+			if errors.Is(readErr, io.EOF) {
+				break
 			}
 		}
+		current, err := anchor.Lstat(filepath.FromSlash(directory.relative))
+		if err != nil {
+			return nil, nil, err
+		}
+		if !current.IsDir() || !os.SameFile(opened, current) {
+			return nil, nil, fmt.Errorf("%w: native artifact directory changed during discovery", workspace.ErrPrecondition)
+		}
+		part := diagnostics[diagnosticStart:]
+		sort.SliceStable(part, func(i, j int) bool {
+			if part[i].Path != part[j].Path {
+				return part[i].Path < part[j].Path
+			}
+			return part[i].Message < part[j].Message
+		})
 	}
 	sort.Strings(unlisted)
 	return unlisted, diagnostics, nil
