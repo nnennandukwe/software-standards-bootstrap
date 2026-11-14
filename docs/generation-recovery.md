@@ -33,7 +33,13 @@ the manifest also block full proposal validation until explicitly reconciled.
 A tracked manifest or report returns `existing_pack`. This protects committed
 packs, including adopted packs, from being mistaken for interrupted generation.
 Git tracking alone can't establish the developer's adoption decision. Embedded
-packs keep their existing maintenance workflow.
+packs keep their existing maintenance workflow. `existing_pack` exits `1` to
+stop generation continuation.
+
+Projection drift returns `blocked`, sets `proposal_reusable` to false, and names
+`projection_recovery` before validation and rendering in the repeat stages.
+Preserve canonical sources and manual edits while reconciling the reported
+derived files through explicit review. Rerun assessment afterward.
 
 ## Correct a validation problem
 

@@ -98,7 +98,7 @@ func TestResumeCorrectedValidationThroughRendering(t *testing.T) {
 	}
 	git(t, repo, "add", ".software-standards", "AGENTS.md")
 	git(t, repo, "commit", "-m", "reviewed pack fixture")
-	result = resumeResult(t, repo, 0)
+	result = resumeResult(t, repo, 1)
 	if result.State != "existing_pack" || result.ProposalReusable || len(result.Repeat) != 0 {
 		t.Fatalf("tracked pack treated as generation: %#v", result)
 	}
@@ -209,7 +209,7 @@ func TestResumePreservesManualTrackedChangesAndProjectionDrift(t *testing.T) {
 	agents := filepath.Join(repo, "AGENTS.md")
 	replaceResumeText(t, agents, "Software Standards Bootstrap", "Manually changed projection")
 	result := resumeResult(t, repo, 1)
-	if result.State != "blocked" || !strings.Contains(fmt.Sprint(result.Diagnostics), "preserve manual edits") {
+	if result.State != "blocked" || result.ProposalReusable || strings.Contains(strings.Join(result.Guidance, " "), "Run ssb render") || !strings.Contains(strings.Join(result.Guidance, " "), "Projection checks blocked continuation") || !strings.Contains(fmt.Sprint(result.Diagnostics), "preserve manual edits") {
 		t.Fatalf("projection drift: %#v", result)
 	}
 }
@@ -308,6 +308,15 @@ func resumeSnapshot(t *testing.T, repo string) map[string]string {
 			if entry.Name() == ".git" {
 				return filepath.SkipDir
 			}
+			relative, err := filepath.Rel(repo, path)
+			if err != nil {
+				return err
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			snapshot[relative] = "directory:" + info.Mode().String()
 			return nil
 		}
 		relative, err := filepath.Rel(repo, path)
@@ -473,5 +482,24 @@ func TestResumeEmptyProposalStillRequiresDeveloperReview(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(repo, "AGENTS.md")); !os.IsNotExist(err) {
 		t.Fatalf("empty proposal created a projection: %v", err)
+	}
+}
+
+func TestResumeProjectionRejectionsStopBeforeRendering(t *testing.T) {
+	for _, target := range []string{"malformed markers", "nonregular target"} {
+		t.Run(target, func(t *testing.T) {
+			repo, baseline := evidenceRepository(t)
+			writeValidManifestLayoutPack(t, repo, baseline)
+			agents := filepath.Join(repo, "AGENTS.md")
+			if target == "malformed markers" {
+				writeFile(t, agents, "# Manual text\n\n<!-- software-standards-bootstrap:start -->\n")
+			} else if err := os.Mkdir(agents, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			result := resumeResult(t, repo, 1)
+			if result.State != "blocked" || result.ProposalReusable || !result.InventoryReusable || len(result.Repeat) == 0 || result.Repeat[0] != "projection_recovery" || strings.Contains(strings.Join(result.Guidance, " "), "Run ssb render") {
+				t.Fatalf("projection rejection gave continuation permission: %#v", result)
+			}
+		})
 	}
 }

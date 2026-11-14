@@ -45,6 +45,9 @@ func runResume(ctx context.Context, args []string, stdout, stderr io.Writer) int
 				return writeResumeError(stderr, err)
 			}
 			result.State = "blocked"
+			result.ProposalReusable = false
+			result.Repeat = []string{"projection_recovery", "validation", "rendering", "developer_review"}
+			result.Guidance = []string{"Projection checks blocked continuation. Preserve canonical sources and manual edits; reconcile the reported derived files through explicit review, then rerun ssb resume. Inventory verification remains reusable."}
 			result.Diagnostics = append(result.Diagnostics, rulepack.Diagnostic{Path: "AGENTS.md", Field: "projection", Message: err.Error(), Recovery: "preserve manual edits; restore derived surfaces through explicit review, then rerun ssb resume"})
 		} else if !projection.Changed {
 			result.State = "complete"
@@ -73,7 +76,7 @@ func runResume(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			writeValidationDiagnostics(stderr, result.Diagnostics)
 		}
 	}
-	if len(result.Diagnostics) != 0 || result.State == "blocked" || result.State == "needs_correction" {
+	if len(result.Diagnostics) != 0 || result.State == "blocked" || result.State == "needs_correction" || result.State == "existing_pack" {
 		return 1
 	}
 	return 0

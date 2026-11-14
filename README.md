@@ -417,7 +417,7 @@ values. Verification steps always expose normalized `working_directory`,
 including `.` for `verification/v1`. Invalid output omits `pack`.
 
 - `0`: success
-- `1`: pack, continuation, or prune-proposal validation failure
+- `1`: pack/proposal validation failure or blocked generation continuation
 - `2`: usage or repository precondition failure
 - `3`: unexpected internal failure
 - `4`: inventory coverage incomplete
