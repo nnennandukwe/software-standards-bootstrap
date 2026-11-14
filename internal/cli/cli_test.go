@@ -282,6 +282,7 @@ func TestHelpDocumentsOnlyTheCanonicalCommandForms(t *testing.T) {
 		t.Fatalf("help failed: exit=%d stderr=%q", code, stderr.String())
 	}
 	for _, form := range []string{
+		"ssb resume   [--repo PATH] [--format text|json]",
 		"ssb inspect  [--repo PATH] [--format text|json]",
 		"ssb validate [--repo PATH] [--format text|json]",
 		"ssb render   [--repo PATH] [--review ID] [--dry-run]",
@@ -305,7 +306,7 @@ func TestHelpDocumentsOnlyTheCanonicalCommandForms(t *testing.T) {
 }
 
 func TestEachSubcommandProvidesSuccessfulFocusedHelp(t *testing.T) {
-	for _, command := range []string{"inspect", "validate", "render", "adr"} {
+	for _, command := range []string{"inspect", "resume", "validate", "render", "adr"} {
 		t.Run(command, func(t *testing.T) {
 			var stdout bytes.Buffer
 			var stderr bytes.Buffer

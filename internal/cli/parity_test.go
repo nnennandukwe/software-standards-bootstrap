@@ -14,6 +14,7 @@ func TestREADMEAndAgentSkillMatchTheExecutableCommandContract(t *testing.T) {
 	skill := readText(t, filepath.Join(root, "skills", "software-standards-bootstrap", "SKILL.md"))
 
 	for _, form := range []string{
+		"ssb resume   [--repo PATH] [--format text|json]",
 		"ssb inspect  [--repo PATH] [--format text|json] [resource limits]",
 		"ssb validate [--repo PATH] [--format text|json]",
 		"ssb render   [--repo PATH] [--review ID] [--dry-run]",

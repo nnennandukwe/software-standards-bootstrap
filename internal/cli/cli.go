@@ -106,6 +106,8 @@ func dispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 			stdout,
 			stderr,
 		)
+	case "resume":
+		return runResume(ctx, args[1:], stdout, stderr)
 	case "validate":
 		return runValidate(
 			ctx,

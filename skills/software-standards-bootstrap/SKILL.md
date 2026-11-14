@@ -30,18 +30,71 @@ prune proposal.
 
 ## Choose the mode
 
-If neither `.software-standards/manifest.yaml` nor
-`.software-standards/report.md` exists, use generation mode. A safe regular
-`manifest.yaml` selects the manifest layout; otherwise a frontmatter-based
-`ssb.dev/report/v1` report selects the embedded layout. When either pack exists:
+Use interrupted-generation continuation mode first when the developer explicitly
+asks to continue or recover generation. Otherwise, an existing
+`.software-standards` directory protects every retained file, including an
+inventory-only run: don't start generation over it. If the directory doesn't
+exist, use generation mode. A safe regular `manifest.yaml` selects the manifest
+layout; otherwise a frontmatter-based `ssb.dev/report/v1` report selects the
+embedded layout. When a pack exists:
 
 - use reviewed-pack maintenance mode only for an explicit request to validate
   or rerender developer-edited sources;
 - use requested-ADR mode only after an explicit request for the adoption record;
 - use governed lifecycle review mode only for an explicit adopted-pack review;
 - stop on regeneration and explain that the existing pack must be reviewed and
-  removed deliberately; never overwrite it; or
+  moved aside deliberately; never overwrite it; or
 - otherwise use existing-pack consumption mode.
+
+### Interrupted-generation continuation mode
+
+Run the read-only assessment before reusing retained output:
+
+```bash
+ssb resume --repo . --format json
+```
+
+Report `state`, `baseline_commit`, `inventory_reusable`, `proposal_reusable`,
+`retained_files` raw-byte identities, `repeat` stages, and diagnostics. The
+assessment verifies inventory against pinned Git blobs without repeating the
+agent's repository analysis. Its result is a point-in-time observation; rerun
+it after changes or another interruption. It never writes files or approves a
+pack.
+
+1. For `blocked`, stop. Preserve every retained file and manual edit. Incomplete
+   or inconsistent inventory and changed baselines require deliberate recovery
+   before inspection or semantic work can be reused. Never relabel old
+   evidence with a new commit. For `existing_pack`, stop generation and use
+   consumption or explicitly requested maintenance; tracked files don't prove
+   adoption.
+2. For `needs_proposal`, reuse only the verified inventory as completed work.
+   Preserve partial proposals as review material. Read the generation schemas
+   and workflows, review retained candidates against pinned blobs, and finish
+   only missing semantic work. Existing unindexed files aren't completed or
+   adopted guidance. Don't replace a retained source or manual edit merely
+   because a target already exists. Write `manifest.yaml` last after the
+   intended proposal and its raw-byte digests are complete.
+3. For `needs_correction`, stop before rendering. Reuse verified inventory and
+   unaffected proposal work. Apply only corrections authorized by the
+   developer's request to affected canonical sources or manifest metadata;
+   preserve manual edits and resolve conflicting intent before changing them.
+   Deliberately update each changed source's matching `sha256:` value. Repeat
+   semantic judgments only where the correction changes them. Rerun
+   `ssb resume --repo . --format json` and `ssb validate --repo . --format text`.
+   Don't repeat repository inspection or semantic generation for a source-only
+   validation correction.
+4. For `ready_to_render`, run the validation and projection commands in
+   generation step 5. For `complete`, the proposal validates and its projection
+   is current; disclose the complete uncommitted result using generation step
+   6. Preserve the developer review and adoption gate in both cases. An empty
+   pack can be complete without creating a projection.
+
+Stop on nonzero exit status. A `needs_correction` response exits `1` and
+identifies the correction work; it isn't permission to render. `needs_proposal`
+exits `0` to report an operable continuation, while `proposal_reusable` remains
+false. Never silently repair a source, refresh all digests, remove an existing
+pack, run recipe commands, or treat completion as adoption. Embedded-layout
+packs retain their existing maintenance workflow.
 
 ### Existing-pack consumption mode
 
@@ -311,7 +364,8 @@ inventory rows or machine metadata. A zero-artifact manifest is valid.
 Verification recipes and automation proposals use their native YAML schemas.
 Their exact primary bytes are digest-bound by the manifest.
 
-If any target exists, stop instead of overwriting developer work.
+If any target exists during fresh generation, stop instead of overwriting developer work.
+Use the explicit continuation mode for retained generation output.
 
 ### 5. Validate and project
 
