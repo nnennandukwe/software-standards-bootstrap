@@ -57,6 +57,12 @@ Git tracking alone can't establish the developer's adoption decision. Embedded
 packs keep their existing maintenance workflow. `existing_pack` exits `1` to
 stop generation continuation.
 
+Without a manifest, a report declaring `ssb.dev/report/v1` returns `blocked`
+with its existing `ssb validate` and `ssb render` workflow. It doesn't require
+standalone inventory or direct the developer to create a manifest. This
+recognizes the layout without claiming the pack is valid or adopted;
+generation recovery doesn't migrate embedded-layout packs.
+
 Projection drift returns `blocked`, sets `proposal_reusable` to false, and names
 `projection_recovery` before validation and rendering in the repeat stages.
 Preserve canonical sources and manual edits while reconciling the reported
