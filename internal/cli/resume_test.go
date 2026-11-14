@@ -1340,3 +1340,37 @@ func TestResumeRechecksPartialSourceIdentities(t *testing.T) {
 		t.Fatalf("fresh partial-source review failed: %#v", retry)
 	}
 }
+
+func TestResumeCannotSwitchValidationLayoutsAfterCapturingAManifest(t *testing.T) {
+	repo, baseline := evidenceRepository(t)
+	writeValidManifestLayoutPack(t, repo, baseline)
+	manifestPath := filepath.Join(repo, ".software-standards/manifest.yaml")
+	reportPath := filepath.Join(repo, ".software-standards/report.md")
+	rulePath := filepath.Join(repo, ".software-standards/rules/verify-before-merge.md")
+	invalidManifest := strings.Replace(readText(t, manifestPath), "confidence: high", "confidence: low", 1)
+	report, rule := readText(t, reportPath), readText(t, rulePath)
+	removeResumeFile(t, repo, ".software-standards/manifest.yaml")
+	writeValidPack(t, repo, baseline)
+	runResumeCommand(t, []string{"validate", "--repo", repo}, 0)
+	embeddedReport, embeddedRule := readText(t, reportPath), readText(t, rulePath)
+	restore := func() {
+		writeFile(t, manifestPath, invalidManifest)
+		writeFile(t, reportPath, report)
+		writeFile(t, rulePath, rule)
+	}
+	restore()
+	runResumeCommand(t, []string{"validate", "--repo", repo}, 1)
+	before := resumeSnapshot(t, repo)
+	ctx := &validationSwapContext{Context: t.Context(), beforeValidation: func() {
+		removeResumeFile(t, repo, ".software-standards/manifest.yaml")
+		writeFile(t, reportPath, embeddedReport)
+		writeFile(t, rulePath, embeddedRule)
+	}, afterValidation: restore}
+	var output, diagnostics bytes.Buffer
+	code := cli.RunContext(ctx, []string{"resume", "--repo", repo, "--format", "json"}, &output, &diagnostics)
+	if !ctx.started.Load() || !ctx.finished.Load() || code != 2 || output.Len() != 0 || !strings.Contains(diagnostics.String(), "manifest changed during continuation validation") {
+		t.Fatalf("captured manifest allowed embedded validation: started=%t finished=%t exit=%d stdout=%q stderr=%q", ctx.started.Load(), ctx.finished.Load(), code, output.String(), diagnostics.String())
+	}
+	assertResumeSnapshot(t, repo, before)
+	runResumeCommand(t, []string{"validate", "--repo", repo}, 1)
+}

@@ -139,6 +139,8 @@ and an optional orientation file that appears without a manifest reference.
 The manifest must bind the captured inventory and source bytes before full
 validation. Validation must also use the captured manifest bytes; temporarily
 replacing inputs and restoring their old bytes can't authorize reuse.
+A captured manifest also fixes the validation layout. Its disappearance during
+validation stops assessment instead of selecting the embedded-layout parser.
 
 A successful projection remains a proposal until developer review and the
 adoption decision through the developer-created pull request and merge. Stop

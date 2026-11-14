@@ -45,6 +45,9 @@ func validateActionablePack(
 	case err == nil:
 		return validateManifestLayoutPack(ctx, repo, retained, snapshot)
 	case errors.Is(err, os.ErrNotExist):
+		if snapshot != nil {
+			return Pack{}, nil, fmt.Errorf("%w: manifest changed during continuation validation; preserve edits and rerun ssb resume", workspace.ErrPrecondition)
+		}
 		return validateEmbeddedLayoutPack(ctx, repo, retained)
 	default:
 		return Pack{}, nil, fmt.Errorf("inspect .software-standards/manifest.yaml: %w", err)
