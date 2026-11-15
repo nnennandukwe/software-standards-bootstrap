@@ -85,7 +85,8 @@ also stops the assessment. A later correction requires a fresh assessment.
 1. Run `ssb resume --repo . --format json` and read its diagnostics. Exit `1`
    means correction or trust checks still block progression. Exit `0` can
    report `needs_proposal`; check the state and `proposal_reusable` before
-   rendering.
+   rendering. A repository precondition failure, such as an edited baseline
+   file, exits `2` and writes recovery guidance to stderr.
 2. Edit only affected canonical sources or manifest fields after reviewing the
    intended correction. Update each changed source's matching manifest
    `sha256:` value using its exact raw bytes, including line endings. For
