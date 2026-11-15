@@ -1,6 +1,9 @@
 # Continue interrupted standards generation
 
-Run this command in the repository that holds the interrupted proposal:
+Check `ssb --help` for the `resume` command. If you're using v0.2.0,
+follow the [source-install instructions](../README.md#install) and use the
+skill from that checkout. Run the assessment in the repository that holds
+the interrupted proposal:
 
 ```bash
 ssb resume --repo . --format text

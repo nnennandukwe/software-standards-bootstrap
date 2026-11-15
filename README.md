@@ -93,6 +93,22 @@ With Go 1.26.9 installed, the CLI alone can also be installed from source:
 go install github.com/nnennandukwe/software-standards-bootstrap/cmd/ssb@v0.2.0
 ```
 
+The v0.2.0 binary supports the commands listed in its own `ssb --help`.
+For the matching instructions, use the [v0.2.0 guide](https://github.com/nnennandukwe/software-standards-bootstrap/tree/v0.2.0).
+
+The `resume` and `version` commands below are available in the source checkout
+after v0.2.0. To use them, clone this repository, open its root directory,
+and run:
+
+```bash
+go install ./cmd/ssb
+```
+
+Use the binary in `go env GOBIN`, or the `bin` directory under
+`go env GOPATH` when GOBIN is empty. Put that directory first on your PATH
+and check `ssb resume --help`. For agent-assisted recovery, use the
+`skills/software-standards-bootstrap` skill from the same checkout.
+
 ## What it generates
 
 ### Semantic rules
@@ -323,7 +339,9 @@ Use the software-standards-bootstrap skill to continue interrupted generation.
 Preserve the retained proposal and my manual edits.
 ```
 
-Start with `ssb resume --repo . --format text`. It reports reusable stages,
+With a CLI that lists `resume` in `ssb --help`, start with
+`ssb resume --repo . --format text`. For v0.2.0, follow the source-install
+steps in [Install](#install) first. It reports reusable stages,
 retained raw-byte digests, required work, and diagnostics without writing files.
 A source-only validation correction needs affected source edits, deliberate
 manifest digest updates, validation, and rendering. The verified inventory and
