@@ -347,6 +347,9 @@ func TestInstallerIsPackagedAndDocumentedBeforeProductDetail(t *testing.T) {
 
 	for _, required := range []string{
 		"curl -fsSL https://raw.githubusercontent.com/nnennandukwe/software-standards-bootstrap/main/install.sh | sh",
+		"go install ./cmd/ssb",
+		"ssb resume --help",
+		"https://github.com/nnennandukwe/software-standards-bootstrap/tree/v0.2.0",
 		"sh -s -- --skill-dir .agents/skills",
 		"\"$HOME/.local/bin/ssb\" --help",
 		"sh -s -- --version v0.2.0",
