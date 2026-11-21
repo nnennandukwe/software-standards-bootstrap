@@ -72,42 +72,42 @@ jobs:
           SSB_RELEASE_SOURCE_REF: ${{ github.ref_name }}
 
       - name: Attest archive provenance from the SHA-256 manifest
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-checksums: dist/checksums.txt
 
       - name: Attest macOS amd64 SBOM
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/ssb_${{ github.ref_name }}_darwin_amd64.tar.gz
           sbom-path: dist/ssb_${{ github.ref_name }}_darwin_amd64.tar.gz.spdx.json
 
       - name: Attest macOS arm64 SBOM
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/ssb_${{ github.ref_name }}_darwin_arm64.tar.gz
           sbom-path: dist/ssb_${{ github.ref_name }}_darwin_arm64.tar.gz.spdx.json
 
       - name: Attest Linux amd64 SBOM
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/ssb_${{ github.ref_name }}_linux_amd64.tar.gz
           sbom-path: dist/ssb_${{ github.ref_name }}_linux_amd64.tar.gz.spdx.json
 
       - name: Attest Linux arm64 SBOM
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/ssb_${{ github.ref_name }}_linux_arm64.tar.gz
           sbom-path: dist/ssb_${{ github.ref_name }}_linux_arm64.tar.gz.spdx.json
 
       - name: Attest Windows amd64 SBOM
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/ssb_${{ github.ref_name }}_windows_amd64.zip
           sbom-path: dist/ssb_${{ github.ref_name }}_windows_amd64.zip.spdx.json
 
       - name: Attest Windows arm64 SBOM
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/ssb_${{ github.ref_name }}_windows_arm64.zip
           sbom-path: dist/ssb_${{ github.ref_name }}_windows_arm64.zip.spdx.json
