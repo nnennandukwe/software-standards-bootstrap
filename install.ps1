@@ -55,7 +55,7 @@ $tempDir = $null
 $targetTemp = $null
 $skillTemp = $null
 $skillTarget = $null
-$skillInstalled = $false
+$publishingSkill = $false
 $exitCode = 0
 
 function Show-Usage {
@@ -111,11 +111,16 @@ function Remove-IfPresent {
 }
 
 function Invoke-Cleanup {
-    Remove-IfPresent $script:targetTemp
-    Remove-IfPresent $script:skillTemp
-    if ($script:skillInstalled) {
+    # Ctrl-C can end the pipeline immediately after either .NET move. A
+    # successful rename consumes its staging path, even if the next script
+    # statement never runs. Inspect those paths before removing either one.
+    if ($script:publishingSkill -and
+        -not [System.IO.Directory]::Exists($script:skillTemp) -and
+        [System.IO.File]::Exists($script:targetTemp)) {
         Remove-IfPresent $script:skillTarget
     }
+    Remove-IfPresent $script:targetTemp
+    Remove-IfPresent $script:skillTemp
     Remove-IfPresent $script:tempDir
 }
 
@@ -226,7 +231,6 @@ try {
         if (Test-EntryExists $skillTarget) {
             throw "Agent Skill already exists at $skillTarget; review or remove it before installing"
         }
-        $gitPath = Get-RequiredCommand 'git.exe'
     }
 
     if (-not $Version) {
@@ -293,16 +297,30 @@ try {
     }
 
     if ($SkillDir) {
-        $sourceCheckout = Join-Path $tempDir 'source'
-        $cloneExit = Invoke-NativeCommand $gitPath @(
-            '-c', 'advice.detachedHead=false', 'clone', '--quiet', '--depth', '1',
-            '--branch', $Version, '--single-branch',
-            "https://github.com/$repository.git", $sourceCheckout
-        )
-        if ($cloneExit -ne 0) {
-            throw "could not download the Agent Skill from release tag $Version"
+        $skillSource = Join-Path $extractDir 'skills\software-standards-bootstrap'
+        if ($Version -eq 'v0.1.0') {
+            # The first archive omitted SKILL.md. Read the historical LF sources.
+            $gitPath = Get-RequiredCommand 'git.exe'
+            $sourceCheckout = Join-Path $tempDir 'source'
+            $emptyAttributes = Join-Path $tempDir 'empty-attributes'
+            [System.IO.File]::WriteAllText($emptyAttributes, '')
+            $previousNoSystemAttributes = $env:GIT_ATTR_NOSYSTEM
+            try {
+                $env:GIT_ATTR_NOSYSTEM = '1'
+                $cloneExit = Invoke-NativeCommand $gitPath @(
+                    '-c', "core.attributesFile=$emptyAttributes", '-c', 'core.autocrlf=false', '-c', 'core.eol=lf',
+                    '-c', 'advice.detachedHead=false', 'clone', '--quiet', '--depth', '1',
+                    '--branch', $Version, '--single-branch',
+                    "https://github.com/$repository.git", $sourceCheckout
+                )
+            } finally {
+                $env:GIT_ATTR_NOSYSTEM = $previousNoSystemAttributes
+            }
+            if ($cloneExit -ne 0) {
+                throw "could not download the Agent Skill from release tag $Version"
+            }
+            $skillSource = Join-Path $sourceCheckout 'skills\software-standards-bootstrap'
         }
-        $skillSource = Join-Path $sourceCheckout 'skills\software-standards-bootstrap'
         if (-not (Test-Path -LiteralPath (Join-Path $skillSource 'SKILL.md') -PathType Leaf)) {
             throw "release tag $Version does not contain the software-standards-bootstrap Agent Skill"
         }
@@ -326,9 +344,8 @@ try {
         }
         # Directory.Move throws when the destination exists. Move-Item -Force
         # would nest the source inside it and report success instead.
+        $publishingSkill = $true
         [System.IO.Directory]::Move($skillTemp, $skillTarget)
-        $skillTemp = $null
-        $skillInstalled = $true
     }
 
     # File.Move has no overwrite overload on .NET Framework, and deleting the
@@ -343,8 +360,6 @@ try {
     } else {
         [System.IO.File]::Move($targetTemp, $target)
     }
-    $targetTemp = $null
-    $skillInstalled = $false
 
     Write-Output "Installed ssb $Version to $target"
     if ($skillTarget) {
@@ -362,10 +377,6 @@ try {
     [Console]::Error.WriteLine("install.ps1: $($_.Exception.Message)")
     $exitCode = 1
 } finally {
-    # Runs on success, on a thrown failure, and on Ctrl-C, matching install.sh's
-    # trap cleanup 0 HUP INT TERM. A completed install has already cleared
-    # $targetTemp and $skillTemp and reset $skillInstalled, so on the success
-    # path this removes the download directory and nothing else.
     Invoke-Cleanup
 }
 

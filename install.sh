@@ -57,7 +57,8 @@ cleanup() {
   fi
 }
 
-trap cleanup 0 HUP INT TERM
+trap cleanup 0
+trap 'fail "installation interrupted"' HUP INT TERM
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -147,10 +148,6 @@ if [ -n "$skill_dir" ]; then
   if [ -e "$skill_target" ] || [ -L "$skill_target" ]; then
     fail "Agent Skill already exists at ${skill_target}; review or remove it before installing"
   fi
-  for command_name in git cp; do
-    command -v "$command_name" >/dev/null 2>&1 ||
-      fail "required command not found for --skill-dir: $command_name"
-  done
 fi
 
 if [ -z "$version" ]; then
@@ -212,11 +209,19 @@ chmod 0755 "${temp_dir}/ssb"
   fail "downloaded ssb binary could not run on ${release_os}/${release_arch}"
 
 if [ -n "$skill_dir" ]; then
-  source_checkout=${temp_dir}/source
-  git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$version" --single-branch \
-    "https://github.com/${REPOSITORY}.git" "$source_checkout" ||
-    fail "could not download the Agent Skill from release tag ${version}"
-  skill_source=${source_checkout}/skills/software-standards-bootstrap
+  skill_source=${temp_dir}/skills/software-standards-bootstrap
+  if [ "$version" = v0.1.0 ]; then
+    # This historical archive omitted SKILL.md. Its source tag has LF blobs.
+    command -v git >/dev/null 2>&1 || fail "git is required for the v0.1.0 Agent Skill"
+    GIT_ATTR_NOSYSTEM=1 git -c core.attributesFile=/dev/null -c core.autocrlf=false -c core.eol=lf \
+      -c advice.detachedHead=false clone --quiet --depth 1 --branch "$version" --single-branch \
+      "https://github.com/${REPOSITORY}.git" "${temp_dir}/source" ||
+      fail "could not download the Agent Skill from release tag ${version}"
+    skill_source=${temp_dir}/source/skills/software-standards-bootstrap
+  else
+    tar -xzf "$archive_path" -C "$temp_dir" 'skills/software-standards-bootstrap' ||
+      fail "could not extract the Agent Skill from ${asset}"
+  fi
   [ -f "${skill_source}/SKILL.md" ] ||
     fail "release tag ${version} does not contain the software-standards-bootstrap Agent Skill"
   mkdir -p "$skill_dir" || fail "could not create Agent Skill directory: $skill_dir"
@@ -233,16 +238,26 @@ target_temp=$(mktemp "${install_dir}/.ssb-install.XXXXXX") ||
 install -m 0755 "${temp_dir}/ssb" "$target_temp" ||
   fail "could not write the ssb binary to ${install_dir}"
 
+# Shell signal traps can run between a successful mv and the following
+# assignment. Defer handling until the result of each publication is known.
+# Let each move finish even if the terminal signals the whole process group.
+publish_move() (
+  trap '' HUP INT TERM
+  exec mv "$@"
+)
+interrupted=0
+trap 'interrupted=1' HUP INT TERM
 if [ -n "$skill_dir" ]; then
   if [ -e "$skill_target" ] || [ -L "$skill_target" ]; then
     fail "Agent Skill appeared during installation at ${skill_target}; no files were replaced"
   fi
-  mv "$skill_temp" "$skill_target" || fail "could not install the Agent Skill to ${skill_target}"
+  publish_move "$skill_temp" "$skill_target" || fail "could not install the Agent Skill to ${skill_target}"
   skill_temp=
   skill_installed=1
 fi
 
-mv -f "$target_temp" "$target" || fail "could not replace ${target}"
+[ "$interrupted" -eq 0 ] || fail "installation interrupted before replacing ${target}"
+publish_move -f "$target_temp" "$target" || fail "could not replace ${target}"
 target_temp=
 skill_installed=0
 
