@@ -116,3 +116,21 @@ jobs:
         run: gh release edit "${GITHUB_REF_NAME}" --draft=false --latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  windows-public-install:
+    name: Verify the public Windows installation
+    needs: release
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the published tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install and verify the public binary and skill
+        shell: pwsh
+        run: python scripts/verify-public-install.py "$env:GITHUB_REF_NAME"
