@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	fixtureBinary = "#!/bin/sh\nprintf 'ssb installer fixture\\n'\n"
-	fixtureSkill  = "---\nname: software-standards-bootstrap\n---\n"
+	fixtureBinary    = "#!/bin/sh\nprintf 'ssb installer fixture\\n'\n"
+	fixtureReference = "A tagged reference with LF.\n"
+	fixtureSkill     = "---\nname: software-standards-bootstrap\n---\n"
 )
 
 func TestInstallScriptInstallsVerifiedRelease(t *testing.T) {
@@ -88,14 +89,9 @@ func TestInstallScriptInstallsVerifiedRelease(t *testing.T) {
 				if !strings.Contains(output, "Installed Agent Skill to "+filepath.Dir(skillPath)) {
 					t.Fatalf("install output does not identify the Agent Skill path:\n%s", output)
 				}
-				cloneLog := readText(t, fixture.cloneLog)
-				for _, required := range []string{
-					"--branch " + test.version,
-					"https://github.com/nnennandukwe/software-standards-bootstrap.git",
-				} {
-					if !strings.Contains(cloneLog, required) {
-						t.Errorf("clone log missing %q:\n%s", required, cloneLog)
-					}
+				referencePath := filepath.Join(filepath.Dir(skillPath), "references", "routing.md")
+				if got := readText(t, referencePath); got != fixtureReference {
+					t.Fatalf("installed reference = %q, want exact release bytes", got)
 				}
 			}
 
@@ -113,6 +109,33 @@ func TestInstallScriptInstallsVerifiedRelease(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestInstallScriptPreservesDestinationsAfterDownloadFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("install.sh targets macOS and Linux")
+	}
+	fixture := newInstallerFixture(t, "v1.2.3", true)
+	if err := os.Remove(fixture.archive); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(fixture.installDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(fixture.installDir, "ssb")
+	if err := os.WriteFile(target, []byte("existing binary"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output, err := fixture.run("--version", "v1.2.3", "--skill-dir", fixture.skillDir)
+	if err == nil || !strings.Contains(output, "could not download") {
+		t.Fatalf("expected a download error: %v\n%s", err, output)
+	}
+	if got := readText(t, target); got != "existing binary" {
+		t.Fatalf("existing binary changed: %q", got)
+	}
+	if _, err := os.Stat(fixture.skillDir); !os.IsNotExist(err) {
+		t.Fatalf("unexpected skill directory: %v", err)
 	}
 }
 
@@ -143,6 +166,30 @@ func TestInstallScriptRejectsChecksumMismatchBeforeReplacingBinary(t *testing.T)
 	}
 	if string(installed) != "existing binary\n" {
 		t.Fatalf("existing binary changed after failed verification: %q", installed)
+	}
+}
+
+func TestInstallScriptChecksSkillCopyToolBeforeDownloading(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("install.sh targets macOS and Linux")
+	}
+	fixture := newInstallerFixture(t, "v1.2.3", true)
+	for _, name := range []string{"uname", "tar", "awk", "mktemp", "install", "rm"} {
+		command, err := exec.LookPath(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(command, filepath.Join(fixture.fakeBin, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fixture.environment = []string{"PATH=" + fixture.fakeBin}
+	output, err := fixture.run("--version", "v1.2.3", "--skill-dir", fixture.skillDir)
+	if err == nil || !strings.Contains(output, "required command not found for --skill-dir: cp") {
+		t.Fatalf("expected the missing skill copy tool in the diagnostic: %v\n%s", err, output)
+	}
+	if requests := readText(t, fixture.requestLog); requests != "" {
+		t.Fatalf("installer requested a download before checking for cp: %s", requests)
 	}
 }
 
@@ -235,7 +282,139 @@ func TestInstallScriptDoesNotOverwriteAnExistingAgentSkill(t *testing.T) {
 	}
 }
 
+// v0.1.0 packaged references but omitted the entrypoint.
+func fixtureArchiveSkill(version string) []archiveEntry {
+	entries := []archiveEntry{{name: bundledSkillDirectory + "/references/routing.md", data: []byte(fixtureReference), mode: 0o644}}
+	if version != "v0.1.0" {
+		entries = append(entries, archiveEntry{name: bundledSkillDirectory + "/SKILL.md", data: []byte(fixtureSkill), mode: 0o644})
+	}
+	return entries
+}
+
+// Redirect the historical source fetch to a real local tag. Checkout conversion
+// is deliberately enabled so comparing raw bytes exercises the user's Git configuration.
+func historicalSkillEnvironment(t *testing.T) []string {
+	t.Helper()
+	root := t.TempDir()
+	skill := filepath.Join(root, filepath.FromSlash(bundledSkillDirectory))
+	if err := os.MkdirAll(filepath.Join(skill, "references"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{"SKILL.md": fixtureSkill, "references/routing.md": fixtureReference} {
+		if err := os.WriteFile(filepath.Join(skill, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGitCommand(t, root, "init", "--quiet")
+	runGitCommand(t, root, "-c", "core.autocrlf=false", "add", "skills")
+	runGitCommand(t, root, "-c", "user.name=Fixture", "-c", "user.email=test@example.org", "-c", "commit.gpgSign=false", "commit", "--quiet", "-m", "historical skill")
+	runGitCommand(t, root, "-c", "tag.gpgSign=false", "tag", "v0.1.0")
+	return []string{
+		"GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_KEY_0=url." + filepath.ToSlash(root) + ".insteadOf",
+		"GIT_CONFIG_VALUE_0=https://github.com/nnennandukwe/software-standards-bootstrap.git",
+		"GIT_CONFIG_KEY_1=core.autocrlf",
+		"GIT_CONFIG_VALUE_1=true",
+	}
+}
+
+func TestInstallScriptHistoricalTagSkillBytes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("install.sh targets macOS and Linux")
+	}
+	fixture := newInstallerFixture(t, "v0.1.0", true)
+	fixture.environment = historicalSkillEnvironment(t)
+	output, err := fixture.run("--version", "v0.1.0", "--skill-dir", fixture.skillDir)
+	if err != nil {
+		t.Fatalf("historical install failed: %v\n%s", err, output)
+	}
+	assertHistoricalSkillBytes(t, fixture.skillDir)
+}
+
+func assertHistoricalSkillBytes(t *testing.T, skillDir string) {
+	t.Helper()
+	root := filepath.Join(skillDir, "software-standards-bootstrap")
+	if got := readText(t, filepath.Join(root, "SKILL.md")); got != fixtureSkill {
+		t.Fatalf("installed historical entrypoint = %q, want tagged LF bytes", got)
+	}
+	if got := readText(t, filepath.Join(root, "references", "routing.md")); got != fixtureReference {
+		t.Fatalf("installed historical reference = %q, want tagged LF bytes", got)
+	}
+}
+
+func TestInstallScriptInterruptAtRename(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("install.sh targets macOS and Linux")
+	}
+	for _, tc := range []struct {
+		name          string
+		afterBinary   bool
+		signalCommand bool
+	}{
+		{name: "after skill publication"},
+		{name: "after binary commit", afterBinary: true},
+		{name: "command and shell interrupted after skill publication", signalCommand: true},
+		{name: "command and shell interrupted after binary commit", afterBinary: true, signalCommand: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newInstallerFixture(t, "v1.2.3", true)
+			if err := os.MkdirAll(fixture.installDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			target := filepath.Join(fixture.installDir, "ssb")
+			writeExecutable(t, target, "existing binary")
+			fixture.environment = append(fixture.environment, fmt.Sprintf("SIGNAL_AFTER_BINARY=%t", tc.afterBinary), fmt.Sprintf("SIGNAL_COMMAND=%t", tc.signalCommand))
+			writeExecutable(t, filepath.Join(fixture.fakeBin, "mv"), `#!/bin/sh
+/bin/mv "$@" || exit 1
+case "$1:$SIGNAL_AFTER_BINARY" in
+  -f:true) ;;
+  -f:*) exit 0 ;;
+  *:false) ;;
+  *) exit 0 ;;
+esac
+kill -TERM "$PPID"
+if [ "$SIGNAL_COMMAND" = true ]; then kill -TERM "$$"; fi
+`)
+			output, err := fixture.run("--version", "v1.2.3", "--skill-dir", fixture.skillDir)
+			skillPath := filepath.Join(fixture.skillDir, "software-standards-bootstrap", "SKILL.md")
+			if tc.afterBinary {
+				if err != nil || !strings.Contains(output, "Installed Agent Skill") {
+					t.Fatalf("complete install reported wrong status: %v\n%s", err, output)
+				}
+				if got := readText(t, target); got != fixtureBinary {
+					t.Fatalf("committed binary = %q", got)
+				}
+				if got := readText(t, skillPath); got != fixtureSkill {
+					t.Fatalf("committed skill = %q", got)
+				}
+			} else {
+				if err == nil {
+					t.Fatalf("pre-commit interrupt reported success: %s", output)
+				}
+				if got := readText(t, target); got != "existing binary" {
+					t.Fatalf("old binary changed: %q", got)
+				}
+				if _, err := os.Stat(filepath.Dir(skillPath)); !os.IsNotExist(err) {
+					t.Fatalf("pre-commit skill remains: %v", err)
+				}
+			}
+			for _, dest := range []string{fixture.skillDir, fixture.installDir} {
+				entries, err := os.ReadDir(dest)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, entry := range entries {
+					if strings.HasPrefix(entry.Name(), ".") {
+						t.Errorf("staging path remains: %s", entry.Name())
+					}
+				}
+			}
+		})
+	}
+}
+
 type installerFixture struct {
+	environment   []string
 	t             *testing.T
 	root          string
 	fakeBin       string
@@ -245,7 +424,6 @@ type installerFixture struct {
 	archive       string
 	checksums     string
 	requestLog    string
-	cloneLog      string
 	assetName     string
 	latestVersion string
 }
@@ -272,9 +450,9 @@ func newInstallerFixture(t *testing.T, version string, validChecksum bool) *inst
 	}
 	assetName := fmt.Sprintf("ssb_%s_%s_%s.tar.gz", version, goos, goarch)
 	archive := filepath.Join(root, assetName)
-	writeTarGzip(t, archive, []archiveEntry{
-		{name: "ssb", data: []byte(fixtureBinary), mode: 0o755},
-	})
+	entries := []archiveEntry{{name: "ssb", data: []byte(fixtureBinary), mode: 0o755}}
+	entries = append(entries, fixtureArchiveSkill(version)...)
+	writeTarGzip(t, archive, entries)
 	digest, err := os.ReadFile(archive)
 	if err != nil {
 		t.Fatal(err)
@@ -292,10 +470,7 @@ func newInstallerFixture(t *testing.T, version string, validChecksum bool) *inst
 	if err := os.WriteFile(requestLog, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cloneLog := filepath.Join(root, "clone.log")
-	if err := os.WriteFile(cloneLog, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
+
 	writeExecutable(t, filepath.Join(fakeBin, "curl"), `#!/bin/sh
 output=
 write_format=
@@ -338,19 +513,6 @@ case "$url" in
     ;;
 esac
 `)
-	writeExecutable(t, filepath.Join(fakeBin, "git"), `#!/bin/sh
-printf '%s\n' "$*" >>"$FAKE_CLONE_LOG"
-destination=
-for argument in "$@"; do
-  destination=$argument
-done
-mkdir -p "$destination/skills/software-standards-bootstrap"
-cp "$FAKE_SKILL_SOURCE" "$destination/skills/software-standards-bootstrap/SKILL.md"
-`)
-	skillSource := filepath.Join(root, "fixture-SKILL.md")
-	if err := os.WriteFile(skillSource, []byte(fixtureSkill), 0o644); err != nil {
-		t.Fatal(err)
-	}
 
 	return &installerFixture{
 		t:             t,
@@ -362,7 +524,6 @@ cp "$FAKE_SKILL_SOURCE" "$destination/skills/software-standards-bootstrap/SKILL.
 		archive:       archive,
 		checksums:     checksums,
 		requestLog:    requestLog,
-		cloneLog:      cloneLog,
 		assetName:     assetName,
 		latestVersion: version,
 	}
@@ -373,6 +534,7 @@ func (fixture *installerFixture) run(arguments ...string) (string, error) {
 	script := filepath.Join(repositoryRoot(fixture.t), "install.sh")
 	command := exec.Command("sh", append([]string{script}, arguments...)...)
 	command.Env = append(os.Environ(),
+		"GIT_ALLOW_PROTOCOL=file",
 		"PATH="+fixture.fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"HOME="+fixture.home,
 		"FAKE_ARCHIVE="+fixture.archive,
@@ -380,9 +542,8 @@ func (fixture *installerFixture) run(arguments ...string) (string, error) {
 		"FAKE_CHECKSUMS="+fixture.checksums,
 		"FAKE_LATEST_URL=https://github.com/nnennandukwe/software-standards-bootstrap/releases/tag/"+fixture.latestVersion,
 		"FAKE_REQUEST_LOG="+fixture.requestLog,
-		"FAKE_CLONE_LOG="+fixture.cloneLog,
-		"FAKE_SKILL_SOURCE="+filepath.Join(fixture.root, "fixture-SKILL.md"),
 	)
+	command.Env = append(command.Env, fixture.environment...)
 	output, err := command.CombinedOutput()
 	return string(output), err
 }

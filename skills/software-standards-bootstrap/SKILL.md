@@ -7,7 +7,7 @@ metadata:
   project: software-standards-bootstrap
   schema: ssb.dev/manifest/v1
   category: developer-experience
-  version: 0.6.0
+  version: 0.7.0
 ---
 
 # Software Standards Bootstrap

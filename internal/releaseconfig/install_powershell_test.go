@@ -83,16 +83,9 @@ func TestInstallPowerShellScriptInstallsVerifiedRelease(t *testing.T) {
 				if !strings.Contains(output, "Installed Agent Skill to "+filepath.Dir(skillPath)) {
 					t.Fatalf("install output does not identify the Agent Skill path:\n%s", output)
 				}
-				cloneLog := readText(t, fixture.cloneLog)
-				for _, required := range []string{
-					"--branch " + test.version,
-					"--depth 1",
-					"--single-branch",
-					"https://github.com/nnennandukwe/software-standards-bootstrap.git",
-				} {
-					if !strings.Contains(cloneLog, required) {
-						t.Errorf("clone log missing %q:\n%s", required, cloneLog)
-					}
+				referencePath := filepath.Join(filepath.Dir(skillPath), "references", "routing.md")
+				if got := readText(t, referencePath); got != fixtureReference {
+					t.Fatalf("installed reference = %q, want exact release bytes", got)
 				}
 			}
 
@@ -107,6 +100,73 @@ func TestInstallPowerShellScriptInstallsVerifiedRelease(t *testing.T) {
 			} {
 				if !strings.Contains(requests, required) {
 					t.Errorf("request log missing %q:\n%s", required, requests)
+				}
+			}
+		})
+	}
+}
+
+func TestInstallPowerShellScriptHistoricalTagSkillBytes(t *testing.T) {
+	fixture := newPowerShellInstallerFixture(t, "v0.1.0", true)
+	fixture.environment = historicalSkillEnvironment(t)
+	output, err := fixture.run("-Version", "v0.1.0", "-SkillDir", fixture.skillDir)
+	if err != nil {
+		t.Fatalf("historical install failed: %v\n%s", err, output)
+	}
+	assertHistoricalSkillBytes(t, fixture.skillDir)
+}
+
+// Inject a terminating error immediately after the real .NET operation.
+// This exercises finally before PowerShell can update another script variable.
+func TestInstallPowerShellScriptInterruptAtRename(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		operation string
+		committed bool
+	}{
+		{name: "after skill publication", operation: "[System.IO.Directory]::Move($skillTemp, $skillTarget)"},
+		{name: "after binary replacement", operation: "[System.IO.File]::Replace($targetTemp, $target, [NullString]::Value)", committed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newPowerShellInstallerFixture(t, "v1.2.3", true)
+			installer := readText(t, filepath.Join(repositoryRoot(t), "install.ps1"))
+			if strings.Count(installer, tc.operation) != 1 {
+				t.Fatal("could not locate the publication operation")
+			}
+			script := filepath.Join(fixture.root, "interrupted.ps1")
+			installer = strings.Replace(installer, tc.operation, tc.operation+"\n        throw 'simulated interruption'", 1)
+			if err := os.WriteFile(script, []byte(installer), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(fixture.installDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			target := filepath.Join(fixture.installDir, "ssb.exe")
+			if err := os.WriteFile(target, []byte("existing binary"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			output, err := fixture.runScript(script, "-Version", "v1.2.3", "-SkillDir", fixture.skillDir)
+			if err == nil || !strings.Contains(output, "simulated interruption") {
+				t.Fatalf("installer missed the injected interrupt: %v\n%s", err, output)
+			}
+			got, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			skillTarget := filepath.Join(fixture.skillDir, "software-standards-bootstrap")
+			if tc.committed {
+				if !bytes.Equal(got, fixture.expectedBinary) {
+					t.Fatal("committed binary differs from archive")
+				}
+				if readText(t, filepath.Join(skillTarget, "SKILL.md")) != fixtureSkill {
+					t.Fatal("committed skill differs from archive")
+				}
+			} else {
+				if string(got) != "existing binary" {
+					t.Fatal("pre-commit interruption replaced existing binary")
+				}
+				if _, err := os.Stat(skillTarget); !os.IsNotExist(err) {
+					t.Fatalf("skill survived pre-commit interruption: %v", err)
 				}
 			}
 		})
@@ -176,6 +236,30 @@ func TestInstallPowerShellScriptShowsUsageAndRejectsUnknownArguments(t *testing.
 	}
 }
 
+func TestInstallPowerShellScriptPreservesDestinationsAfterDownloadFailure(t *testing.T) {
+	fixture := newPowerShellInstallerFixture(t, "v1.2.3", true)
+	if err := os.Remove(fixture.archive); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(fixture.installDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(fixture.installDir, "ssb.exe")
+	if err := os.WriteFile(target, []byte("existing binary"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output, err := fixture.run("-Version", "v1.2.3", "-SkillDir", fixture.skillDir)
+	if err == nil || !strings.Contains(output, "could not download") {
+		t.Fatalf("expected a download error: %v\n%s", err, output)
+	}
+	if got := readText(t, target); got != "existing binary" {
+		t.Fatalf("existing binary changed: %q", got)
+	}
+	if _, err := os.Stat(fixture.skillDir); !os.IsNotExist(err) {
+		t.Fatalf("unexpected skill directory: %v", err)
+	}
+}
+
 func TestInstallPowerShellScriptRejectsChecksumMismatchBeforeReplacingBinary(t *testing.T) {
 	fixture := newPowerShellInstallerFixture(t, "v1.2.3", false)
 	if err := os.MkdirAll(fixture.installDir, 0o755); err != nil {
@@ -208,7 +292,7 @@ func TestInstallPowerShellScriptRejectsChecksumMismatchBeforeReplacingBinary(t *
 // installer must verify the archive without depending on that command.
 func TestInstallPowerShellScriptDoesNotDependOnGetFileHash(t *testing.T) {
 	fixture := newPowerShellInstallerFixture(t, "v1.2.3", true)
-	fixture.shadowGetFileHash(t)
+	fixture.shadowCommand(t, "Microsoft.PowerShell.Utility", "Get-FileHash")
 
 	output, err := fixture.run("-Version", "v1.2.3", "-InstallDir", fixture.installDir)
 	if err != nil {
@@ -216,6 +300,19 @@ func TestInstallPowerShellScriptDoesNotDependOnGetFileHash(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(fixture.installDir, "ssb.exe")); statErr != nil {
 		t.Fatalf("binary was not installed: %v", statErr)
+	}
+}
+
+func TestInstallPowerShellScriptDoesNotDependOnArchiveModule(t *testing.T) {
+	fixture := newPowerShellInstallerFixture(t, "v1.2.3", true)
+	fixture.shadowCommand(t, "Microsoft.PowerShell.Archive", "Expand-Archive")
+
+	output, err := fixture.run("-Version", "v1.2.3", "-SkillDir", fixture.skillDir)
+	if err != nil {
+		t.Fatalf("installer depended on the shadowed Archive module: %v\n%s", err, output)
+	}
+	if got := readText(t, filepath.Join(fixture.skillDir, "software-standards-bootstrap", "SKILL.md")); got != fixtureSkill {
+		t.Fatalf("installed skill differs from the archive: %q", got)
 	}
 }
 
@@ -370,7 +467,6 @@ type powerShellInstallerFixture struct {
 	archive               string
 	checksums             string
 	requestLog            string
-	cloneLog              string
 	assetName             string
 	latestVersion         string
 	processorArchitecture string
@@ -403,19 +499,9 @@ func newPowerShellInstallerFixture(t *testing.T, version string, validChecksum b
 	if err := os.WriteFile(requestLog, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cloneLog := filepath.Join(root, "clone.log")
-	if err := os.WriteFile(cloneLog, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	skillSource := filepath.Join(root, "fixture-SKILL.md")
-	if err := os.WriteFile(skillSource, []byte(fixtureSkill), 0o644); err != nil {
-		t.Fatal(err)
-	}
 
-	// install.ps1 shells out to curl.exe and git.exe, so the fakes must be real
-	// executables that Windows will resolve from PATH.
+	// The installer invokes curl.exe as a native Windows application.
 	copyFile(t, sharedFakeExecutable(t, "curl", fakeCurlSource), filepath.Join(fakeBin, "curl.exe"))
-	copyFile(t, sharedFakeExecutable(t, "git", fakeGitSource), filepath.Join(fakeBin, "git.exe"))
 
 	fixture := &powerShellInstallerFixture{
 		t:                     t,
@@ -427,7 +513,6 @@ func newPowerShellInstallerFixture(t *testing.T, version string, validChecksum b
 		archive:               filepath.Join(root, assetName),
 		checksums:             filepath.Join(root, "checksums.txt"),
 		requestLog:            requestLog,
-		cloneLog:              cloneLog,
 		assetName:             assetName,
 		latestVersion:         version,
 		processorArchitecture: os.Getenv("PROCESSOR_ARCHITECTURE"),
@@ -446,9 +531,9 @@ func (fixture *powerShellInstallerFixture) useBinarySource(t *testing.T, source 
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeZip(t, fixture.archive, []archiveEntry{
-		{name: "ssb.exe", data: expectedBinary, mode: 0o755},
-	})
+	entries := []archiveEntry{{name: "ssb.exe", data: expectedBinary, mode: 0o755}}
+	entries = append(entries, fixtureArchiveSkill(fixture.latestVersion)...)
+	writeZip(t, fixture.archive, entries)
 
 	archiveBytes, err := os.ReadFile(fixture.archive)
 	if err != nil {
@@ -478,7 +563,11 @@ func (fixture *powerShellInstallerFixture) expand(values []string) []string {
 
 func (fixture *powerShellInstallerFixture) run(arguments ...string) (string, error) {
 	fixture.t.Helper()
-	script := filepath.Join(repositoryRoot(fixture.t), "install.ps1")
+	return fixture.runScript(filepath.Join(repositoryRoot(fixture.t), "install.ps1"), arguments...)
+}
+
+func (fixture *powerShellInstallerFixture) runScript(script string, arguments ...string) (string, error) {
+	fixture.t.Helper()
 	command := exec.Command("powershell.exe",
 		append([]string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script}, arguments...)...)
 	command.Env = fixture.powerShellEnvironment()
@@ -488,6 +577,7 @@ func (fixture *powerShellInstallerFixture) run(arguments ...string) (string, err
 
 func (fixture *powerShellInstallerFixture) powerShellEnvironment() []string {
 	environment := append(os.Environ(),
+		"GIT_ALLOW_PROTOCOL=file",
 		"PATH="+fixture.fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"USERPROFILE="+fixture.home,
 		"HOME="+fixture.home,
@@ -503,29 +593,23 @@ func (fixture *powerShellInstallerFixture) powerShellEnvironment() []string {
 		"FAKE_CHECKSUMS="+fixture.checksums,
 		"FAKE_LATEST_URL=https://github.com/nnennandukwe/software-standards-bootstrap/releases/tag/"+fixture.latestVersion,
 		"FAKE_REQUEST_LOG="+fixture.requestLog,
-		"FAKE_CLONE_LOG="+fixture.cloneLog,
-		"FAKE_SKILL_SOURCE="+filepath.Join(fixture.root, "fixture-SKILL.md"),
 	)
 	return append(environment, fixture.environment...)
 }
 
-// shadowGetFileHash prepends a module that fails if the installer tries to use
-// Get-FileHash. Other PowerShell modules remain available through the inherited
-// module path, matching the mixed PowerShell 7 / Windows PowerShell environment
-// that exposed the CI failure.
-func (fixture *powerShellInstallerFixture) shadowGetFileHash(t *testing.T) {
+// A native launcher can inherit PowerShell 7's module path even when the
+// installer runs under Windows PowerShell 5.1. Shadow the incompatible
+// command and test that the installer can complete in that environment.
+func (fixture *powerShellInstallerFixture) shadowCommand(t *testing.T, moduleName, commandName string) {
 	t.Helper()
 	moduleRoot := filepath.Join(fixture.root, "shadow-modules")
-	moduleDir := filepath.Join(moduleRoot, "Microsoft.PowerShell.Utility")
+	moduleDir := filepath.Join(moduleRoot, moduleName)
 	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	module := `function Get-FileHash {
-    throw 'shadowed Get-FileHash must not be called'
-}
-Export-ModuleMember -Function Get-FileHash
-`
-	modulePath := filepath.Join(moduleDir, "Microsoft.PowerShell.Utility.psm1")
+	message := "shadowed " + commandName + " must not be called"
+	module := fmt.Sprintf("function %s { throw '%s' }\nExport-ModuleMember -Function %s\n", commandName, message, commandName)
+	modulePath := filepath.Join(moduleDir, moduleName+".psm1")
 	if err := os.WriteFile(modulePath, []byte(module), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -534,17 +618,11 @@ Export-ModuleMember -Function Get-FileHash
 		"PSModulePath="+moduleRoot+string(os.PathListSeparator)+os.Getenv("PSModulePath"),
 	)
 
-	probe := exec.Command(
-		"powershell.exe",
-		"-NoProfile",
-		"-NonInteractive",
-		"-Command",
-		"Get-FileHash -LiteralPath (Join-Path $PSHOME 'powershell.exe') -Algorithm SHA256",
-	)
+	probe := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", commandName)
 	probe.Env = fixture.powerShellEnvironment()
 	output, err := probe.CombinedOutput()
-	if err == nil || !strings.Contains(string(output), "shadowed Get-FileHash must not be called") {
-		t.Fatalf("Get-FileHash shadow is not active: %v\n%s", err, output)
+	if err == nil || !strings.Contains(string(output), message) {
+		t.Fatalf("%s shadow isn't active: %v\n%s", commandName, err, output)
 	}
 }
 
@@ -702,39 +780,6 @@ func main() {
 	default:
 		fmt.Fprintf(os.Stderr, "unexpected URL: %s\n", url)
 		os.Exit(22)
-	}
-}
-`
-
-const fakeGitSource = `package main
-
-import (
-	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
-)
-
-func main() {
-	arguments := os.Args[1:]
-	log, err := os.OpenFile(os.Getenv("FAKE_CLONE_LOG"), os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		os.Exit(1)
-	}
-	fmt.Fprintln(log, strings.Join(arguments, " "))
-	log.Close()
-
-	destination := arguments[len(arguments)-1]
-	skillDirectory := filepath.Join(destination, "skills", "software-standards-bootstrap")
-	if mkdirErr := os.MkdirAll(skillDirectory, 0o755); mkdirErr != nil {
-		os.Exit(1)
-	}
-	data, readErr := os.ReadFile(os.Getenv("FAKE_SKILL_SOURCE"))
-	if readErr != nil {
-		os.Exit(1)
-	}
-	if writeErr := os.WriteFile(filepath.Join(skillDirectory, "SKILL.md"), data, 0o644); writeErr != nil {
-		os.Exit(1)
 	}
 }
 `

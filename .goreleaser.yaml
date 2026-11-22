@@ -41,6 +41,7 @@ archives:
       - install.sh
       - install.ps1
       - docs/architecture.md
+      - docs/generation-recovery.md
       - docs/rule-format.md
       - skills/software-standards-bootstrap/SKILL.md
       - skills/software-standards-bootstrap/**/*

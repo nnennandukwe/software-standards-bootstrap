@@ -18,11 +18,9 @@ go tool govulncheck ./...
 go run github.com/goreleaser/goreleaser/v2@v2.17.0 check
 go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 make verify-release-archives
+uvx --from skills-ref==0.1.1 agentskills validate skills/software-standards-bootstrap
 make verify
 ```
-
-Validate the bundled portable skill with the repository's pinned Agent Skills
-reference check.
 
 ## Contract coverage
 
@@ -107,88 +105,9 @@ for this actionable-artifact cutover.
 
 ## Release controls
 
-Do not mark a release complete until the source commit, hosted checks, signed
-tag, curated release body, archives, checksums, SBOMs, attestations, and clean
-installation are each verified independently. Pending evidence remains
-pending.
-
-Verify the public installer separately from the release workflow in an
-isolated destination:
-
-```bash
-install_root=$(mktemp -d) || exit 1
-(
-  set -e
-  trap 'rm -rf "$install_root"' EXIT
-  mkdir -p "$install_root/source"
-  git archive --format=tar --output="$install_root/source.tar" v0.2.0 skills/software-standards-bootstrap
-  tar -xf "$install_root/source.tar" -C "$install_root/source"
-  ./install.sh --version v0.2.0 --install-dir "$install_root/bin" --skill-dir "$install_root/skills"
-  "$install_root/bin/ssb" --help
-  diff -ru "$install_root/source/skills/software-standards-bootstrap" "$install_root/skills/software-standards-bootstrap"
-)
-```
-
-On Windows, exercise the PowerShell installer the same way:
-
-```powershell
-$installRoot = Join-Path $env:TEMP ([System.IO.Path]::GetRandomFileName())
-$sourceArchive = Join-Path $installRoot 'source.zip'
-$sourceRoot = Join-Path $installRoot 'source'
-try {
-    New-Item -ItemType Directory -Path $sourceRoot -Force | Out-Null
-    & git.exe archive --format=zip --output=$sourceArchive v0.2.0 skills/software-standards-bootstrap
-    if ($LASTEXITCODE -ne 0) { throw "could not materialize tagged Agent Skill" }
-    Expand-Archive -LiteralPath $sourceArchive -DestinationPath $sourceRoot
-    .\install.ps1 -Version v0.2.0 -InstallDir "$installRoot\bin" -SkillDir "$installRoot\skills"
-    & "$installRoot\bin\ssb.exe" --help
-    if ($LASTEXITCODE -ne 0) { throw "installed ssb.exe failed its smoke test" }
-    & git.exe diff --no-index --exit-code -- "$sourceRoot\skills\software-standards-bootstrap" "$installRoot\skills\software-standards-bootstrap"
-    if ($LASTEXITCODE -ne 0) { throw "installed Agent Skill differs from tagged source" }
-} finally {
-    if (Test-Path -LiteralPath $installRoot) {
-        Remove-Item -LiteralPath $installRoot -Recurse -Force
-    }
-}
-```
-
-Installer scripts are served from `main` and shipped inside each release
-archive. They are outside the attestation boundary, so both installers must
-enforce the same guarantees and are verified by running them, not by
-attestation.
-
-Verify the published archive contents against the tagged source separately
-from checksums, SBOMs, and attestations:
-
-```bash
-release_root=$(mktemp -d) || exit 1
-gh release view v0.2.0 --repo nnennandukwe/software-standards-bootstrap --json body --jq .body
-gh release download v0.2.0 --repo nnennandukwe/software-standards-bootstrap --dir "$release_root"
-(cd "$release_root" && shasum -a 256 --check checksums.txt)
-SSB_RELEASE_ARCHIVE_DIR="$release_root" SSB_RELEASE_SOURCE_REF=v0.2.0 go test ./internal/releaseconfig -run '^TestGeneratedReleaseArchivesContainCompleteSkill$'
-for artifact in "$release_root"/ssb_v0.2.0_*; do
-  gh attestation verify "$artifact" \
-    --repo nnennandukwe/software-standards-bootstrap \
-    --source-ref refs/tags/v0.2.0 \
-    --signer-workflow nnennandukwe/software-standards-bootstrap/.github/workflows/release.yml \
-    --predicate-type https://slsa.dev/provenance/v1
-done
-for archive in "$release_root"/ssb_v0.2.0_*.tar.gz "$release_root"/ssb_v0.2.0_*.zip; do
-  gh attestation verify "$archive" \
-    --repo nnennandukwe/software-standards-bootstrap \
-    --source-ref refs/tags/v0.2.0 \
-    --signer-workflow nnennandukwe/software-standards-bootstrap/.github/workflows/release.yml \
-    --predicate-type https://spdx.dev/Document/v2.3
-done
-rm -rf "$release_root"
-```
-
-The published body must contain the `CHANGELOG.md` content beneath the
-`[0.2.0]` heading. While the release is still a draft, the workflow accounts
-for GoReleaser v2.17.0's final line feed and compares the rendered body byte for
-byte.
-
-This archive gate requires all six target archives and byte-for-byte copies of
-every regular file beneath `skills/software-standards-bootstrap`. The v0.1.0
-archives remain historical incomplete-skill artifacts because they omit the
-root `SKILL.md`.
+Record the reviewed source, hosted checks, signature, public release body,
+checksums, archive contents, SPDX documents, attestations and fresh
+installations. Run the public installer on a native Windows machine as well as
+macOS or Linux. Keep the source and release evidence tied to their exact
+commits. Follow the [public release verification procedure](releasing.md#verify-the-published-release)
+for commands, expected results and failure handling.

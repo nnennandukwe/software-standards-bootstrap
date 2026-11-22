@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - "release/v*"
 
 permissions:
   contents: read
@@ -73,5 +74,30 @@ jobs:
           go-version: 1.26.9
           cache: true
 
+      - name: Check pinned release configuration and workflows
+        run: |
+          go run github.com/goreleaser/goreleaser/v2@v2.17.0 check
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+      - name: Identify candidate archives before tagging
+        if: startsWith(github.ref, 'refs/heads/release/v')
+        run: |
+          version=${GITHUB_REF_NAME#release/}
+          sh scripts/release-notes.sh "$version" > /dev/null
+          echo "GORELEASER_CURRENT_TAG=$version-rc" >> "$GITHUB_ENV"
+
       - name: Build and verify every release archive
         run: make verify-release-archives
+
+      - name: Retain candidate archives for installer verification
+        if: startsWith(github.ref, 'refs/heads/release/v')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ssb-candidate-${{ github.sha }}
+          path: |
+            dist/ssb_*.tar.gz
+            dist/ssb_*.zip
+            dist/checksums.txt
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0

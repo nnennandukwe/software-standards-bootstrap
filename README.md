@@ -8,15 +8,11 @@ for a Git repository:
 3. **Agent Skills** for multi-step engineering workflows.
 4. **Automation proposals** for valuable checks that do not yet exist.
 
-An `AGENTS.md` file is derived from the codebase context and
-orients coding agents to reason about and routes them to coding rules, code verification processes, and agent skills.
-
-Run `ssb` in a repository whose engineering conventions are not yet documented for AI tools. A coding agent analyzes the repository and proposes these files.
-Developers review, edit, delete, or approve them before official adoption via an ADR (architectural decision record), which `ssb` will create for you.
-
-The coding agent performs semantic analysis. The offline `ssb` CLI pins the
-input commit, builds, validates schemas, and exact
-evidence, renders `AGENTS.md`, and creates an optional Proposed ADR.
+A coding agent reads evidence from a pinned Git commit and proposes standards
+for developers to review. The offline `ssb` CLI inventories files, validates the
+proposal and renders an `AGENTS.md` entry point with links to the relevant
+guidance. Developers can edit or remove artifacts and request a Proposed
+architecture decision record (ADR) before deciding whether to merge the pack.
 
 ## Install
 
@@ -29,8 +25,8 @@ curl -fsSL https://raw.githubusercontent.com/nnennandukwe/software-standards-boo
 
 The installer detects the operating system and architecture, downloads the
 matching release archive, verifies its SHA-256 checksum, and installs the
-binary. It installs the binary into `~/.local/bin` by default and prints the
-exact `PATH` command when that directory is not already available.
+binary. It installs the binary into `~/.local/bin` by default and prints a
+`PATH` command if your shell can't find that directory.
 
 To install the CLI and expose the bootstrap skill in the current repository,
 run the command for your coding agent from that repository's root:
@@ -43,76 +39,66 @@ curl -fsSL https://raw.githubusercontent.com/nnennandukwe/software-standards-boo
 curl -fsSL https://raw.githubusercontent.com/nnennandukwe/software-standards-bootstrap/main/install.sh | sh -s -- --skill-dir .claude/skills
 ```
 
-With `--skill-dir`, the installer checks out the same release tag as the CLI
-and copies its `software-standards-bootstrap` skill into the requested host
-directory. It stops without replacing an existing skill.
+With `--skill-dir`, the installer copies the bundled `software-standards-bootstrap`
+skill into the requested host directory. For v0.3.0, the checksum-verified
+archive supplies both the skill and the binary. The installer stops if the
+skill directory already exists.
 
-Pin both the CLI and Codex skill to v0.2.0:
+To pin the CLI and its bundled skill to v0.3.0, run this from the target
+repository. Use `--install-dir /path/to/bin` to choose a binary directory.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nnennandukwe/software-standards-bootstrap/main/install.sh | sh -s -- --version v0.2.0 --skill-dir .agents/skills
+curl -fsSL https://raw.githubusercontent.com/nnennandukwe/software-standards-bootstrap/v0.3.0/install.sh | sh -s -- --version v0.3.0 --skill-dir .agents/skills
+"$HOME/.local/bin/ssb" version
 ```
 
-Use `--install-dir /path/to/bin` to choose another binary directory.
+The release binary prints `ssb v0.3.0 (commit <full-commit>)`. The skill
+declares version `0.7.0` in its `SKILL.md` metadata. You can compare both to the
+[tagged source](https://github.com/nnennandukwe/software-standards-bootstrap/tree/v0.3.0).
 
-On Windows, use the PowerShell installer. Download it, read it, then run it:
+### Windows
+
+Download the tagged installer into a temporary file and read it before running
+it. The following example installs both the binary and the Codex skill.
 
 ```powershell
-irm https://raw.githubusercontent.com/nnennandukwe/software-standards-bootstrap/main/install.ps1 -OutFile install.ps1
-# Review install.ps1, then:
-powershell -ExecutionPolicy Bypass -File .\install.ps1
-& "$env:USERPROFILE\.local\bin\ssb.exe" --help
-Remove-Item .\install.ps1
+$installer = Join-Path $env:TEMP ("ssb-install-" + [guid]::NewGuid() + ".ps1")
+Invoke-WebRequest https://raw.githubusercontent.com/nnennandukwe/software-standards-bootstrap/v0.3.0/install.ps1 -OutFile $installer
+Get-Content -LiteralPath $installer
+# After reviewing the installer, run the following commands.
+powershell -ExecutionPolicy Bypass -File $installer -Version v0.3.0 -SkillDir .agents\skills
+& "$env:USERPROFILE\.local\bin\ssb.exe" version
 ```
 
-The `-ExecutionPolicy Bypass` argument applies to that one invocation only,
-and is needed because the default policy on Windows client editions blocks
-downloaded scripts.
+Use `-SkillDir .claude\skills` for Claude Code, or omit `-SkillDir` to install
+only the binary. Use `-InstallDir` to choose its destination. The execution
+policy applies only to the PowerShell process that runs the installer.
+You can also download the Windows ZIP from the
+[published releases](https://github.com/nnennandukwe/software-standards-bootstrap/releases).
 
-`install.ps1` takes the same options as `install.sh`, spelled as PowerShell
-parameters, and `-Help` prints them:
+### Upgrade an existing skill
 
-```powershell
-# Codex
-powershell -ExecutionPolicy Bypass -File .\install.ps1 -SkillDir .agents\skills
+If your host already has a `software-standards-bootstrap` directory, install
+the new binary and skill into a fresh directory first. For example, pass
+`--install-dir /path/to/review/bin --skill-dir /path/to/review/skills`
+to the pinned installer, or use `-InstallDir` and `-SkillDir` on Windows.
+Compare the skills and keep a backup of any local edits. When you're ready,
+move the previous skill outside the host's discovery path, copy the reviewed
+skill into its place, and select the matching binary on your `PATH`.
+Run `ssb version` and `ssb resume --help` before continuing a proposal.
 
-# Claude Code
-powershell -ExecutionPolicy Bypass -File .\install.ps1 -SkillDir .claude\skills
+### Build from source
 
-# Pin both the CLI and skill to a release
-powershell -ExecutionPolicy Bypass -File .\install.ps1 -Version v0.2.0 -SkillDir .agents\skills
-```
-
-The matching `.zip` is also available from the
-[published releases](https://github.com/nnennandukwe/software-standards-bootstrap/releases)
-for a manual install.
-
-With Go 1.26.9 installed, the CLI alone can also be installed from source:
+With Go 1.26.9 installed, you can build the tagged CLI yourself.
 
 ```bash
-go install github.com/nnennandukwe/software-standards-bootstrap/cmd/ssb@v0.2.0
+go install github.com/nnennandukwe/software-standards-bootstrap/cmd/ssb@v0.3.0
 ```
 
-The v0.2.0 binary supports the commands listed in its own `ssb --help`.
-For the matching instructions, use the [v0.2.0 guide](https://github.com/nnennandukwe/software-standards-bootstrap/tree/v0.2.0).
-
-To use `ssb resume` or `ssb version` with the current source, clone this
-repository, open its root directory, and run:
-
-```bash
-go install ./cmd/ssb
-```
-
-Use the binary in `go env GOBIN`, or the `bin` directory under
-`go env GOPATH` when GOBIN is empty. Put that directory first on your PATH and check both commands:
-
-```bash
-ssb resume --help
-ssb version
-```
-
-For agent-assisted recovery, use the
-`skills/software-standards-bootstrap` skill from the same checkout.
+A plain Go build reports `ssb dev (commit unknown)`. The archive binaries carry
+the release identity. For agent-assisted generation from a source build, copy
+the matching tag's `skills/software-standards-bootstrap` directory into the
+host's skill directory after checking for an existing installation.
 
 ## What it generates
 
@@ -321,10 +307,10 @@ Untracked files are allowed during inspection.
 
 ### 1. Install the CLI and expose the bootstrap skill
 
-From the target repository's root, run the Codex or Claude Code command under
-[Install](#install). Run `"$HOME/.local/bin/ssb" --help` to verify the default
-CLI installation before continuing. If the installer prints a `PATH` command,
-run it in the current shell before using `ssb` directly.
+From the target repository's root, run the installer for your platform and
+host. Put its binary directory on your `PATH`, then run `ssb version` and
+`ssb resume --help` to check which executable your host will use.
+[Installation instructions](#install)
 
 ### 2. Generate the proposal
 
@@ -344,9 +330,8 @@ Use the software-standards-bootstrap skill to continue interrupted generation.
 Preserve the retained proposal and my manual edits.
 ```
 
-With a CLI that lists `resume` in `ssb --help`, start with
-`ssb resume --repo . --format text`. For v0.2.0, follow the source-install
-steps in [Install](#install) first. It reports reusable stages,
+Start with `ssb resume --repo . --format text`. This command is available
+in v0.3.0. It reports reusable stages,
 retained raw-byte digests, required work, and diagnostics without writing files.
 A source-only validation correction needs affected source edits, deliberate
 manifest digest updates, validation, and rendering. The verified inventory and

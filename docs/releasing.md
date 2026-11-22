@@ -13,7 +13,12 @@
   tag date instead of `unreleased`.
 - The portable skill's `metadata.version` matches the contract being released.
 
-Do not tag a release from an unreviewed working tree.
+Check the repository setting with an authenticated GitHub CLI session. The
+command must return `true` before you tag.
+
+```bash
+gh api repos/nnennandukwe/software-standards-bootstrap/immutable-releases --jq .enabled
+```
 
 Validate the workflow and GoReleaser configuration with the exact tool versions
 used for this release contract:
@@ -22,6 +27,7 @@ used for this release contract:
 go run github.com/goreleaser/goreleaser/v2@v2.17.0 check
 go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 make verify-release-archives
+uvx --from skills-ref==0.1.1 agentskills validate skills/software-standards-bootstrap
 ```
 
 ## Tag and workflow
@@ -31,11 +37,18 @@ Run `ssb version` or `ssb --version` to read that identity as
 `ssb <version> (commit <full-commit>)`. Local builds use `dev` and `unknown`.
 Version output doesn't include a wall-clock build date.
 
-Create and push a signed semantic-version tag after every gate passes:
+After all prerequisite checks pass, use a clean checkout of the reviewed
+merge. Verify the changelog heading carries the tag date and that the tested
+commit matches the current remote main before signing.
 
 ```bash
-git tag -s v0.2.0 -m "Software Standards Bootstrap v0.2.0"
-git push origin v0.2.0
+set -e
+git fetch origin main
+test -z "$(git status --porcelain)"
+test "$(git rev-parse HEAD)" = "$(git rev-parse FETCH_HEAD)"
+git tag -s v0.3.0 -m "Software Standards Bootstrap v0.3.0"
+git verify-tag v0.3.0
+git push origin refs/tags/v0.3.0
 ```
 
 The release workflow:
@@ -52,99 +65,107 @@ The release workflow:
 9. creates an SBOM attestation for each archive; and
 10. publishes the draft only after the release-note, archive, and attestation gates succeed.
 
-Every third-party action is pinned to a full commit SHA. GoReleaser and Syft versions are exact.
+After publication, the Windows job installs from the public tag and exercises
+recovery. Retain that job's result separately from the draft verification.
+Third-party actions use full commit pins. GoReleaser and Syft use exact versions.
 
 ## Verify the published release
 
-From the repository checkout, exercise the public installer against an isolated
-destination:
+Use a checkout of the signed tag and a fresh download directory. Run these
+commands from the checkout's root in Bash. You'll need `gh` with attestation
+support, `jq`, `shasum`, Git and the repository's pinned Go toolchain.
+
+### Verify the tag, downloads and published notes
 
 ```bash
-install_root=$(mktemp -d) || exit 1
-(
-  set -e
-  trap 'rm -rf "$install_root"' EXIT
-  mkdir -p "$install_root/source"
-  git archive --format=tar --output="$install_root/source.tar" v0.2.0 skills/software-standards-bootstrap
-  tar -xf "$install_root/source.tar" -C "$install_root/source"
-  ./install.sh --version v0.2.0 --install-dir "$install_root/bin" --skill-dir "$install_root/skills"
-  "$install_root/bin/ssb" --help
-  diff -ru "$install_root/source/skills/software-standards-bootstrap" "$install_root/skills/software-standards-bootstrap"
-)
+set -euo pipefail
+tag=v0.3.0
+repo=nnennandukwe/software-standards-bootstrap
+workflow="$repo/.github/workflows/release.yml"
+git verify-tag "$tag"
+commit=$(git rev-parse "$tag^{commit}")
+test "$(git rev-parse HEAD)" = "$commit"
+gh api "repos/$repo/releases/tags/$tag" | jq -e --arg tag "$tag" \
+  '.tag_name == $tag and .draft == false and .immutable == true'
+
+release_root=$(mktemp -d)
+mkdir "$release_root/assets"
+gh release download "$tag" --repo "$repo" --dir "$release_root/assets"
+gh release view "$tag" --repo "$repo" --json body --template '{{.body}}' > "$release_root/public.md"
+git show "$tag:CHANGELOG.md" > "$release_root/changelog.md"
+sh scripts/release-notes.sh "$tag" "$release_root/changelog.md" > "$release_root/expected.md"
+printf '\n' >> "$release_root/expected.md"
+cmp "$release_root/expected.md" "$release_root/public.md"
 ```
 
-On Windows, exercise the PowerShell installer the same way:
+GoReleaser v2.17.0 adds the final line feed. The comparison checks the entire
+published body, including that byte.
+
+### Verify all six archives and their attestations
+
+Continue in the same shell. The checksum manifest covers each archive and its
+SPDX JSON document. Check that the download directory and checksum subjects
+contain the full sets before verifying the hashes.
+
+```bash
+for os in darwin linux windows; do
+  ext=tar.gz
+  if [ "$os" = windows ]; then ext=zip; fi
+  for arch in amd64 arm64; do
+    archive="ssb_${tag}_${os}_${arch}.$ext"
+    printf '%s\n' "$archive" "$archive.spdx.json"
+  done
+done | LC_ALL=C sort > "$release_root/subjects.txt"
+
+(
+  cd "$release_root/assets"
+  awk '{print $2}' checksums.txt | LC_ALL=C sort > "$release_root/checksum-names.txt"
+  cmp "$release_root/subjects.txt" "$release_root/checksum-names.txt"
+  { cat "$release_root/subjects.txt"; echo checksums.txt; } | LC_ALL=C sort > "$release_root/expected-assets.txt"
+  printf '%s\n' * | LC_ALL=C sort > "$release_root/downloaded.txt"
+  cmp "$release_root/expected-assets.txt" "$release_root/downloaded.txt"
+  shasum -a 256 --check checksums.txt
+)
+SSB_RELEASE_ARCHIVE_DIR="$release_root/assets" SSB_RELEASE_SOURCE_REF="$tag" \
+  go test -count=1 ./internal/releaseconfig -run '^TestGeneratedReleaseArchivesContainCompleteSkill$'
+
+trust=(--repo "$repo" --source-ref "refs/tags/$tag" --source-digest "$commit" --signer-workflow "$workflow")
+while IFS= read -r name; do
+  gh attestation verify "$release_root/assets/$name" "${trust[@]}" --predicate-type https://slsa.dev/provenance/v1
+done < "$release_root/subjects.txt"
+
+for archive in "$release_root"/assets/*.tar.gz "$release_root"/assets/*.zip; do
+  gh attestation verify "$archive" "${trust[@]}" --predicate-type https://spdx.dev/Document/v2.3 \
+    --format json > "$release_root/$(basename "$archive").attestation.json"
+  jq -e --slurpfile sbom "$archive.spdx.json" \
+    'any(.[]; .verificationResult.statement.predicate == $sbom[0])' \
+    "$release_root/$(basename "$archive").attestation.json"
+done
+```
+
+This checks twelve provenance subjects, the full skill tree in each archive
+and six signed SPDX predicates against their public JSON documents. Keep the
+download directory until you've recorded the results. The historical v0.1.0
+archives omit the skill's root `SKILL.md`.
+
+### Exercise the public installers
+
+Run the tagged verification script on macOS or Linux and on a native Windows
+machine. The script downloads the public installer into a fresh directory,
+checks it against the tagged source and runs it.
+
+```bash
+python3 scripts/verify-public-install.py v0.3.0
+```
 
 ```powershell
-$installRoot = Join-Path $env:TEMP ([System.IO.Path]::GetRandomFileName())
-$sourceArchive = Join-Path $installRoot 'source.zip'
-$sourceRoot = Join-Path $installRoot 'source'
-try {
-    New-Item -ItemType Directory -Path $sourceRoot -Force | Out-Null
-    & git.exe archive --format=zip --output=$sourceArchive v0.2.0 skills/software-standards-bootstrap
-    if ($LASTEXITCODE -ne 0) { throw "could not materialize tagged Agent Skill" }
-    Expand-Archive -LiteralPath $sourceArchive -DestinationPath $sourceRoot
-    .\install.ps1 -Version v0.2.0 -InstallDir "$installRoot\bin" -SkillDir "$installRoot\skills"
-    & "$installRoot\bin\ssb.exe" --help
-    if ($LASTEXITCODE -ne 0) { throw "installed ssb.exe failed its smoke test" }
-    & git.exe diff --no-index --exit-code -- "$sourceRoot\skills\software-standards-bootstrap" "$installRoot\skills\software-standards-bootstrap"
-    if ($LASTEXITCODE -ne 0) { throw "installed Agent Skill differs from tagged source" }
-} finally {
-    if (Test-Path -LiteralPath $installRoot) {
-        Remove-Item -LiteralPath $installRoot -Recurse -Force
-    }
-}
+python scripts/verify-public-install.py v0.3.0
 ```
 
-Installer scripts are served from `main` and shipped inside each release
-archive. They are outside the attestation boundary, so both installers must
-enforce the same guarantees and are verified by running them, not by
-attestation.
-
-From the repository checkout, download and verify the public assets in an
-isolated directory:
-
-```bash
-release_root=$(mktemp -d) || exit 1
-gh release view v0.2.0 --repo nnennandukwe/software-standards-bootstrap --json body --jq .body
-gh release download v0.2.0 --repo nnennandukwe/software-standards-bootstrap --dir "$release_root"
-(cd "$release_root" && shasum -a 256 --check checksums.txt)
-SSB_RELEASE_ARCHIVE_DIR="$release_root" SSB_RELEASE_SOURCE_REF=v0.2.0 go test ./internal/releaseconfig -run '^TestGeneratedReleaseArchivesContainCompleteSkill$'
-for artifact in "$release_root"/ssb_v0.2.0_*; do
-  gh attestation verify "$artifact" \
-    --repo nnennandukwe/software-standards-bootstrap \
-    --source-ref refs/tags/v0.2.0 \
-    --signer-workflow nnennandukwe/software-standards-bootstrap/.github/workflows/release.yml \
-    --predicate-type https://slsa.dev/provenance/v1
-done
-for archive in "$release_root"/ssb_v0.2.0_*.tar.gz "$release_root"/ssb_v0.2.0_*.zip; do
-  gh attestation verify "$archive" \
-    --repo nnennandukwe/software-standards-bootstrap \
-    --source-ref refs/tags/v0.2.0 \
-    --signer-workflow nnennandukwe/software-standards-bootstrap/.github/workflows/release.yml \
-    --predicate-type https://spdx.dev/Document/v2.3
-done
-```
-
-Confirm that the published body contains the `CHANGELOG.md` content beneath the
-`[0.2.0]` heading. Before publication, the workflow accounts for GoReleaser
-v2.17.0's final line feed and compares the rendered draft body byte for byte.
-
-Inspect the matching `.spdx.json` assets and confirm all six archives are present:
-
-- Darwin amd64 and arm64;
-- Linux amd64 and arm64; and
-- Windows amd64 and arm64.
-
-The published v0.1.0 archives remain immutable historical artifacts. They
-contain the skill reference files but omit
-`skills/software-standards-bootstrap/SKILL.md`; do not use them as evidence of
-a complete packaged Agent Skill.
-
-Remove the isolated download only after recording the verification result:
-
-```bash
-rm -rf "$release_root"
-```
-
-Only then mark the release verification gate complete.
+The installed binary must report the tag and full commit. Compare **every
+installed skill path and its raw bytes** with the Git blobs from that tag.
+Git checkout filters can change line endings on Windows. The verification
+script checks the unfiltered bytes and exercises read-only recovery in an
+isolated repository. Record the host OS, architecture, source commit, command
+results and corresponding release workflow run. If a public check fails,
+retain the failing release and its evidence while preparing a reviewed fix.
