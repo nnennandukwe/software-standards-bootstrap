@@ -169,6 +169,30 @@ func TestInstallScriptRejectsChecksumMismatchBeforeReplacingBinary(t *testing.T)
 	}
 }
 
+func TestInstallScriptChecksSkillCopyToolBeforeDownloading(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("install.sh targets macOS and Linux")
+	}
+	fixture := newInstallerFixture(t, "v1.2.3", true)
+	for _, name := range []string{"uname", "tar", "awk", "mktemp", "install", "rm"} {
+		command, err := exec.LookPath(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(command, filepath.Join(fixture.fakeBin, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fixture.environment = []string{"PATH=" + fixture.fakeBin}
+	output, err := fixture.run("--version", "v1.2.3", "--skill-dir", fixture.skillDir)
+	if err == nil || !strings.Contains(output, "required command not found for --skill-dir: cp") {
+		t.Fatalf("expected the missing skill copy tool in the diagnostic: %v\n%s", err, output)
+	}
+	if requests := readText(t, fixture.requestLog); requests != "" {
+		t.Fatalf("installer requested a download before checking for cp: %s", requests)
+	}
+}
+
 func TestInstallScriptRejectsUnsupportedPlatformsBeforeDownloading(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("install.sh targets macOS and Linux")

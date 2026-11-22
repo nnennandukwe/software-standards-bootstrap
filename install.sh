@@ -144,6 +144,7 @@ target=${install_dir}/ssb
 [ ! -d "$target" ] || fail "install target is a directory: $target"
 
 if [ -n "$skill_dir" ]; then
+  command -v cp >/dev/null 2>&1 || fail "required command not found for --skill-dir: cp"
   skill_target=${skill_dir}/software-standards-bootstrap
   if [ -e "$skill_target" ] || [ -L "$skill_target" ]; then
     fail "Agent Skill already exists at ${skill_target}; review or remove it before installing"
