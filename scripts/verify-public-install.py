@@ -16,10 +16,12 @@ SOURCE_SKILL = f"skills/{SKILL_NAME}"
 
 
 def git(repo, *args, env=None):
+    """Return raw Git output from the requested repository and fail on Git errors."""
     return subprocess.check_output(["git", "-C", repo, *args], env=env)
 
 
 def verify_skill(commit, installed):
+    """Check every installed skill path and byte against the specified Git tree."""
     # Compare to Git blobs to keep checkout filters out of the expected bytes.
     entries = git(REPO, "ls-tree", "-r", "-z", "--name-only", f"{commit}:{SOURCE_SKILL}")
     expected = {name.decode() for name in entries.split(b"\0") if name}
@@ -44,6 +46,7 @@ def verify_skill(commit, installed):
 
 
 def verify_recovery(binary, fixture):
+    """Interrupt generation after inventory and check the installed resume command preserves the fixture."""
     fixture.mkdir()
     git(fixture, "init", "--quiet", "-b", "main")
     git(fixture, "config", "core.autocrlf", "false")
@@ -72,6 +75,7 @@ def verify_recovery(binary, fixture):
     expected_files = {".software-standards/inventory.json": inventory_digest}
 
     def snapshot():
+        """Capture the fixture files outside Git so two observations can be compared."""
         return {
             p.relative_to(fixture).as_posix(): p.read_bytes()
             for p in fixture.rglob("*")
@@ -93,6 +97,7 @@ def verify_recovery(binary, fixture):
 
 
 def verify_public_install(tag, root):
+    """Install a published tag into an empty destination and print its verified identity and recovery result."""
     commit = git(REPO, "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}").decode().strip()
     windows = os.name == "nt"
     name = "install.ps1" if windows else "install.sh"
