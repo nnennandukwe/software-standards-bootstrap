@@ -292,7 +292,7 @@ func TestInstallPowerShellScriptRejectsChecksumMismatchBeforeReplacingBinary(t *
 // installer must verify the archive without depending on that command.
 func TestInstallPowerShellScriptDoesNotDependOnGetFileHash(t *testing.T) {
 	fixture := newPowerShellInstallerFixture(t, "v1.2.3", true)
-	fixture.shadowGetFileHash(t)
+	fixture.shadowCommand(t, "Microsoft.PowerShell.Utility", "Get-FileHash")
 
 	output, err := fixture.run("-Version", "v1.2.3", "-InstallDir", fixture.installDir)
 	if err != nil {
@@ -300,6 +300,19 @@ func TestInstallPowerShellScriptDoesNotDependOnGetFileHash(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(fixture.installDir, "ssb.exe")); statErr != nil {
 		t.Fatalf("binary was not installed: %v", statErr)
+	}
+}
+
+func TestInstallPowerShellScriptDoesNotDependOnArchiveModule(t *testing.T) {
+	fixture := newPowerShellInstallerFixture(t, "v1.2.3", true)
+	fixture.shadowCommand(t, "Microsoft.PowerShell.Archive", "Expand-Archive")
+
+	output, err := fixture.run("-Version", "v1.2.3", "-SkillDir", fixture.skillDir)
+	if err != nil {
+		t.Fatalf("installer depended on the shadowed Archive module: %v\n%s", err, output)
+	}
+	if got := readText(t, filepath.Join(fixture.skillDir, "software-standards-bootstrap", "SKILL.md")); got != fixtureSkill {
+		t.Fatalf("installed skill differs from the archive: %q", got)
 	}
 }
 
@@ -584,23 +597,19 @@ func (fixture *powerShellInstallerFixture) powerShellEnvironment() []string {
 	return append(environment, fixture.environment...)
 }
 
-// shadowGetFileHash prepends a module that fails if the installer tries to use
-// Get-FileHash. Other PowerShell modules remain available through the inherited
-// module path, matching the mixed PowerShell 7 / Windows PowerShell environment
-// that exposed the CI failure.
-func (fixture *powerShellInstallerFixture) shadowGetFileHash(t *testing.T) {
+// A native launcher can inherit PowerShell 7's module path even when the
+// installer runs under Windows PowerShell 5.1. Shadow the incompatible
+// command and test that the installer can complete in that environment.
+func (fixture *powerShellInstallerFixture) shadowCommand(t *testing.T, moduleName, commandName string) {
 	t.Helper()
 	moduleRoot := filepath.Join(fixture.root, "shadow-modules")
-	moduleDir := filepath.Join(moduleRoot, "Microsoft.PowerShell.Utility")
+	moduleDir := filepath.Join(moduleRoot, moduleName)
 	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	module := `function Get-FileHash {
-    throw 'shadowed Get-FileHash must not be called'
-}
-Export-ModuleMember -Function Get-FileHash
-`
-	modulePath := filepath.Join(moduleDir, "Microsoft.PowerShell.Utility.psm1")
+	message := "shadowed " + commandName + " must not be called"
+	module := fmt.Sprintf("function %s { throw '%s' }\nExport-ModuleMember -Function %s\n", commandName, message, commandName)
+	modulePath := filepath.Join(moduleDir, moduleName+".psm1")
 	if err := os.WriteFile(modulePath, []byte(module), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -609,17 +618,11 @@ Export-ModuleMember -Function Get-FileHash
 		"PSModulePath="+moduleRoot+string(os.PathListSeparator)+os.Getenv("PSModulePath"),
 	)
 
-	probe := exec.Command(
-		"powershell.exe",
-		"-NoProfile",
-		"-NonInteractive",
-		"-Command",
-		"Get-FileHash -LiteralPath (Join-Path $PSHOME 'powershell.exe') -Algorithm SHA256",
-	)
+	probe := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", commandName)
 	probe.Env = fixture.powerShellEnvironment()
 	output, err := probe.CombinedOutput()
-	if err == nil || !strings.Contains(string(output), "shadowed Get-FileHash must not be called") {
-		t.Fatalf("Get-FileHash shadow is not active: %v\n%s", err, output)
+	if err == nil || !strings.Contains(string(output), message) {
+		t.Fatalf("%s shadow isn't active: %v\n%s", commandName, err, output)
 	}
 }
 

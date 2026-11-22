@@ -283,9 +283,15 @@ try {
 
     $extractDir = Join-Path $tempDir 'extract'
     try {
-        Expand-Archive -LiteralPath $archivePath -DestinationPath $extractDir -Force
+        # Windows PowerShell can inherit the PowerShell 7 module path. Its
+        # Expand-Archive module calls an overload unavailable on .NET Framework.
+        # The extraction destination is new, so both runtimes can use two arguments.
+        [void][System.Reflection.Assembly]::Load(
+            'System.IO.Compression.FileSystem, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089'
+        )
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($archivePath, $extractDir)
     } catch {
-        throw "could not extract ssb.exe from $asset"
+        throw "could not extract ssb.exe from ${asset}: $($_.Exception.Message)"
     }
     $extracted = Join-Path $extractDir 'ssb.exe'
     if (-not (Test-Path -LiteralPath $extracted -PathType Leaf)) {
