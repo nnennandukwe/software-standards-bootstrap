@@ -37,6 +37,9 @@ All notable changes are documented here. The project follows semantic versioning
 
 - Both installers take the v0.3.0 skill from the checksum-verified archive.
   Local Git line-ending settings can no longer change the installed bytes.
+- The Windows installer extracts ZIP files through the .NET API shared by
+  Windows PowerShell 5.1 and PowerShell 7. This also supports launching
+  Windows PowerShell from a PowerShell 7 session.
 - The shell installer handles interruption at binary replacement so the
   installed binary and skill stay together when the replacement succeeds.
 
