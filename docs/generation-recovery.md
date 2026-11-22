@@ -1,11 +1,11 @@
 # Continue interrupted standards generation
 
-Check `ssb --help` for the `resume` command. If you're using v0.2.0,
-follow the [source-install instructions](../README.md#install) and use the
-skill from that checkout. Run the assessment in the repository that holds
-the interrupted proposal:
+Install the [v0.3.0 CLI and matching Agent Skill](../README.md#install).
+In the repository with the interrupted proposal, check the binary's identity
+and read the assessment.
 
 ```bash
+ssb version
 ssb resume --repo . --format text
 ```
 

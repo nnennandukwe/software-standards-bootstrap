@@ -91,6 +91,7 @@ func TestReleaseConfigurationKeepsToolchainTargetsAndAttestationGates(t *testing
 		"algorithm: sha256",
 		"artifacts: archive",
 		"skills/software-standards-bootstrap/SKILL.md",
+		"docs/generation-recovery.md",
 		"draft: true",
 		"replace_existing_artifacts: false",
 		"internal/buildinfo.Version={{ .Tag }}",
@@ -244,35 +245,58 @@ func TestReleaseRunbookRequiresPinnedConfigurationPreflight(t *testing.T) {
 		"go run github.com/goreleaser/goreleaser/v2@v2.17.0 check",
 		"go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12",
 		"make verify-release-archives",
-		"./install.sh --version v0.2.0 --install-dir \"$install_root/bin\" --skill-dir \"$install_root/skills\"",
-		"\"$install_root/bin/ssb\" --help",
-		"git archive --format=tar --output=\"$install_root/source.tar\" v0.2.0 skills/software-standards-bootstrap",
-		"diff -ru \"$install_root/source/skills/software-standards-bootstrap\" " +
-			"\"$install_root/skills/software-standards-bootstrap\"",
-		".\\install.ps1 -Version v0.2.0 -InstallDir \"$installRoot\\bin\" -SkillDir \"$installRoot\\skills\"",
-		"if ($LASTEXITCODE -ne 0) { throw \"installed ssb.exe failed its smoke test\" }",
-		"& git.exe archive --format=zip --output=$sourceArchive v0.2.0 skills/software-standards-bootstrap",
-		"if ($LASTEXITCODE -ne 0) { throw \"could not materialize tagged Agent Skill\" }",
-		"& git.exe diff --no-index --exit-code -- " +
-			"\"$sourceRoot\\skills\\software-standards-bootstrap\" " +
-			"\"$installRoot\\skills\\software-standards-bootstrap\"",
-		"if ($LASTEXITCODE -ne 0) { throw \"installed Agent Skill differs from tagged source\" }",
-		"gh release view v0.2.0 --repo nnennandukwe/software-standards-bootstrap --json body --jq .body",
-		"(cd \"$release_root\" && shasum -a 256 --check checksums.txt)",
-		"SSB_RELEASE_ARCHIVE_DIR=\"$release_root\" SSB_RELEASE_SOURCE_REF=v0.2.0 " +
-			"go test ./internal/releaseconfig " +
-			"-run '^TestGeneratedReleaseArchivesContainCompleteSkill$'",
-		"for artifact in \"$release_root\"/ssb_v0.2.0_*; do",
-		"--source-ref refs/tags/v0.2.0",
-		"--signer-workflow nnennandukwe/software-standards-bootstrap/.github/workflows/release.yml",
+		"uvx --from skills-ref==0.1.1 agentskills validate skills/software-standards-bootstrap",
+	} {
+		if !strings.Contains(releasing, required) || !strings.Contains(verification, required) {
+			t.Errorf("release preflight must document %q in both guides", required)
+		}
+	}
+
+	const verificationSection = "Verify the published release"
+	if !strings.Contains(releasing, "## "+verificationSection) ||
+		!strings.Contains(verification, "(releasing.md#verify-the-published-release)") {
+		t.Fatal("verification guide must link to the public release procedure")
+	}
+	for _, required := range []string{
+		"python scripts/verify-public-install.py v0.3.0",
+		"gh release download",
+		"shasum -a 256 --check checksums.txt",
+		"SSB_RELEASE_SOURCE_REF=",
+		"TestGeneratedReleaseArchivesContainCompleteSkill",
+		"--source-ref",
+		"--source-digest",
+		"--signer-workflow",
 		"--predicate-type https://slsa.dev/provenance/v1",
 		"--predicate-type https://spdx.dev/Document/v2.3",
+		"sh scripts/release-notes.sh",
 	} {
 		if !strings.Contains(releasing, required) {
-			t.Errorf("release runbook missing %q", required)
+			t.Errorf("published release procedure missing %q", required)
 		}
-		if !strings.Contains(verification, required) {
-			t.Errorf("verification contract missing %q", required)
+	}
+}
+
+func TestV030ReleaseDocsDescribeInstalledRecovery(t *testing.T) {
+	root := repositoryRoot(t)
+	skill := readText(t, filepath.Join(root, "skills", "software-standards-bootstrap", "SKILL.md"))
+	if !strings.Contains(strings.ReplaceAll(skill, "\r\n", "\n"), "\n  version: 0.7.0\n") {
+		t.Error("expected portable recovery instructions version 0.7.0")
+	}
+	guide := readText(t, filepath.Join(root, "docs", "generation-recovery.md"))
+	for _, required := range []string{"v0.3.0", "ssb version", "ssb resume --repo . --format text"} {
+		if !strings.Contains(guide, required) {
+			t.Errorf("installed recovery guide missing %q", required)
+		}
+	}
+	notes := readText(t, filepath.Join(root, "CHANGELOG.md"))
+	_, section, found := strings.Cut(notes, "## [0.3.0] - ")
+	if !found {
+		t.Fatal("expected dated v0.3.0 release notes")
+	}
+	section, _, _ = strings.Cut(section, "\n## [")
+	for _, required := range []string{"ssb resume", "ssb version", "130", "root_core", "0.7.0", "embedded"} {
+		if !strings.Contains(section, required) {
+			t.Errorf("v0.3.0 release notes missing %q", required)
 		}
 	}
 }
@@ -345,20 +369,21 @@ func TestInstallerIsPackagedAndDocumentedBeforeProductDetail(t *testing.T) {
 		t.Error("README hides installation below product detail")
 	}
 
+	installInstructions := readme[installHeading:productDetailHeading]
 	for _, required := range []string{
 		"curl -fsSL https://raw.githubusercontent.com/nnennandukwe/software-standards-bootstrap/main/install.sh | sh",
-		"go install ./cmd/ssb",
+		"ssb dev (commit unknown)",
 		"ssb resume --help",
-		"https://github.com/nnennandukwe/software-standards-bootstrap/tree/v0.2.0",
+		"https://github.com/nnennandukwe/software-standards-bootstrap/tree/v0.3.0",
 		"sh -s -- --skill-dir .agents/skills",
 		"\"$HOME/.local/bin/ssb\" --help",
-		"sh -s -- --version v0.2.0",
-		"-Version v0.2.0",
-		"go install github.com/nnennandukwe/software-standards-bootstrap/cmd/ssb@v0.2.0",
+		"sh -s -- --version v0.3.0",
+		"-Version v0.3.0",
+		"go install github.com/nnennandukwe/software-standards-bootstrap/cmd/ssb@v0.3.0",
 		"installs the binary into `~/.local/bin`",
 		"verifies its SHA-256 checksum",
 	} {
-		if !strings.Contains(readme, required) {
+		if !strings.Contains(installInstructions, required) {
 			t.Errorf("README installer section missing %q", required)
 		}
 	}

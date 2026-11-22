@@ -4,19 +4,41 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## Unreleased
 
+## [0.3.0] - 2026-11-21
+
 ### Added
 
-- Optional manifest-v1 `root_core` selection for at most 16 explicit
-  repository-wide base rules, plus deterministic portable routing catalogs and
-  exact-selector Markdown bundles for on-demand agent guidance.
-- Additive validation response-schema-3 projection measurements and
-  non-blocking 16-KiB root and 64-KiB catalog warnings.
+- Continue an interrupted proposal with `ssb resume --repo . --format text`.
+  The read-only assessment verifies the inventory against its Git baseline and
+  identifies reusable work, raw file digests and stages to repeat. Use
+  `--format json` for the schema 1 response.
+- Read the release tag and full source commit from an archive binary with
+  `ssb version` or `ssb --version`.
+- Select up to 16 repository-wide base rules with the optional manifest
+  `root_core` field. Agents can use the generated catalog to load guidance
+  for a specific path, language or task. The root, catalog and routing bundles
+  carry digests so readers can check which instructions belong together.
+- Portable Agent Skill 0.7.0 guides an agent through routing and interrupted
+  generation, including manual edits, corrections and review before reuse.
+  The CLI and skill ship together under the v0.3.0 tag.
 
 ### Changed
 
-- Manifest rendering now keeps root `AGENTS.md` finite, publishes the complete
-  root/catalog/bundle write set transactionally, records routing-tree evidence
-  in new prune rerender events, and preserves replay of older events.
+- Manifest rendering publishes the root, catalog and bundles together.
+  Validation JSON stays at schema 3 and adds projection sizes and warnings
+  above 16 KiB for the root and 64 KiB for the catalog. Inspection stays at
+  schema 2. Existing manifest-v1 and embedded-layout packs remain readable.
+- New prune rerender records bind the routing tree. Older records still replay.
+- Interrupting a command before output delivery exits with status 130 and
+  suppresses partial output. Read any reported cleanup or recovery diagnostics
+  before retrying a write.
+
+### Fixed
+
+- Both installers take the v0.3.0 skill from the checksum-verified archive.
+  Local Git line-ending settings can no longer change the installed bytes.
+- The shell installer handles interruption at binary replacement so the
+  installed binary and skill stay together when the replacement succeeds.
 
 ## [0.2.0] - 2026-08-17
 
