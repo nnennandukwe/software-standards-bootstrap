@@ -285,7 +285,7 @@ try {
     try {
         Expand-Archive -LiteralPath $archivePath -DestinationPath $extractDir -Force
     } catch {
-        throw "could not extract ssb.exe from $asset"
+        throw "could not extract ssb.exe from ${asset}: $($_.Exception.GetType().FullName) $($_.Exception.Message). Stack: $($_.ScriptStackTrace)"
     }
     $extracted = Join-Path $extractDir 'ssb.exe'
     if (-not (Test-Path -LiteralPath $extracted -PathType Leaf)) {

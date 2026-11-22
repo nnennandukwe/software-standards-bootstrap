@@ -1,0 +1,23 @@
+name: Diagnose Windows installer extraction
+
+on:
+  push:
+    branches:
+      - diagnostics/v030-windows-installer
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: 1.26.9
+      - name: Inspect the Windows PowerShell archive command
+        run: |
+          powershell.exe -NoProfile -NonInteractive -Command 'Get-Command Expand-Archive -ErrorAction Continue | Select-Object Name,Version,Source; Get-Module -ListAvailable Microsoft.PowerShell.Archive | Select-Object Version,Path'
+      - name: Run the failing native installer case
+        run: go test -v ./internal/releaseconfig -run '^TestInstallPowerShellScriptInstallsVerifiedRelease/latest' -count=1
