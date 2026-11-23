@@ -228,7 +228,9 @@ if [ -n "$skill_dir" ]; then
   mkdir -p "$skill_dir" || fail "could not create Agent Skill directory: $skill_dir"
   skill_temp=$(mktemp -d "${skill_dir}/.software-standards-bootstrap.install.XXXXXX") ||
     fail "could not create a temporary Agent Skill directory beneath ${skill_dir}"
-  cp -R "${skill_source}/." "$skill_temp" ||
+  mkdir "${skill_temp}/software-standards-bootstrap" ||
+    fail "could not prepare the Agent Skill staging directory"
+  cp -R "${skill_source}/." "${skill_temp}/software-standards-bootstrap" ||
     fail "could not prepare the Agent Skill beneath ${skill_dir}"
 fi
 
@@ -239,11 +241,12 @@ target_temp=$(mktemp "${install_dir}/.ssb-install.XXXXXX") ||
 install -m 0755 "${temp_dir}/ssb" "$target_temp" ||
   fail "could not write the ssb binary to ${install_dir}"
 
-# Defer signals until ownership and the result of each publication are known.
-# Let each filesystem command finish if the terminal signals the process group.
-publish_command() (
+# Shell signal traps can run between a successful mv and the following
+# assignment. Defer handling until the result of each publication is known.
+# Let each move finish even if the terminal signals the whole process group.
+publish_move() (
   trap '' HUP INT TERM
-  exec "$@"
+  exec mv "$@"
 )
 interrupted=0
 trap 'interrupted=1' HUP INT TERM
@@ -251,19 +254,19 @@ if [ -n "$skill_dir" ]; then
   if [ -e "$skill_target" ] || [ -L "$skill_target" ]; then
     fail "Agent Skill appeared during installation at ${skill_target}; no files were replaced"
   fi
-  # mkdir claims this exact path without nesting into a directory that another
-  # installer or developer created after the check above. Cleanup owns only a
-  # directory successfully created by this process.
-  publish_command mkdir "$skill_target" ||
-    fail "could not reserve Agent Skill destination ${skill_target}; check for an existing skill or directory permissions and retry"
-  skill_installed=1
-  [ "$interrupted" -eq 0 ] || fail "installation interrupted before copying the Agent Skill"
-  publish_command cp -R "${skill_temp}/." "$skill_target" ||
+  # Use the final basename inside private staging and move into the parent.
+  # This prevents mv from nesting staging inside a newly created destination.
+  # -n can skip an occupied destination with exit 0; the source must be gone.
+  publish_move -n "${skill_temp}/software-standards-bootstrap" "${skill_dir}/" ||
     fail "could not install the Agent Skill to ${skill_target}"
+  if [ -e "${skill_temp}/software-standards-bootstrap" ]; then
+    fail "Agent Skill appeared during installation at ${skill_target}; no files were replaced"
+  fi
+  skill_installed=1
 fi
 
 [ "$interrupted" -eq 0 ] || fail "installation interrupted before replacing ${target}"
-publish_command mv -f "$target_temp" "$target" || fail "could not replace ${target}"
+publish_move -f "$target_temp" "$target" || fail "could not replace ${target}"
 target_temp=
 skill_installed=0
 
