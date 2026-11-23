@@ -228,7 +228,9 @@ if [ -n "$skill_dir" ]; then
   mkdir -p "$skill_dir" || fail "could not create Agent Skill directory: $skill_dir"
   skill_temp=$(mktemp -d "${skill_dir}/.software-standards-bootstrap.install.XXXXXX") ||
     fail "could not create a temporary Agent Skill directory beneath ${skill_dir}"
-  cp -R "${skill_source}/." "$skill_temp" ||
+  mkdir "${skill_temp}/software-standards-bootstrap" ||
+    fail "could not prepare the Agent Skill staging directory"
+  cp -R "${skill_source}/." "${skill_temp}/software-standards-bootstrap" ||
     fail "could not prepare the Agent Skill beneath ${skill_dir}"
 fi
 
@@ -252,8 +254,14 @@ if [ -n "$skill_dir" ]; then
   if [ -e "$skill_target" ] || [ -L "$skill_target" ]; then
     fail "Agent Skill appeared during installation at ${skill_target}; no files were replaced"
   fi
-  publish_move "$skill_temp" "$skill_target" || fail "could not install the Agent Skill to ${skill_target}"
-  skill_temp=
+  # Use the final basename inside private staging and move into the parent.
+  # This prevents mv from nesting staging inside a newly created destination.
+  # -n can skip an occupied destination with exit 0; the source must be gone.
+  publish_move -n "${skill_temp}/software-standards-bootstrap" "${skill_dir}/" ||
+    fail "could not install the Agent Skill to ${skill_target}"
+  if [ -e "${skill_temp}/software-standards-bootstrap" ]; then
+    fail "Agent Skill appeared during installation at ${skill_target}; no files were replaced"
+  fi
   skill_installed=1
 fi
 

@@ -245,6 +245,118 @@ func TestInstallScriptRejectsADirectoryAtTheBinaryTarget(t *testing.T) {
 	}
 }
 
+func TestInstallScriptRejectsSkillCreatedDuringPublication(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("install.sh targets macOS and Linux")
+	}
+	for _, kind := range []string{"directory", "empty directory", "symlink", "file"} {
+		t.Run(kind, func(t *testing.T) {
+			fixture := newInstallerFixture(t, "v1.2.3", true)
+			if err := os.MkdirAll(fixture.installDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			target := filepath.Join(fixture.installDir, "ssb")
+			writeExecutable(t, target, "existing binary")
+			skillTarget := filepath.Join(fixture.skillDir, "software-standards-bootstrap")
+			developerDir := filepath.Join(fixture.root, "developer")
+			if err := os.Mkdir(developerDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeExecutable(t, filepath.Join(developerDir, "SKILL.md"), "developer-owned skill\n")
+			fixture.environment = append(fixture.environment, "RACE_SKILL_TARGET="+skillTarget, "RACE_KIND="+kind, "DEVELOPER_DIR="+developerDir)
+			writeExecutable(t, filepath.Join(fixture.fakeBin, "mv"), `#!/bin/sh
+if [ "$1" != -f ]; then
+  case "$RACE_KIND" in
+    directory) /bin/mkdir "$RACE_SKILL_TARGET"; /bin/cp "$DEVELOPER_DIR/SKILL.md" "$RACE_SKILL_TARGET/SKILL.md" ;;
+    'empty directory') /bin/mkdir "$RACE_SKILL_TARGET" ;;
+    symlink) /bin/ln -s "$DEVELOPER_DIR" "$RACE_SKILL_TARGET" ;;
+    file) /bin/cp "$DEVELOPER_DIR/SKILL.md" "$RACE_SKILL_TARGET" ;;
+  esac
+fi
+exec /bin/mv "$@"
+`)
+			output, err := fixture.run("--version", "v1.2.3", "--skill-dir", fixture.skillDir)
+			if err == nil {
+				t.Fatalf("installer accepted a skill created during publication:\n%s", output)
+			}
+			if got := readText(t, target); got != "existing binary" {
+				t.Fatalf("existing binary changed: %q", got)
+			}
+			if kind == "file" {
+				if got := readText(t, skillTarget); got != "developer-owned skill\n" {
+					t.Fatalf("developer file changed: %q", got)
+				}
+				return
+			}
+			if kind != "empty directory" {
+				if got := readText(t, filepath.Join(skillTarget, "SKILL.md")); got != "developer-owned skill\n" {
+					t.Fatalf("developer skill changed: %q", got)
+				}
+			}
+			entries, err := os.ReadDir(skillTarget)
+			want := 1
+			if kind == "empty directory" {
+				want = 0
+			}
+			if err != nil || len(entries) != want {
+				t.Fatalf("installer left files inside developer skill: %v, %v", entries, err)
+			}
+			if kind == "symlink" {
+				if destination, err := os.Readlink(skillTarget); err != nil || destination != developerDir {
+					t.Fatalf("developer link changed: %q, %v", destination, err)
+				}
+			}
+		})
+	}
+}
+
+func TestInstallScriptPublishesCompleteSkillAndRecoversAfterFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("install.sh targets macOS and Linux")
+	}
+	fixture := newInstallerFixture(t, "v1.2.3", true)
+	if err := os.MkdirAll(fixture.installDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(fixture.installDir, "ssb")
+	writeExecutable(t, target, "existing binary")
+	skillTarget := filepath.Join(fixture.skillDir, "software-standards-bootstrap")
+	marker := filepath.Join(fixture.root, "publication-observed")
+	fixture.environment = append(fixture.environment, "SKILL_TARGET="+skillTarget, "PUBLICATION_MARKER="+marker, "FAIL_PUBLICATION=1")
+	writeExecutable(t, filepath.Join(fixture.fakeBin, "mv"), `#!/bin/sh
+if [ "$1" = -n ]; then
+  [ ! -e "$SKILL_TARGET" ] || exit 20
+  [ -f "$2/SKILL.md" ] && [ -f "$2/references/routing.md" ] || exit 21
+  printf observed > "$PUBLICATION_MARKER"
+  [ "$FAIL_PUBLICATION" != 1 ] || exit 22
+fi
+/bin/mv "$@" || exit 1
+if [ "$1" = -n ]; then
+  [ -f "$SKILL_TARGET/SKILL.md" ] && [ -f "$SKILL_TARGET/references/routing.md" ] || exit 23
+fi
+`)
+	if output, err := fixture.run("--version", "v1.2.3", "--skill-dir", fixture.skillDir); err == nil {
+		t.Fatalf("failed publication reported success: %s", output)
+	}
+	if got := readText(t, marker); got != "observed" {
+		t.Fatalf("publication wasn't observed: %q", got)
+	}
+	if got := readText(t, target); got != "existing binary" {
+		t.Fatalf("binary changed: %q", got)
+	}
+	entries, err := os.ReadDir(fixture.skillDir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("partial skill or staging remains: %v, %v", entries, err)
+	}
+	fixture.environment = append(fixture.environment, "FAIL_PUBLICATION=0")
+	if output, err := fixture.run("--version", "v1.2.3", "--skill-dir", fixture.skillDir); err != nil {
+		t.Fatalf("retry failed: %v\n%s", err, output)
+	}
+	if got := readText(t, filepath.Join(skillTarget, "SKILL.md")); got != fixtureSkill {
+		t.Fatalf("retry installed wrong skill: %q", got)
+	}
+}
+
 func TestInstallScriptDoesNotOverwriteAnExistingAgentSkill(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("install.sh targets macOS and Linux")
