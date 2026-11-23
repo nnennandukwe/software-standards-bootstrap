@@ -245,6 +245,102 @@ func TestInstallScriptRejectsADirectoryAtTheBinaryTarget(t *testing.T) {
 	}
 }
 
+func TestInstallScriptRejectsSkillCreatedDuringPublication(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("install.sh targets macOS and Linux")
+	}
+	fixture := newInstallerFixture(t, "v1.2.3", true)
+	if err := os.MkdirAll(fixture.installDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(fixture.installDir, "ssb")
+	writeExecutable(t, target, "existing binary")
+	skillTarget := filepath.Join(fixture.skillDir, "software-standards-bootstrap")
+	fixture.environment = append(fixture.environment, "RACE_SKILL_TARGET="+skillTarget)
+	for _, command := range []string{"mkdir", "mv"} {
+		writeExecutable(t, filepath.Join(fixture.fakeBin, command), `#!/bin/sh
+for last do :; done
+if [ "$last" = "$RACE_SKILL_TARGET" ]; then
+  /bin/mkdir -p "$RACE_SKILL_TARGET"
+  printf 'developer-owned skill\n' > "$RACE_SKILL_TARGET/SKILL.md"
+fi
+exec /bin/`+command+` "$@"
+`)
+	}
+	output, err := fixture.run("--version", "v1.2.3", "--skill-dir", fixture.skillDir)
+	if err == nil {
+		t.Fatalf("installer accepted a skill created during publication:\n%s", output)
+	}
+	if got := readText(t, target); got != "existing binary" {
+		t.Fatalf("existing binary changed: %q", got)
+	}
+	if got := readText(t, filepath.Join(skillTarget, "SKILL.md")); got != "developer-owned skill\n" {
+		t.Fatalf("developer skill changed: %q", got)
+	}
+	entries, err := os.ReadDir(skillTarget)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("installer left files inside developer skill: %v, %v", entries, err)
+	}
+}
+
+func TestInstallScriptRecoversAfterClaimOrCopyFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("install.sh targets macOS and Linux")
+	}
+	for _, failure := range []string{"claim interrupted", "copy failed", "copy interrupted"} {
+		t.Run(failure, func(t *testing.T) {
+			fixture := newInstallerFixture(t, "v1.2.3", true)
+			if err := os.MkdirAll(fixture.installDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			target := filepath.Join(fixture.installDir, "ssb")
+			writeExecutable(t, target, "existing binary")
+			skillTarget := filepath.Join(fixture.skillDir, "software-standards-bootstrap")
+			fixture.environment = append(fixture.environment, "FAIL_SKILL_TARGET="+skillTarget, "FAIL_MODE="+failure)
+			for _, command := range []string{"mkdir", "cp"} {
+				writeExecutable(t, filepath.Join(fixture.fakeBin, command), `#!/bin/sh
+/bin/`+command+` "$@" || exit 1
+for last do :; done
+if [ "$last" = "$FAIL_SKILL_TARGET" ]; then
+  case '`+command+`:'"$FAIL_MODE" in
+    'mkdir:claim interrupted'|'cp:copy interrupted') kill -TERM "$PPID"; kill -TERM "$$" ;;
+    'cp:copy failed') exit 1 ;;
+  esac
+fi
+`)
+			}
+			output, err := fixture.run("--version", "v1.2.3", "--skill-dir", fixture.skillDir)
+			if err == nil {
+				t.Fatalf("installer accepted %s: %s", failure, output)
+			}
+			if got := readText(t, target); got != "existing binary" {
+				t.Fatalf("old binary changed: %q", got)
+			}
+			if _, err := os.Stat(skillTarget); !os.IsNotExist(err) {
+				t.Fatalf("partial skill remains: %v", err)
+			}
+			for _, directory := range []string{fixture.skillDir, fixture.installDir} {
+				entries, err := os.ReadDir(directory)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, entry := range entries {
+					if strings.HasPrefix(entry.Name(), ".") {
+						t.Fatalf("staging path remains: %s", entry.Name())
+					}
+				}
+			}
+			fixture.environment = nil
+			if output, err := fixture.run("--version", "v1.2.3", "--skill-dir", fixture.skillDir); err != nil {
+				t.Fatalf("retry failed: %v\n%s", err, output)
+			}
+			if got := readText(t, filepath.Join(skillTarget, "SKILL.md")); got != fixtureSkill {
+				t.Fatalf("retry installed wrong skill: %q", got)
+			}
+		})
+	}
+}
+
 func TestInstallScriptDoesNotOverwriteAnExistingAgentSkill(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("install.sh targets macOS and Linux")
@@ -363,7 +459,15 @@ func TestInstallScriptInterruptAtRename(t *testing.T) {
 			}
 			target := filepath.Join(fixture.installDir, "ssb")
 			writeExecutable(t, target, "existing binary")
-			fixture.environment = append(fixture.environment, fmt.Sprintf("SIGNAL_AFTER_BINARY=%t", tc.afterBinary), fmt.Sprintf("SIGNAL_COMMAND=%t", tc.signalCommand))
+			fixture.environment = append(fixture.environment, fmt.Sprintf("SIGNAL_AFTER_BINARY=%t", tc.afterBinary), fmt.Sprintf("SIGNAL_COMMAND=%t", tc.signalCommand), "SIGNAL_SKILL_TARGET="+filepath.Join(fixture.skillDir, "software-standards-bootstrap"))
+			writeExecutable(t, filepath.Join(fixture.fakeBin, "cp"), `#!/bin/sh
+/bin/cp "$@" || exit 1
+for last do :; done
+if [ "$last" = "$SIGNAL_SKILL_TARGET" ] && [ "$SIGNAL_AFTER_BINARY" = false ]; then
+  kill -TERM "$PPID"
+  if [ "$SIGNAL_COMMAND" = true ]; then kill -TERM "$$"; fi
+fi
+`)
 			writeExecutable(t, filepath.Join(fixture.fakeBin, "mv"), `#!/bin/sh
 /bin/mv "$@" || exit 1
 case "$1:$SIGNAL_AFTER_BINARY" in

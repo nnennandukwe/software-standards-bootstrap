@@ -239,12 +239,11 @@ target_temp=$(mktemp "${install_dir}/.ssb-install.XXXXXX") ||
 install -m 0755 "${temp_dir}/ssb" "$target_temp" ||
   fail "could not write the ssb binary to ${install_dir}"
 
-# Shell signal traps can run between a successful mv and the following
-# assignment. Defer handling until the result of each publication is known.
-# Let each move finish even if the terminal signals the whole process group.
-publish_move() (
+# Defer signals until ownership and the result of each publication are known.
+# Let each filesystem command finish if the terminal signals the process group.
+publish_command() (
   trap '' HUP INT TERM
-  exec mv "$@"
+  exec "$@"
 )
 interrupted=0
 trap 'interrupted=1' HUP INT TERM
@@ -252,13 +251,19 @@ if [ -n "$skill_dir" ]; then
   if [ -e "$skill_target" ] || [ -L "$skill_target" ]; then
     fail "Agent Skill appeared during installation at ${skill_target}; no files were replaced"
   fi
-  publish_move "$skill_temp" "$skill_target" || fail "could not install the Agent Skill to ${skill_target}"
-  skill_temp=
+  # mkdir claims this exact path without nesting into a directory that another
+  # installer or developer created after the check above. Cleanup owns only a
+  # directory successfully created by this process.
+  publish_command mkdir "$skill_target" ||
+    fail "could not reserve Agent Skill destination ${skill_target}; check for an existing skill or directory permissions and retry"
   skill_installed=1
+  [ "$interrupted" -eq 0 ] || fail "installation interrupted before copying the Agent Skill"
+  publish_command cp -R "${skill_temp}/." "$skill_target" ||
+    fail "could not install the Agent Skill to ${skill_target}"
 fi
 
 [ "$interrupted" -eq 0 ] || fail "installation interrupted before replacing ${target}"
-publish_move -f "$target_temp" "$target" || fail "could not replace ${target}"
+publish_command mv -f "$target_temp" "$target" || fail "could not replace ${target}"
 target_temp=
 skill_installed=0
 
